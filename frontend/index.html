@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>نظام ابو عمران — تسجيل الدخول</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f4f3f0;--sur:#fff;
+  --brd:rgba(0,0,0,.08);--brdm:rgba(0,0,0,.14);
+  --tx:#181715;--tx2:#6a6862;--tx3:#9e9b96;
+  --bl:#1a56db;--bll:#eff6ff;--bld:#1e40af;
+  --rd:#c81e1e;--rdl:#fef2f2;
+  --r:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans Arabic',system-ui,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-size:14px}
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem}
+.login-box{background:var(--sur);border:1px solid var(--brd);border-radius:20px;padding:2.5rem;width:380px;box-shadow:0 4px 24px rgba(0,0,0,.1)}
+.login-logo{text-align:center;margin-bottom:2rem}
+.login-logo .name{font-size:22px;font-weight:700;margin-top:8px}
+.login-logo .sub{font-size:12px;color:var(--tx3);margin-top:4px}
+.badge-v{font-size:11px;font-weight:700;color:var(--bl);background:var(--bll);padding:2px 10px;border-radius:20px;display:inline-block;margin-top:4px}
+.role-tabs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:1.25rem}
+.rt{padding:10px 4px;border:1px solid var(--brdm);border-radius:var(--r);background:transparent;cursor:pointer;text-align:center;font-family:inherit;transition:all .15s}
+.rt .icon{font-size:20px;display:block;margin-bottom:3px}
+.rt .lbl{font-size:11px;font-weight:600;color:var(--tx2)}
+.rt.sel{border-color:var(--bl);background:var(--bll)}
+.rt.sel .lbl{color:var(--bld)}
+.fr{margin-bottom:12px}
+.fr label{display:block;font-size:11px;font-weight:700;color:var(--tx2);margin-bottom:3px;text-transform:uppercase;letter-spacing:.04em}
+.fr input{width:100%;border:1px solid var(--brdm);border-radius:var(--r);padding:10px 12px;font-size:13px;font-family:inherit;background:var(--sur);color:var(--tx);outline:none}
+.fr input:focus{border-color:var(--bl);box-shadow:0 0 0 3px rgba(26,86,219,.1)}
+.btn{border:none;background:var(--bl);border-radius:var(--r);padding:11px 16px;font-size:14px;font-family:inherit;cursor:pointer;color:#fff;font-weight:600;width:100%;transition:all .12s}
+.btn:hover{background:var(--bld)}
+.btn:disabled{opacity:.6;cursor:not-allowed}
+.al-rd{background:var(--rdl);color:var(--rd);border:1px solid rgba(200,30,30,.2);border-radius:var(--r);padding:10px 14px;font-size:13px;margin-bottom:12px}
+.hidden{display:none!important}
+.hint{text-align:center;font-size:11px;color:var(--tx3);margin-top:1rem;line-height:2}
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <div class="login-box">
+    <div class="login-logo">
+      <div style="font-size:40px">📦</div>
+      <div class="name">نظام ابو عمران</div>
+      <div class="badge-v">Enterprise v4 — Real Backend</div>
+      <div class="sub">بورسلان · أحذية · مصري</div>
+    </div>
+
+    <div class="fr">
+      <label>تسجيل الدخول كـ</label>
+      <div class="role-tabs">
+        <button class="rt sel" onclick="setRole('admin',this)">
+          <span class="icon">👔</span><span class="lbl">مدير</span>
+        </button>
+        <button class="rt" onclick="setRole('employee',this)">
+          <span class="icon">🧑‍💼</span><span class="lbl">موظف</span>
+        </button>
+        <button class="rt" onclick="setRole('client',this)">
+          <span class="icon">🏪</span><span class="lbl">عميل</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="fr">
+      <label>اسم المستخدم</label>
+      <input id="lu" type="text" value="admin" autocomplete="username"/>
+    </div>
+    <div class="fr">
+      <label>كلمة المرور</label>
+      <input id="lp" type="password" value="1234" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter') doLogin()"/>
+
+    </div>
+
+    <div id="lerr" class="al-rd hidden"></div>
+
+    <button id="login-btn" class="btn" onclick="doLogin()">دخول →</button>
+
+    <div class="hint">
+      مدير: <strong>admin / 1234</strong> |
+      موظف: <strong>emp / 1234</strong> |
+      عميل: <strong>jaloudi / 1234</strong>
+    </div>
+  </div>
+</div>
+
+<!-- نحمّل api.js أولاً ثم auth.js لأن auth.js يستخدم دوال api.js -->
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+</body>
+</html>
