@@ -1,0 +1,242 @@
+from decimal import Decimal
+from datetime import date, datetime
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from config.db import get_pool
+from middleware.auth import get_current_user
+from middleware.roles import require_role
+
+router = APIRouter()
+
+
+def safe_uuid(val):
+    try:
+        return UUID(str(val))
+    except Exception:
+        return None
+
+
+def to_val(v):
+    if isinstance(v, Decimal): return float(v)
+    if isinstance(v, (date, datetime)): return v.isoformat()
+    if isinstance(v, UUID): return str(v)
+    return v
+
+
+def row_to_dict(row):
+    return {k: to_val(row[k]) for k in row.keys()}
+
+
+class PaymentIn(BaseModel):
+    recipient_name: str
+    client_id: Optional[int] = None
+    amount: float
+    payment_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.get("/")
+async def list_recipients(user=Depends(get_current_user)):
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            WITH inv_sum AS (
+                SELECT
+                    TRIM(i.recipient_name) AS name,
+                    i.client_id,
+                    c.name AS client_name,
+                    COUNT(i.id) AS invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS total_invoiced
+                FROM invoices i
+                JOIN clients c ON c.id = i.client_id
+                WHERE i.recipient_name IS NOT NULL
+                  AND TRIM(i.recipient_name) <> ''
+                GROUP BY TRIM(i.recipient_name), i.client_id, c.name
+            )
+            SELECT
+                inv_sum.name,
+                inv_sum.client_id,
+                inv_sum.client_name,
+                inv_sum.invoice_count,
+                inv_sum.total_invoiced,
+
+                COALESCE((
+                    SELECT SUM(rp.amount)
+                    FROM recipient_payments rp
+                    WHERE LOWER(TRIM(rp.recipient_name)) = LOWER(TRIM(inv_sum.name))
+                      AND (rp.client_id = inv_sum.client_id OR rp.client_id IS NULL)
+                ), 0)
+                +
+                COALESCE((
+                    SELECT SUM(p.amount)
+                    FROM payments p
+                    JOIN invoices i2 ON i2.client_id = p.client_id
+                    WHERE p.status = 'approved'
+                      AND COALESCE(p.notes, '') ILIKE ('%invoice_id:' || i2.id::text || '%')
+                      AND LOWER(TRIM(i2.recipient_name)) = LOWER(TRIM(inv_sum.name))
+                      AND i2.client_id = inv_sum.client_id
+                ), 0) AS total_paid
+
+            FROM inv_sum
+            ORDER BY inv_sum.total_invoiced DESC
+        """)
+
+        result = []
+        for r in rows:
+            d = row_to_dict(r)
+            d["balance"] = round(
+                float(d["total_invoiced"] or 0) - float(d["total_paid"] or 0),
+                3
+            )
+            result.append(d)
+
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/{recipient_name}/statement")
+async def recipient_statement(recipient_name: str, user=Depends(get_current_user)):
+    pool = await get_pool()
+    try:
+        inv_rows = await pool.fetch("""
+            SELECT
+                i.id,
+                i.invoice_number,
+                i.date,
+                i.total_amount,
+                i.payment_method,
+                i.notes,
+                i.recipient_name,
+                c.name AS client_name,
+                i.client_id
+            FROM invoices i
+            JOIN clients c ON c.id = i.client_id
+            WHERE LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
+            ORDER BY i.date ASC, i.id ASC
+        """, recipient_name)
+
+        manual_pay_rows = await pool.fetch("""
+            SELECT
+                id,
+                amount,
+                payment_date AS date,
+                notes,
+                created_at,
+                client_id
+            FROM recipient_payments
+            WHERE LOWER(TRIM(recipient_name)) = LOWER(TRIM($1))
+            ORDER BY payment_date ASC, id ASC
+        """, recipient_name)
+
+        invoice_pay_rows = await pool.fetch("""
+            SELECT
+                p.id,
+                p.amount,
+                p.payment_date AS date,
+                p.notes,
+                p.client_id,
+                i.invoice_number,
+                i.recipient_name,
+                c.name AS client_name
+            FROM payments p
+            JOIN invoices i ON i.client_id = p.client_id
+            JOIN clients c ON c.id = i.client_id
+            WHERE p.status = 'approved'
+              AND COALESCE(p.notes, '') ILIKE ('%invoice_id:' || i.id::text || '%')
+              AND LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
+            ORDER BY p.payment_date ASC, p.id ASC
+        """, recipient_name)
+
+        transactions = []
+
+        for r in inv_rows:
+            d = row_to_dict(r)
+            d["type"] = "invoice"
+            d["amount"] = float(d["total_amount"] or 0)
+            transactions.append(d)
+
+        for r in invoice_pay_rows:
+            d = row_to_dict(r)
+            d["type"] = "payment"
+            d["source"] = "invoice_payment"
+            d["amount"] = float(d["amount"] or 0)
+            d["notes"] = d.get("notes") or "دفعة من داخل الفاتورة"
+            transactions.append(d)
+
+        for r in manual_pay_rows:
+            d = row_to_dict(r)
+            d["type"] = "payment"
+            d["source"] = "manual_recipient_payment"
+            d["amount"] = float(d["amount"] or 0)
+            transactions.append(d)
+
+        transactions.sort(key=lambda x: (x.get("date") or "", x.get("id") or 0))
+
+        balance = 0.0
+        for t in transactions:
+            if t["type"] == "invoice":
+                balance += t["amount"]
+            else:
+                balance -= t["amount"]
+            t["running_balance"] = round(balance, 3)
+
+        total_invoiced = sum(t["amount"] for t in transactions if t["type"] == "invoice")
+        total_paid = sum(t["amount"] for t in transactions if t["type"] == "payment")
+
+        return {
+            "recipient_name": recipient_name,
+            "balance": round(balance, 3),
+            "total_invoiced": round(total_invoiced, 3),
+            "total_paid": round(total_paid, 3),
+            "transactions": transactions,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@router.post("/payments")
+async def add_payment(data: PaymentIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+
+    if not data.recipient_name.strip():
+        raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+
+    pool = await get_pool()
+    try:
+        pay_date = date.fromisoformat(data.payment_date) if data.payment_date else date.today()
+
+        row = await pool.fetchrow("""
+            INSERT INTO recipient_payments
+              (recipient_name, client_id, amount, payment_date, notes, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+        """,
+            data.recipient_name.strip(),
+            data.client_id,
+            round(data.amount, 3),
+            pay_date,
+            data.notes,
+            user.get("id"),
+        )
+        return row_to_dict(row)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/payments/{payment_id}")
+async def delete_payment(payment_id: int, user=Depends(get_current_user)):
+    require_role(user, "admin")
+    pool = await get_pool()
+    try:
+        await pool.execute(
+            "DELETE FROM recipient_payments WHERE id=$1", payment_id
+        )
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

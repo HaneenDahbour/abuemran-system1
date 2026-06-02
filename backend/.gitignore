@@ -1,4 +1,0 @@
-# Git يتجاهل هذه الملفات ولا يرفعها على GitHub
-node_modules/
-.env
-*.log
