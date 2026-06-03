@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,7 +22,7 @@ def row_to_dict(row):
 
 
 # GET /api/notifications/
-@router.get("/")
+@router.get("")
 async def get_notifications(user=Depends(get_current_user)):
     pool = await get_pool()
 
@@ -36,16 +36,13 @@ async def get_notifications(user=Depends(get_current_user)):
             LIMIT 50
             """,
             user.get("id"),
-            user.get("role")
+            user.get("role"),
         )
 
         return [row_to_dict(row) for row in rows]
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"خطأ في السيرفر: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±: {str(e)}")
 
 
 # PUT /api/notifications/read
@@ -61,13 +58,11 @@ async def mark_notifications_read(user=Depends(get_current_user)):
             WHERE user_id = $1 OR role = $2
             """,
             user.get("id"),
-            user.get("role")
+            user.get("role"),
         )
 
-        return {"message": "تم تعليم الكل مقروءاً"}
+        return {"message": "ØªÙ… ØªØ¹Ù„ÙŠÙ… Ø§Ù„ÙƒÙ„ Ù…Ù‚Ø±ÙˆØ¡Ø§Ù‹"}
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"خطأ في السيرفر: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±: {str(e)}")
+

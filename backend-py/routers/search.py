@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -22,7 +22,7 @@ def row_to_dict(row):
 
 
 # GET /api/search?q=term
-@router.get("/")
+@router.get("")
 async def search(q: str = Query(default=""), user=Depends(get_current_user)):
     raw = q.strip()
 
@@ -33,8 +33,8 @@ async def search(q: str = Query(default=""), user=Depends(get_current_user)):
     pool = await get_pool()
 
     try:
-        clients_rows, invoices_rows, checks_rows, products_rows = await _run_parallel_search(
-            pool, pattern
+        clients_rows, invoices_rows, checks_rows, products_rows = (
+            await _run_parallel_search(pool, pattern)
         )
 
         return {
@@ -62,7 +62,7 @@ async def _run_parallel_search(pool, pattern: str):
             WHERE name ILIKE $1 OR phone ILIKE $1
             LIMIT 6
             """,
-            pattern
+            pattern,
         )
 
     async def fetch_invoices():
@@ -76,7 +76,7 @@ async def _run_parallel_search(pool, pattern: str):
             ORDER BY inv.date DESC
             LIMIT 6
             """,
-            pattern
+            pattern,
         )
 
     async def fetch_checks():
@@ -90,7 +90,7 @@ async def _run_parallel_search(pool, pattern: str):
             ORDER BY ch.due_date DESC
             LIMIT 6
             """,
-            pattern
+            pattern,
         )
 
     async def fetch_products():
@@ -103,12 +103,10 @@ async def _run_parallel_search(pool, pattern: str):
             WHERE p.name ILIKE $1 OR p.sku ILIKE $1
             LIMIT 6
             """,
-            pattern
+            pattern,
         )
 
     return await asyncio.gather(
-        fetch_clients(),
-        fetch_invoices(),
-        fetch_checks(),
-        fetch_products()
+        fetch_clients(), fetch_invoices(), fetch_checks(), fetch_products()
     )
+

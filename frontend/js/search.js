@@ -39,31 +39,31 @@
 let _searchTimer = null;
 
 function showGlobalSearch() {
-  const wrap = document.getElementById('global-search-wrap');
-  if (wrap) wrap.style.display = 'block';
+  const wrap = document.getElementById("global-search-wrap");
+  if (wrap) wrap.style.display = "block";
 
   // Ctrl+K / Cmd+K shortcut
-  document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "k") {
       e.preventDefault();
-      document.getElementById('global-search-input')?.focus();
+      document.getElementById("global-search-input")?.focus();
     }
-    if (e.key === 'Escape') closeSearchDropdown();
+    if (e.key === "Escape") closeSearchDropdown();
   });
 }
 
 function handleGlobalSearch(val) {
   clearTimeout(_searchTimer);
-  const dd = document.getElementById('search-dropdown');
+  const dd = document.getElementById("search-dropdown");
   if (!dd) return;
 
   if (!val || val.length < 2) {
-    dd.style.display = 'none';
+    dd.style.display = "none";
     return;
   }
 
   // Show loading state immediately
-  dd.style.display = 'block';
+  dd.style.display = "block";
   dd.innerHTML = `
     <div style="padding:16px; text-align:center; color:#9e9a94; font-size:13px">
       <div style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#1a4fd6;border-radius:50%;animation:spin 0.7s linear infinite;margin-left:6px"></div>
@@ -74,7 +74,7 @@ function handleGlobalSearch(val) {
 }
 
 async function doGlobalSearch(q) {
-  const dd = document.getElementById('search-dropdown');
+  const dd = document.getElementById("search-dropdown");
   if (!dd) return;
 
   try {
@@ -87,7 +87,8 @@ async function doGlobalSearch(q) {
 
 function renderSearchDropdown(data, q, dd) {
   const { clients = [], invoices = [], checks = [], products = [] } = data;
-  const total = clients.length + invoices.length + checks.length + products.length;
+  const total =
+    clients.length + invoices.length + checks.length + products.length;
 
   if (total === 0) {
     dd.innerHTML = `
@@ -100,24 +101,27 @@ function renderSearchDropdown(data, q, dd) {
 
   const hl = (text) => {
     // Highlight matched portion
-    const s = String(text || '');
+    const s = String(text || "");
     const idx = s.toLowerCase().indexOf(q.toLowerCase());
     if (idx === -1) return escHtml(s);
-    return escHtml(s.slice(0, idx)) +
+    return (
+      escHtml(s.slice(0, idx)) +
       `<mark style="background:#fef08a; border-radius:2px; padding:0 1px">${escHtml(s.slice(idx, idx + q.length))}</mark>` +
-      escHtml(s.slice(idx + q.length));
+      escHtml(s.slice(idx + q.length))
+    );
   };
 
-  const fmt = (n) => parseFloat(n || 0).toLocaleString('ar-JO', { minimumFractionDigits: 2 });
+  const fmt = (n) =>
+    parseFloat(n || 0).toLocaleString("ar-JO", { minimumFractionDigits: 2 });
 
   let html = `<div style="padding:8px 12px; font-size:11px; color:#9e9a94; border-bottom:1px solid #f0ede8">${total} نتيجة</div>`;
 
   // ── Clients ───────────────────────────────────────────────
   if (clients.length) {
-    html += sectionHeader('👥 العملاء');
-    clients.forEach(c => {
+    html += sectionHeader("👥 العملاء");
+    clients.forEach((c) => {
       const bal = parseFloat(c.balance || 0);
-      const balColor = bal > 0 ? '#c21515' : '#057a55';
+      const balColor = bal > 0 ? "#c21515" : "#057a55";
       html += `
         <div class="sr-row" onclick="navigateTo('clients'); closeSearchDropdown();"
              style="padding:10px 16px; cursor:pointer; display:flex; align-items:center; gap:10px; transition:background .1s"
@@ -125,7 +129,7 @@ function renderSearchDropdown(data, q, dd) {
           <div style="width:34px;height:34px;background:#e8f0fe;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">👤</div>
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:13px">${hl(c.name)}</div>
-            ${c.phone ? `<div style="font-size:11px;color:#9e9a94">${hl(c.phone)}</div>` : ''}
+            ${c.phone ? `<div style="font-size:11px;color:#9e9a94">${hl(c.phone)}</div>` : ""}
           </div>
           <div style="text-align:left;flex-shrink:0">
             <div style="font-size:12px;font-weight:700;color:${balColor}">${fmt(c.balance)} د.أ</div>
@@ -137,8 +141,8 @@ function renderSearchDropdown(data, q, dd) {
 
   // ── Invoices ──────────────────────────────────────────────
   if (invoices.length) {
-    html += sectionHeader('🧾 الفواتير');
-    invoices.forEach(inv => {
+    html += sectionHeader("🧾 الفواتير");
+    invoices.forEach((inv) => {
       html += `
         <div class="sr-row" onclick="navigateTo('invoices'); closeSearchDropdown();"
              style="padding:10px 16px; cursor:pointer; display:flex; align-items:center; gap:10px"
@@ -150,7 +154,7 @@ function renderSearchDropdown(data, q, dd) {
           </div>
           <div style="text-align:left;flex-shrink:0">
             <div style="font-size:12px;font-weight:700">${fmt(inv.total_amount)} د.أ</div>
-            <div style="font-size:10px;color:#9e9a94">${inv.date ? new Date(inv.date).toLocaleDateString('ar-JO') : ''}</div>
+            <div style="font-size:10px;color:#9e9a94">${inv.date ? new Date(inv.date).toLocaleDateString("ar-JO") : ""}</div>
           </div>
         </div>`;
     });
@@ -158,10 +162,18 @@ function renderSearchDropdown(data, q, dd) {
 
   // ── Checks ────────────────────────────────────────────────
   if (checks.length) {
-    html += sectionHeader('🏦 الشيكات');
-    const statusLabel = { pending:'معلّق', cashed:'محصَّل', returned:'مرتجع' };
-    const statusColor = { pending:'#9a4500', cashed:'#057a55', returned:'#c21515' };
-    checks.forEach(ch => {
+    html += sectionHeader("🏦 الشيكات");
+    const statusLabel = {
+      pending: "معلّق",
+      cashed: "محصَّل",
+      returned: "مرتجع",
+    };
+    const statusColor = {
+      pending: "#9a4500",
+      cashed: "#057a55",
+      returned: "#c21515",
+    };
+    checks.forEach((ch) => {
       html += `
         <div class="sr-row" onclick="navigateTo('checks'); closeSearchDropdown();"
              style="padding:10px 16px; cursor:pointer; display:flex; align-items:center; gap:10px"
@@ -173,7 +185,7 @@ function renderSearchDropdown(data, q, dd) {
           </div>
           <div style="text-align:left;flex-shrink:0">
             <div style="font-size:12px;font-weight:700">${fmt(ch.amount)} د.أ</div>
-            <div style="font-size:10px;color:${statusColor[ch.status]||'#9e9a94'};font-weight:600">${statusLabel[ch.status]||ch.status}</div>
+            <div style="font-size:10px;color:${statusColor[ch.status] || "#9e9a94"};font-weight:600">${statusLabel[ch.status] || ch.status}</div>
           </div>
         </div>`;
     });
@@ -181,8 +193,8 @@ function renderSearchDropdown(data, q, dd) {
 
   // ── Products ──────────────────────────────────────────────
   if (products.length) {
-    html += sectionHeader('📦 المستودع');
-    products.forEach(p => {
+    html += sectionHeader("📦 المستودع");
+    products.forEach((p) => {
       const isLow = parseFloat(p.current_stock) === 0;
       html += `
         <div class="sr-row" onclick="navigateTo('warehouse'); closeSearchDropdown();"
@@ -191,10 +203,10 @@ function renderSearchDropdown(data, q, dd) {
           <div style="width:34px;height:34px;background:#dcfce7;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">📦</div>
           <div style="flex:1;min-width:0">
             <div style="font-weight:600;font-size:13px">${hl(p.name)}</div>
-            <div style="font-size:11px;color:#9e9a94">${p.category_name || ''} ${p.sku ? '· ' + p.sku : ''}</div>
+            <div style="font-size:11px;color:#9e9a94">${p.category_name || ""} ${p.sku ? "· " + p.sku : ""}</div>
           </div>
           <div style="text-align:left;flex-shrink:0">
-            <div style="font-size:12px;font-weight:700;color:${isLow?'#c21515':'#057a55'}">${p.current_stock} ${p.unit}</div>
+            <div style="font-size:12px;font-weight:700;color:${isLow ? "#c21515" : "#057a55"}">${p.current_stock} ${p.unit}</div>
             <div style="font-size:10px;color:#9e9a94">مخزون</div>
           </div>
         </div>`;
@@ -209,8 +221,8 @@ function sectionHeader(label) {
 }
 
 function closeSearchDropdown() {
-  const dd = document.getElementById('search-dropdown');
-  const inp = document.getElementById('global-search-input');
-  if (dd) dd.style.display = 'none';
-  if (inp) inp.value = '';
+  const dd = document.getElementById("search-dropdown");
+  const inp = document.getElementById("global-search-input");
+  if (dd) dd.style.display = "none";
+  if (inp) inp.value = "";
 }

@@ -1,4 +1,4 @@
-// js/api.js — HTTP layer (fixed + safer)
+// js/api.js
 
 (function () {
   function isBrowser() {
@@ -8,23 +8,22 @@
   function getApiBase() {
     if (!isBrowser()) return '/api';
     if (window.ENV_API_BASE) return window.ENV_API_BASE;
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const isLocal =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1';
     return isLocal ? 'http://localhost:8000/api' : '/api';
   }
 
   const API_BASE = getApiBase();
 
   function getToken() {
-    try {
-      return localStorage.getItem('token');
-    } catch {
-      return null;
-    }
+    try { return localStorage.getItem('token'); } catch { return null; }
   }
 
   function normalizePath(path) {
     if (!path) return '';
-    return path.startsWith('/') ? path : `/${path}`;
+    const p = path.startsWith('/') ? path : `/${path}`;
+    return p.replace(/\/+$/, '') || '/';
   }
 
   function requireValidId(id, label = 'id') {
@@ -48,37 +47,22 @@
       localStorage.removeItem('token');
       localStorage.removeItem('user');
     } catch { }
-    if (isBrowser()) {
-      window.location.reload();
-    }
+    if (isBrowser()) window.location.reload();
   }
 
   async function parseResponse(res) {
     const contentType = res.headers.get('content-type') || '';
     const isJson = contentType.includes('application/json');
-    try {
-      return isJson ? await res.json() : await res.text();
-    } catch {
-      return null;
-    }
+    try { return isJson ? await res.json() : await res.text(); } catch { return null; }
   }
 
   function extractErrorMessage(data, fallback = 'حدث خطأ غير متوقع') {
     if (!data) return fallback;
-
-    if (typeof data === 'string') {
-      return data.trim() || fallback;
-    }
-
-    if (Array.isArray(data)) {
-      return data.map(item => extractErrorMessage(item, fallback)).join(' | ');
-    }
-
+    if (typeof data === 'string') return data.trim() || fallback;
+    if (Array.isArray(data)) return data.map(i => extractErrorMessage(i, fallback)).join(' | ');
     if (typeof data === 'object') {
       const detail = data.detail || data.message || data.error || data.details;
-
       if (typeof detail === 'string') return detail;
-
       if (Array.isArray(detail)) {
         return detail.map(err => {
           if (typeof err === 'string') return err;
@@ -89,53 +73,26 @@
           return JSON.stringify(err);
         }).join(' | ');
       }
-
-      if (typeof detail === 'object' && detail !== null) {
-        return JSON.stringify(detail);
-      }
-
+      if (typeof detail === 'object' && detail !== null) return JSON.stringify(detail);
       return JSON.stringify(data);
     }
-
     return fallback;
   }
 
   async function apiFetch(path, options = {}) {
-    const normalizedPath = normalizePath(path);
-    const url = `${API_BASE}${normalizedPath}`;
-
-    const headers = {
-      ...(options.headers || {})
-    };
-
+    const url = `${API_BASE}${normalizePath(path)}`;
+    const headers = { ...(options.headers || {}) };
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
-
     if (!isFormData && !headers['Content-Type']) {
       headers['Content-Type'] = 'application/json';
     }
-
     const token = getToken();
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
+    if (token) headers.Authorization = `Bearer ${token}`;
     try {
-      const res = await fetch(url, {
-        ...options,
-        headers
-      });
-
-      if (res.status === 401) {
-        clearAuthAndReload();
-        return null;
-      }
-
+      const res = await fetch(url, { ...options, headers, cache: options.cache || 'no-store' });
+      if (res.status === 401) { clearAuthAndReload(); return null; }
       const data = await parseResponse(res);
-
-      if (!res.ok) {
-        throw new Error(extractErrorMessage(data, `HTTP ${res.status}`));
-      }
-
+      if (!res.ok) throw new Error(extractErrorMessage(data, `HTTP ${res.status}`));
       return data;
     } catch (err) {
       if (err && err.name === 'TypeError') {
@@ -144,265 +101,183 @@
       throw err;
     }
   }
-  
 
   const API = {
-    // Auth
-    search: (q) => apiFetch(`/search?q=${encodeURIComponent(q)}`),
-
+    // ── Auth ──────────────────────────────────────────────────────
     login: (username, password) =>
-      apiFetch('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ username, password })
-      }),
-
+      apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
     getUsers: () => apiFetch('/auth/users'),
+    createUser: data =>
+      apiFetch('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
+    deleteUser: id =>
+      apiFetch(`/auth/users/${requireId(id, 'معرّف المستخدم')}`, { method: 'DELETE' }),
 
-    createUser: (data) =>
-      apiFetch('/auth/users', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
+    // ── Search ────────────────────────────────────────────────────
+    search: q => apiFetch(`/search?q=${encodeURIComponent(q)}`),
 
-    deleteUser: (id) =>
-      apiFetch(`/auth/users/${id}`, {
-        method: 'DELETE'
-      }),
-
-    // Clients
+    // ── Clients ───────────────────────────────────────────────────
     getClients: () => apiFetch('/clients'),
-
-    getClient: (id) => apiFetch(`/clients/${requireId(id, 'معرّف العميل')}`),
-
-    createClient: (data) =>
-      apiFetch('/clients', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
+    getClient: id => apiFetch(`/clients/${requireId(id, 'معرّف العميل')}`),
+    createClient: data =>
+      apiFetch('/clients', { method: 'POST', body: JSON.stringify(data) }),
     updateClient: (id, data) =>
-      apiFetch(`/clients/${requireId(id, 'معرّف العميل')}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      }),
-
-    deleteClient: (id) =>
-      apiFetch(`/clients/${requireId(id, 'معرّف العميل')}`, {
-        method: 'DELETE'
-      }),
-
-    getClientStatement: (id) =>
+      apiFetch(`/clients/${requireId(id, 'معرّف العميل')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteClient: id =>
+      apiFetch(`/clients/${requireId(id, 'معرّف العميل')}`, { method: 'DELETE' }),
+    getClientStatement: id =>
       apiFetch(`/clients/${requireId(id, 'معرّف العميل')}/statement`),
 
-    // Invoices
+    // ── Invoices ──────────────────────────────────────────────────
     getInvoices: () => apiFetch('/invoices'),
-
-    createInvoice: (data) =>
-      apiFetch('/invoices', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
+    createInvoice: data =>
+      apiFetch('/invoices', { method: 'POST', body: JSON.stringify(data) }),
     updateInvoice: (id, data) =>
-      apiFetch(`/invoices/${requireId(id, 'معرّف الفاتورة')}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
+      apiFetch(`/invoices/${requireId(id, 'معرّف الفاتورة')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteInvoice: id =>
+      apiFetch(`/invoices/${requireId(id, 'معرّف الفاتورة')}`, { method: 'DELETE' }),
+    approveInvoice: id =>
+      apiFetch(`/invoices/${requireId(id, 'معرّف الفاتورة')}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
+    rejectInvoice: (id, reason) =>
+      apiFetch(`/invoices/${requireId(id, 'معرّف الفاتورة')}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
       }),
 
-
-    deleteInvoice: (id) =>
-      apiFetch(`/invoices/${requireId(id, 'معرّف الفاتورة')}`, {
-        method: 'DELETE'
-      }),
-
-    // Payments
+    // ── Payments ──────────────────────────────────────────────────
     getPayments: () => apiFetch('/payments'),
+    createPayment: data =>
+      apiFetch('/payments', { method: 'POST', body: JSON.stringify(data) }),
+    approvePayment: id =>
+      apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}/approve`, { method: 'POST', body: JSON.stringify({}) }),
+    rejectPayment: (id, reason) =>
+      apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    deletePayment: id =>
+      apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 
-    createPayment: (data) =>
-      apiFetch('/payments', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
-    deletePayment: (id) =>
-      apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}`, {
-        method: 'DELETE'
-      }),
-
-    // Checks
+    // ── Checks ────────────────────────────────────────────────────
     getChecks: () => apiFetch('/checks'),
-
-    createCheck: (data) =>
-      apiFetch('/checks', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
+    createCheck: data =>
+      apiFetch('/checks', { method: 'POST', body: JSON.stringify(data) }),
     updateCheckStatus: (id, status) =>
-      apiFetch(`/checks/${requireId(id, 'معرّف الشيك')}/status`, {
-        method: 'PUT',
-        body: JSON.stringify({ status })
-      }),
+      apiFetch(`/checks/${requireId(id, 'معرّف الشيك')}/status`, { method: 'PUT', body: JSON.stringify({ status }) }),
+    deleteCheck: id =>
+      apiFetch(`/checks/${requireId(id, 'معرّف الشيك')}`, { method: 'DELETE' }),
 
-    deleteCheck: (id) =>
-      apiFetch(`/checks/${requireId(id, 'معرّف الشيك')}`, {
-        method: 'DELETE'
-      }),
-
-    // Audit / Stats
+    // ── Audit / Stats ─────────────────────────────────────────────
     getStats: () => apiFetch('/audit/stats'),
     getAuditLog: () => apiFetch('/audit/log'),
+    getCashbox: () => apiFetch('/audit/cashbox'),
+    addCashboxExpense: data =>
+      apiFetch('/audit/cashbox/expenses', { method: 'POST', body: JSON.stringify(data) }),
 
-    // AI
+    // ── AI ────────────────────────────────────────────────────────
     askAI: (message, history = []) =>
-      apiFetch('/ai/chat', {
-        method: 'POST',
-        body: JSON.stringify({ message, history })
-      }),
+      apiFetch('/ai/chat', { method: 'POST', body: JSON.stringify({ message, history }) }),
 
-    // Suppliers
+    // ── Suppliers ─────────────────────────────────────────────────
     getSuppliers: () => apiFetch('/suppliers'),
+    createSupplier: data =>
+      apiFetch('/suppliers', { method: 'POST', body: JSON.stringify(data) }),
+    updateSupplier: (id, data) =>
+      apiFetch(`/suppliers/${requireValidId(id, 'معرّف المورد')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteSupplier: id =>
+      apiFetch(`/suppliers/${requireValidId(id, 'معرّف المورد')}`, { method: 'DELETE' }),
+    getSupplierStatement: id =>
+      apiFetch(`/suppliers/${requireValidId(id, 'معرّف المورد')}/statement`),
+    addSupplierPayment: (id, data) =>
+      apiFetch(`/suppliers/${requireValidId(id, 'معرّف المورد')}/payments`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteSupplierPayment: id =>
+      apiFetch(`/suppliers/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 
-    createSupplier: (data) =>
-      apiFetch('/suppliers', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
-    deleteSupplier: (id) =>
-      apiFetch(`/suppliers/${id}`, {
-        method: 'DELETE'
-      }),
-    getSupplierStatement: (id) =>
-    apiFetch(`/suppliers/${requireValidId(id, 'معرّف المورد')}/statement`),
-
-addSupplierPayment: (id, data) =>
-    apiFetch(`/suppliers/${requireValidId(id, 'معرّف المورد')}/payments`, {
-        method: 'POST',
-        body: JSON.stringify(data)
-    }),
-
-deleteSupplierPayment: (id) =>
-    apiFetch(`/suppliers/payments/${requireId(id, 'معرّف الدفعة')}`, {
-        method: 'DELETE'
-    }),
-
-getCashbox: () => apiFetch('/audit/cashbox'),
-
-addCashboxExpense: (data) =>
-    apiFetch('/audit/cashbox/expenses', {
-        method: 'POST',
-        body: JSON.stringify(data)
-    }),
-
-    // Products
+    // ── Products ──────────────────────────────────────────────────
     getProducts: () => apiFetch('/products'),
-
-    getProduct: (id) =>
-      apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}`),
-
-    createProduct: (data) =>
-      apiFetch('/products', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
+    getProduct: id => apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}`),
+    createProduct: data =>
+      apiFetch('/products', { method: 'POST', body: JSON.stringify(data) }),
     updateProduct: (id, data) =>
-      apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      }),
-
-    deleteProduct: (id) =>
-      apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}`, {
-        method: 'DELETE'
-      }),
-
-    getStockMovements: (productId) =>
+      apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteProduct: id =>
+      apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}`, { method: 'DELETE' }),
+    getStockMovements: productId =>
       apiFetch(`/products/${requireValidId(productId, 'معرّف الصنف')}/movements`),
-
     adjustProductStock: (id, data) =>
-      apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}/adjust`, {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
+      apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}/adjust`, { method: 'POST', body: JSON.stringify(data) }),
+    importProductsExcel: (file, updateExisting = false) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiFetch(
+        `/products/import-excel?update_existing=${updateExisting ? 'true' : 'false'}`,
+        { method: 'POST', body: formData }
+      );
+    },
+    async exportProductsExcel() {
+      const res = await fetch(`${API_BASE}/products/export-excel`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
+        cache: 'no-store',
+      });
+      if (res.status === 401) { clearAuthAndReload(); return; }
+      if (!res.ok) {
+        const data = await parseResponse(res);
+        throw new Error(extractErrorMessage(data, 'فشل تصدير ملف Excel'));
+      }
+      const blob = await res.blob();
+      let filename = 'تصدير-المستودع.xlsx';
+      const disposition = res.headers.get('content-disposition') || '';
+      const match = disposition.match(/filename\*=UTF-8''([^;]+)/);
+      if (match?.[1]) {
+        try { filename = decodeURIComponent(match[1]); } catch { filename = match[1]; }
+      }
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    },
 
-    // Purchases
+    // ── Purchases ─────────────────────────────────────────────────
     getPurchases: () => apiFetch('/purchases'),
+    createPurchase: data =>
+      apiFetch('/purchases', { method: 'POST', body: JSON.stringify(data) }),
+    receivePurchase: id =>
+      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}/receive`, { method: 'PUT' }),
+    deletePurchase: id =>
+      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}`, { method: 'DELETE' }),
 
-    createPurchase: (data) =>
-      apiFetch('/purchases', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
-    receivePurchase: (id) =>
-      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}/receive`, {
-        method: 'PUT'
-      }),
-
-    deletePurchase: (id) =>
-      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}`, {
-        method: 'DELETE'
-      }),
-
-    // Warehouse Categories
+    // ── Warehouse Categories ──────────────────────────────────────
     getWarehouseCategories: () => apiFetch('/warehouse-categories'),
-
-    getCategoryProducts: (id) =>
+    getCategoryProducts: id =>
       apiFetch(`/warehouse-categories/${requireId(id, 'معرّف الفئة')}/products`),
-
-    createWarehouseCategory: (data) =>
-      apiFetch('/warehouse-categories', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
+    createWarehouseCategory: data =>
+      apiFetch('/warehouse-categories', { method: 'POST', body: JSON.stringify(data) }),
     updateWarehouseCategory: (id, data) =>
-      apiFetch(`/warehouse-categories/${requireId(id, 'معرّف الفئة')}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      }),
+      apiFetch(`/warehouse-categories/${requireId(id, 'معرّف الفئة')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteWarehouseCategory: id =>
+      apiFetch(`/warehouse-categories/${requireId(id, 'معرّف الفئة')}`, { method: 'DELETE' }),
 
-    deleteWarehouseCategory: (id) =>
-      apiFetch(`/warehouse-categories/${id}`, {
-        method: 'DELETE'
-      }),
-
-    // Warehouse Invoices
-        // Warehouse Invoices
+    // ── Warehouse Invoices ────────────────────────────────────────
     getWarehouseInvoices: () => apiFetch('/warehouse-invoices'),
+    createWarehouseInvoice: data =>
+      apiFetch('/warehouse-invoices', { method: 'POST', body: JSON.stringify(data) }),
+    deleteWarehouseInvoice: id =>
+      apiFetch(`/warehouse-invoices/${requireId(id, 'معرّف فاتورة المستودع')}`, { method: 'DELETE' }),
 
-    createWarehouseInvoice: (data) =>
-      apiFetch('/warehouse-invoices', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
-    deleteWarehouseInvoice: (id) =>
-      apiFetch(`/warehouse-invoices/${requireId(id, 'معرّف فاتورة المستودع')}`, {
-        method: 'DELETE'
-      }),
-
-    // Recipients
+    // ── Recipients ────────────────────────────────────────────────
     getRecipients: () => apiFetch('/recipients'),
-
-    getRecipientStatement: (name) =>
+    getRecipientStatement: name =>
       apiFetch(`/recipients/${encodeURIComponent(name)}/statement`),
-
-    createRecipientPayment: (data) =>
-      apiFetch('/recipients/payments', {
-        method: 'POST',
-        body: JSON.stringify(data)
-      }),
-
-    deleteRecipientPayment: (id) =>
-      apiFetch(`/recipients/payments/${requireId(id, 'معرّف الدفعة')}`, {
-        method: 'DELETE'
-      }),
+    createRecipientPayment: data =>
+      apiFetch('/recipients/payments', { method: 'POST', body: JSON.stringify(data) }),
+    deleteRecipientPayment: id =>
+      apiFetch(`/recipients/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
   };
 
-  // expose globally for non-module scripts
   window.API_BASE = API_BASE;
   window.getToken = getToken;
   window.apiFetch = apiFetch;

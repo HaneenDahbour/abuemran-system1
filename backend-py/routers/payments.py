@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
@@ -47,14 +47,14 @@ def parse_payment_date(value: Optional[str]) -> date:
     try:
         return date.fromisoformat(value)
     except ValueError:
-        raise HTTPException(status_code=400, detail="تاريخ المقبوضة غير صحيح")
+        raise HTTPException(status_code=400, detail="ØªØ§Ø±ÙŠØ® Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø© ØºÙŠØ± ØµØ­ÙŠØ­")
 
 
 def normalize_payment_method(value: Optional[str]) -> str:
     value = clean_text(value) or "cash"
     allowed = {"cash", "check", "transfer"}
     if value not in allowed:
-        raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
+        raise HTTPException(status_code=400, detail="Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ø¯ÙØ¹ ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
     return value
 
 
@@ -65,6 +65,7 @@ class PaymentRequest(BaseModel):
     payment_method: Optional[str] = "cash"
     payment_date: Optional[str] = None
     notes: Optional[str] = None
+
 
 class RejectPaymentRequest(BaseModel):
     reason: str
@@ -87,7 +88,7 @@ LEFT JOIN users a ON p.approved_by = a.id
 """
 
 
-@router.get("/")
+@router.get("")
 async def get_payments(user=Depends(get_current_user)):
     pool = await get_pool()
 
@@ -111,28 +112,26 @@ async def get_payments(user=Depends(get_current_user)):
             )
 
         else:
-            rows = await pool.fetch(
-                PAYMENT_SELECT + """
+            rows = await pool.fetch(PAYMENT_SELECT + """
                 ORDER BY p.created_at DESC
-                """
-            )
+                """)
 
         return [row_to_dict(row) for row in rows]
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ في السيرفر: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±: {str(e)}")
 
 
-@router.post("/")
+@router.post("")
 async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant", "employee")
 
     if not data.client_id:
-        raise HTTPException(status_code=400, detail="العميل مطلوب")
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ Ù…Ø·Ù„ÙˆØ¨")
 
     amount = float(data.amount or 0)
     if amount <= 0:
-        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±")
 
     method = normalize_payment_method(data.payment_method)
     payment_date = parse_payment_date(data.payment_date)
@@ -161,7 +160,7 @@ async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
                     data.client_id,
                 )
                 if not client_exists:
-                    raise HTTPException(status_code=400, detail="العميل غير موجود")
+                    raise HTTPException(status_code=400, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
 
                 if data.invoice_id:
                     invoice_exists = await conn.fetchval(
@@ -179,7 +178,7 @@ async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
                     if not invoice_exists:
                         raise HTTPException(
                             status_code=400,
-                            detail="الفاتورة غير موجودة أو لا تتبع هذا العميل"
+                            detail="Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© Ø£Ùˆ Ù„Ø§ ØªØªØ¨Ø¹ Ù‡Ø°Ø§ Ø§Ù„Ø¹Ù…ÙŠÙ„",
                         )
 
                 new_payment = await conn.fetchrow(
@@ -207,7 +206,7 @@ async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
                             INSERT INTO notifications (role, message, type)
                             VALUES ('admin', $1, 'pending')
                             """,
-                            f"⏳ دفعة جديدة {amount} د.أ تنتظر موافقتك",
+                            f"â³ Ø¯ÙØ¹Ø© Ø¬Ø¯ÙŠØ¯Ø© {amount} Ø¯.Ø£ ØªÙ†ØªØ¸Ø± Ù…ÙˆØ§ÙÙ‚ØªÙƒ",
                         )
                     except Exception:
                         pass
@@ -219,10 +218,14 @@ async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
                         VALUES ($1,$2,$3,'payment',$4,$5)
                         """,
                         user.get("id"),
-                        user.get("full_name") or user.get("username") or "مستخدم",
-                        "سجّل دفعة مباشرة" if status == "approved" else "أرسل دفعة للموافقة",
+                        user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
+                        (
+                            "Ø³Ø¬Ù‘Ù„ Ø¯ÙØ¹Ø© Ù…Ø¨Ø§Ø´Ø±Ø©"
+                            if status == "approved"
+                            else "Ø£Ø±Ø³Ù„ Ø¯ÙØ¹Ø© Ù„Ù„Ù…ÙˆØ§ÙÙ‚Ø©"
+                        ),
                         new_payment["id"],
-                        f"{amount:.3f} د.أ — client_id:{data.client_id} — invoice_id:{data.invoice_id or 'none'} — method:{method}",
+                        f"{amount:.3f} Ø¯.Ø£ â€” client_id:{data.client_id} â€” invoice_id:{data.invoice_id or 'none'} â€” method:{method}",
                     )
                 except Exception:
                     pass
@@ -234,7 +237,8 @@ async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ في السيرفر: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±: {str(e)}")
+
 
 @router.post("/{payment_id}/approve")
 async def approve_payment(payment_id: int, user=Depends(get_current_user)):
@@ -257,7 +261,9 @@ async def approve_payment(payment_id: int, user=Depends(get_current_user)):
         )
 
         if not payment:
-            raise HTTPException(status_code=404, detail="الدفعة غير موجودة أو تمت معالجتها مسبقاً")
+            raise HTTPException(
+                status_code=404, detail="Ø§Ù„Ø¯ÙØ¹Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© Ø£Ùˆ ØªÙ…Øª Ù…Ø¹Ø§Ù„Ø¬ØªÙ‡Ø§ Ù…Ø³Ø¨Ù‚Ø§Ù‹"
+            )
 
         try:
             await pool.execute(
@@ -266,7 +272,7 @@ async def approve_payment(payment_id: int, user=Depends(get_current_user)):
                 VALUES ($1, $2, 'approved')
                 """,
                 payment["submitted_by"],
-                f"✓ اعتمد المدير دفعتك بقيمة {payment['amount']} د.أ",
+                f"âœ“ Ø§Ø¹ØªÙ…Ø¯ Ø§Ù„Ù…Ø¯ÙŠØ± Ø¯ÙØ¹ØªÙƒ Ø¨Ù‚ÙŠÙ…Ø© {payment['amount']} Ø¯.Ø£",
             )
         except Exception:
             pass
@@ -276,15 +282,17 @@ async def approve_payment(payment_id: int, user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(status_code=500, detail="خطأ في السيرفر")
+        raise HTTPException(status_code=500, detail="Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±")
 
 
 @router.post("/{payment_id}/reject")
-async def reject_payment(payment_id: int, data: RejectPaymentRequest, user=Depends(get_current_user)):
+async def reject_payment(
+    payment_id: int, data: RejectPaymentRequest, user=Depends(get_current_user)
+):
     require_role(user, "admin")
 
     if not data.reason or not data.reason.strip():
-        raise HTTPException(status_code=400, detail="سبب الرفض مطلوب")
+        raise HTTPException(status_code=400, detail="Ø³Ø¨Ø¨ Ø§Ù„Ø±ÙØ¶ Ù…Ø·Ù„ÙˆØ¨")
 
     pool = await get_pool()
 
@@ -305,7 +313,9 @@ async def reject_payment(payment_id: int, data: RejectPaymentRequest, user=Depen
         )
 
         if not payment:
-            raise HTTPException(status_code=404, detail="الدفعة غير موجودة أو تمت معالجتها مسبقاً")
+            raise HTTPException(
+                status_code=404, detail="Ø§Ù„Ø¯ÙØ¹Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© Ø£Ùˆ ØªÙ…Øª Ù…Ø¹Ø§Ù„Ø¬ØªÙ‡Ø§ Ù…Ø³Ø¨Ù‚Ø§Ù‹"
+            )
 
         try:
             await pool.execute(
@@ -314,7 +324,7 @@ async def reject_payment(payment_id: int, data: RejectPaymentRequest, user=Depen
                 VALUES ($1, $2, 'rejected')
                 """,
                 payment["submitted_by"],
-                f"✗ رُفضت دفعتك {payment['amount']} د.أ — السبب: {data.reason}",
+                f"âœ— Ø±ÙÙØ¶Øª Ø¯ÙØ¹ØªÙƒ {payment['amount']} Ø¯.Ø£ â€” Ø§Ù„Ø³Ø¨Ø¨: {data.reason}",
             )
         except Exception:
             pass
@@ -324,7 +334,7 @@ async def reject_payment(payment_id: int, data: RejectPaymentRequest, user=Depen
     except HTTPException:
         raise
     except Exception:
-        raise HTTPException(status_code=500, detail="خطأ في السيرفر")
+        raise HTTPException(status_code=500, detail="Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±")
 
 
 @router.delete("/{payment_id}")
@@ -340,7 +350,7 @@ async def delete_payment(payment_id: int, user=Depends(get_current_user)):
         )
 
         if not deleted:
-            raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
+            raise HTTPException(status_code=404, detail="Ø§Ù„Ø¯ÙØ¹Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
 
         return {"success": True}
 
@@ -348,3 +358,4 @@ async def delete_payment(payment_id: int, user=Depends(get_current_user)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

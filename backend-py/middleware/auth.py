@@ -13,7 +13,7 @@ security = HTTPBearer()
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     token = credentials.credentials
 
@@ -22,6 +22,5 @@ async def get_current_user(
         return payload
     except JWTError:
         raise HTTPException(
-            status_code=403,
-            detail="الجلسة انتهت — يرجى تسجيل الدخول مجدداً"
+            status_code=403, detail="الجلسة انتهت — يرجى تسجيل الدخول مجدداً"
         )

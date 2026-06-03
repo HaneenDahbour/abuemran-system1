@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
@@ -21,9 +21,12 @@ def safe_uuid(val):
 
 
 def to_val(v):
-    if isinstance(v, Decimal): return float(v)
-    if isinstance(v, (date, datetime)): return v.isoformat()
-    if isinstance(v, UUID): return str(v)
+    if isinstance(v, Decimal):
+        return float(v)
+    if isinstance(v, (date, datetime)):
+        return v.isoformat()
+    if isinstance(v, UUID):
+        return str(v)
     return v
 
 
@@ -39,7 +42,7 @@ class PaymentIn(BaseModel):
     notes: Optional[str] = None
 
 
-@router.get("/")
+@router.get("")
 async def list_recipients(user=Depends(get_current_user)):
     pool = await get_pool()
     try:
@@ -89,8 +92,7 @@ async def list_recipients(user=Depends(get_current_user)):
         for r in rows:
             d = row_to_dict(r)
             d["balance"] = round(
-                float(d["total_invoiced"] or 0) - float(d["total_paid"] or 0),
-                3
+                float(d["total_invoiced"] or 0) - float(d["total_paid"] or 0), 3
             )
             result.append(d)
 
@@ -98,11 +100,14 @@ async def list_recipients(user=Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{recipient_name}/statement")
 async def recipient_statement(recipient_name: str, user=Depends(get_current_user)):
     pool = await get_pool()
     try:
-        inv_rows = await pool.fetch("""
+        inv_rows = await pool.fetch(
+            """
             SELECT
                 i.id,
                 i.invoice_number,
@@ -117,9 +122,12 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
             JOIN clients c ON c.id = i.client_id
             WHERE LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
             ORDER BY i.date ASC, i.id ASC
-        """, recipient_name)
+        """,
+            recipient_name,
+        )
 
-        manual_pay_rows = await pool.fetch("""
+        manual_pay_rows = await pool.fetch(
+            """
             SELECT
                 id,
                 amount,
@@ -130,9 +138,12 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
             FROM recipient_payments
             WHERE LOWER(TRIM(recipient_name)) = LOWER(TRIM($1))
             ORDER BY payment_date ASC, id ASC
-        """, recipient_name)
+        """,
+            recipient_name,
+        )
 
-        invoice_pay_rows = await pool.fetch("""
+        invoice_pay_rows = await pool.fetch(
+            """
             SELECT
                 p.id,
                 p.amount,
@@ -149,7 +160,9 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
               AND COALESCE(p.notes, '') ILIKE ('%invoice_id:' || i.id::text || '%')
               AND LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
             ORDER BY p.payment_date ASC, p.id ASC
-        """, recipient_name)
+        """,
+            recipient_name,
+        )
 
         transactions = []
 
@@ -164,7 +177,7 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
             d["type"] = "payment"
             d["source"] = "invoice_payment"
             d["amount"] = float(d["amount"] or 0)
-            d["notes"] = d.get("notes") or "دفعة من داخل الفاتورة"
+            d["notes"] = d.get("notes") or "Ø¯ÙØ¹Ø© Ù…Ù† Ø¯Ø§Ø®Ù„ Ø§Ù„ÙØ§ØªÙˆØ±Ø©"
             transactions.append(d)
 
         for r in manual_pay_rows:
@@ -184,7 +197,9 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
                 balance -= t["amount"]
             t["running_balance"] = round(balance, 3)
 
-        total_invoiced = sum(t["amount"] for t in transactions if t["type"] == "invoice")
+        total_invoiced = sum(
+            t["amount"] for t in transactions if t["type"] == "invoice"
+        )
         total_paid = sum(t["amount"] for t in transactions if t["type"] == "payment")
 
         return {
@@ -197,20 +212,25 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/payments")
 async def add_payment(data: PaymentIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     if not data.recipient_name.strip():
-        raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
+        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ø²Ø¨ÙˆÙ† Ù…Ø·Ù„ÙˆØ¨")
     if data.amount <= 0:
-        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±")
 
     pool = await get_pool()
     try:
-        pay_date = date.fromisoformat(data.payment_date) if data.payment_date else date.today()
+        pay_date = (
+            date.fromisoformat(data.payment_date) if data.payment_date else date.today()
+        )
 
-        row = await pool.fetchrow("""
+        row = await pool.fetchrow(
+            """
             INSERT INTO recipient_payments
               (recipient_name, client_id, amount, payment_date, notes, created_by)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -234,9 +254,8 @@ async def delete_payment(payment_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
     pool = await get_pool()
     try:
-        await pool.execute(
-            "DELETE FROM recipient_payments WHERE id=$1", payment_id
-        )
+        await pool.execute("DELETE FROM recipient_payments WHERE id=$1", payment_id)
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

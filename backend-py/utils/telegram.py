@@ -7,6 +7,7 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 MANAGER_CHAT_ID = os.getenv("MANAGER_CHAT_ID", "")
 
+
 async def notify_admin(message: str):
     if not TELEGRAM_TOKEN or not MANAGER_CHAT_ID:
         return
@@ -17,8 +18,8 @@ async def notify_admin(message: str):
                 json={
                     "chat_id": MANAGER_CHAT_ID,
                     "text": message,
-                    "parse_mode": "HTML"
-                }
+                    "parse_mode": "HTML",
+                },
             )
     except Exception:
         pass

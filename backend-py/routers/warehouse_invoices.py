@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional, List
 from uuid import UUID
@@ -50,13 +50,12 @@ class WarehouseInvoiceRequest(BaseModel):
     items: List[WarehouseInvoiceItem]
 
 
-@router.get("/")
+@router.get("")
 async def get_warehouse_invoices(user=Depends(get_current_user)):
     pool = await get_pool()
 
     try:
-        rows = await pool.fetch(
-            """
+        rows = await pool.fetch("""
             SELECT
                 wi.*,
                 wc.name AS category_name,
@@ -65,8 +64,7 @@ async def get_warehouse_invoices(user=Depends(get_current_user)):
             LEFT JOIN warehouse_categories wc ON wc.id = wi.category_id
             LEFT JOIN users u ON u.id = wi.issued_by
             ORDER BY wi.date DESC, wi.created_at DESC
-            """
-        )
+            """)
 
         results = []
         for row in rows:
@@ -79,7 +77,7 @@ async def get_warehouse_invoices(user=Depends(get_current_user)):
                 JOIN products p ON p.id = wii.product_id
                 WHERE wii.warehouse_invoice_id = $1
                 """,
-                row["id"]
+                row["id"],
             )
             item["items"] = [row_to_dict(i) for i in items]
             results.append(item)
@@ -88,21 +86,22 @@ async def get_warehouse_invoices(user=Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"تعذر تحميل فواتير المستودع: {str(e)}"
+            status_code=500, detail=f"ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ÙÙˆØ§ØªÙŠØ± Ø§Ù„Ù…Ø³ØªÙˆØ¯Ø¹: {str(e)}"
         )
 
 
-@router.post("/")
-async def create_warehouse_invoice(data: WarehouseInvoiceRequest, user=Depends(get_current_user)):
+@router.post("")
+async def create_warehouse_invoice(
+    data: WarehouseInvoiceRequest, user=Depends(get_current_user)
+):
     require_role(user, "admin", "accountant")
 
     if not data.items:
-        raise HTTPException(status_code=400, detail="أضف صنفاً على الأقل")
+        raise HTTPException(status_code=400, detail="Ø£Ø¶Ù ØµÙ†ÙØ§Ù‹ Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„")
 
     for item in data.items:
         if not item.product_id or item.quantity <= 0 or item.unit_price < 0:
-            raise HTTPException(status_code=400, detail="بيانات أحد الأصناف غير صحيحة")
+            raise HTTPException(status_code=400, detail="Ø¨ÙŠØ§Ù†Ø§Øª Ø£Ø­Ø¯ Ø§Ù„Ø£ØµÙ†Ø§Ù ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
 
     pool = await get_pool()
     conn = await pool.acquire()
@@ -110,7 +109,9 @@ async def create_warehouse_invoice(data: WarehouseInvoiceRequest, user=Depends(g
     try:
         async with conn.transaction():
             total = sum(item.quantity * item.unit_price for item in data.items)
-            invoice_number = data.invoice_number or f"WINV-{int(datetime.now().timestamp() * 1000)}"
+            invoice_number = (
+                data.invoice_number or f"WINV-{int(datetime.now().timestamp() * 1000)}"
+            )
             invoice_date = date.fromisoformat(data.date) if data.date else date.today()
 
             inv = await conn.fetchrow(
@@ -142,7 +143,7 @@ async def create_warehouse_invoice(data: WarehouseInvoiceRequest, user=Depends(g
                     inv["id"],
                     product_uuid,
                     item.quantity,
-                    item.unit_price
+                    item.unit_price,
                 )
 
                 await conn.execute(
@@ -152,7 +153,7 @@ async def create_warehouse_invoice(data: WarehouseInvoiceRequest, user=Depends(g
                     WHERE id = $2
                     """,
                     item.quantity,
-                    product_uuid
+                    product_uuid,
                 )
 
                 try:
@@ -165,7 +166,7 @@ async def create_warehouse_invoice(data: WarehouseInvoiceRequest, user=Depends(g
                         product_uuid,
                         item.quantity,
                         inv["id"],
-                        f"فاتورة مستودع #{invoice_number}",
+                        f"ÙØ§ØªÙˆØ±Ø© Ù…Ø³ØªÙˆØ¯Ø¹ #{invoice_number}",
                         safe_uuid(user.get("id")),
                     )
                 except Exception:
@@ -175,11 +176,11 @@ async def create_warehouse_invoice(data: WarehouseInvoiceRequest, user=Depends(g
             await pool.execute(
                 """
                 INSERT INTO audit_log (user_id, user_name, action, detail)
-                VALUES ($1, $2, 'أضاف فاتورة مستودع', $3)
+                VALUES ($1, $2, 'Ø£Ø¶Ø§Ù ÙØ§ØªÙˆØ±Ø© Ù…Ø³ØªÙˆØ¯Ø¹', $3)
                 """,
                 safe_uuid(user.get("id")),
                 user.get("full_name"),
-                f"فاتورة #{invoice_number} — {total:.2f} د.أ"
+                f"ÙØ§ØªÙˆØ±Ø© #{invoice_number} â€” {total:.2f} Ø¯.Ø£",
             )
         except Exception:
             pass
@@ -190,8 +191,7 @@ async def create_warehouse_invoice(data: WarehouseInvoiceRequest, user=Depends(g
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"تعذر إنشاء فاتورة المستودع: {str(e)}"
+            status_code=500, detail=f"ØªØ¹Ø°Ø± Ø¥Ù†Ø´Ø§Ø¡ ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ù…Ø³ØªÙˆØ¯Ø¹: {str(e)}"
         )
 
     finally:
@@ -206,19 +206,16 @@ async def delete_warehouse_invoice(invoice_id: int, user=Depends(get_current_use
 
     try:
         deleted = await pool.fetchrow(
-            "DELETE FROM warehouse_invoices WHERE id=$1 RETURNING id",
-            invoice_id
+            "DELETE FROM warehouse_invoices WHERE id=$1 RETURNING id", invoice_id
         )
 
         if not deleted:
-            raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+            raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
 
         return {"success": True}
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"تعذر حذف الفاتورة: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"ØªØ¹Ø°Ø± Ø­Ø°Ù Ø§Ù„ÙØ§ØªÙˆØ±Ø©: {str(e)}")
+

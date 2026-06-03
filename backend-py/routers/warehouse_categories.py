@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
@@ -36,16 +36,31 @@ def row_to_dict(row):
 
 class CategoryRequest(BaseModel):
     name: str
-    icon: Optional[str] = "📦"
+    icon: Optional[str] = "ðŸ“¦"
 
 
-@router.get("/")
+async def insert_category_audit(conn, user, action: str, detail: str):
+    try:
+        await conn.execute(
+            """
+            INSERT INTO audit_log (user_id, user_name, action, detail)
+            VALUES ($1, $2, $3, $4)
+            """,
+            safe_uuid(user.get("id")),
+            user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
+            action,
+            detail,
+        )
+    except Exception:
+        pass
+
+
+@router.get("")
 async def get_categories(user=Depends(get_current_user)):
     pool = await get_pool()
 
     try:
-        rows = await pool.fetch(
-            """
+        rows = await pool.fetch("""
             WITH sold_by_category AS (
                 SELECT
                     p.category_id,
@@ -69,7 +84,7 @@ async def get_categories(user=Depends(get_current_user)):
             SELECT
                 wc.id,
                 wc.name,
-                COALESCE(wc.icon, '📦') AS icon,
+                COALESCE(wc.icon, 'ðŸ“¦') AS icon,
                 COUNT(p.id)::int AS product_count,
                 COALESCE(SUM(p.current_stock), 0) AS total_stock,
                 COALESCE(SUM(p.min_stock), 0) AS total_min_stock,
@@ -87,22 +102,22 @@ async def get_categories(user=Depends(get_current_user)):
                       AND COALESCE(p.current_stock, 0) > 0
                       AND (COALESCE(p.min_stock, 0) = 0 OR p.current_stock > p.min_stock)
                 )::int AS healthy_count,
-                COALESCE(sbc.total_sold, 0) AS total_sold
+                COALESCE(MAX(sbc.total_sold), 0) AS total_sold
             FROM warehouse_categories wc
             LEFT JOIN products p ON p.category_id = wc.id
             LEFT JOIN sold_by_category sbc ON sbc.category_id = wc.id
-            GROUP BY wc.id, wc.name, wc.icon, sbc.total_sold
+            GROUP BY wc.id, wc.name, wc.icon
             ORDER BY wc.name ASC
-            """
-        )
+            """)
 
         return [row_to_dict(r) for r in rows]
 
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"تعذر تحميل فئات المستودع: {str(e)}"
+            detail=f"ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ÙØ¦Ø§Øª Ø§Ù„Ù…Ø³ØªÙˆØ¯Ø¹: {str(e)}",
         )
+
 
 @router.get("/{category_id}/products")
 async def get_category_products(category_id: int, user=Depends(get_current_user)):
@@ -110,8 +125,14 @@ async def get_category_products(category_id: int, user=Depends(get_current_user)
 
     try:
         rows = await pool.fetch(
-            "SELECT * FROM products WHERE category_id = $1 ORDER BY name ASC",
-            category_id
+            """
+            SELECT p.*, wc.name AS category_name, wc.icon AS category_icon
+            FROM products p
+            LEFT JOIN warehouse_categories wc ON wc.id = p.category_id
+            WHERE p.category_id = $1
+            ORDER BY p.name ASC
+            """,
+            category_id,
         )
 
         return [row_to_dict(r) for r in rows]
@@ -119,75 +140,127 @@ async def get_category_products(category_id: int, user=Depends(get_current_user)
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"تعذر تحميل أصناف الفئة: {str(e)}"
+            detail=f"ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ Ø£ØµÙ†Ø§Ù Ø§Ù„ÙØ¦Ø©: {str(e)}",
         )
 
 
-@router.post("/")
+@router.post("")
 async def create_category(data: CategoryRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
-    if not data.name or not data.name.strip():
-        raise HTTPException(status_code=400, detail="الاسم مطلوب")
+    name = (data.name or "").strip()
+    icon = (data.icon or "ðŸ“¦").strip() or "ðŸ“¦"
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ø§Ø³Ù… Ù…Ø·Ù„ÙˆØ¨")
 
     pool = await get_pool()
 
     try:
-        row = await pool.fetchrow(
-            """
-            INSERT INTO warehouse_categories (name, icon)
-            VALUES ($1, $2)
-            RETURNING *
-            """,
-            data.name.strip(),
-            data.icon or "📦"
-        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                existing = await conn.fetchrow(
+                    """
+                    SELECT id
+                    FROM warehouse_categories
+                    WHERE LOWER(name) = LOWER($1)
+                    LIMIT 1
+                    """,
+                    name,
+                )
 
-        try:
-            await pool.execute(
-                """
-                INSERT INTO audit_log (user_id, user_name, action, detail)
-                VALUES ($1, $2, 'أضاف فئة مستودع', $3)
-                """,
-                safe_uuid(user.get("id")),
-                user.get("full_name"),
-                f"فئة: {data.name.strip()}"
-            )
-        except Exception:
-            pass
+                if existing:
+                    raise HTTPException(
+                        status_code=409, detail="Ù‡Ø°Ù‡ Ø§Ù„ÙØ¦Ø© Ù…ÙˆØ¬ÙˆØ¯Ø© Ù…Ø³Ø¨Ù‚Ø§Ù‹"
+                    )
 
-        return row_to_dict(row)
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO warehouse_categories (name, icon)
+                    VALUES ($1, $2)
+                    RETURNING *
+                    """,
+                    name,
+                    icon,
+                )
 
+                await insert_category_audit(
+                    conn, user, "Ø£Ø¶Ø§Ù ÙØ¦Ø© Ù…Ø³ØªÙˆØ¯Ø¹", f"ÙØ¦Ø©: {name}"
+                )
+
+                return row_to_dict(row)
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.put("/{category_id}")
-async def update_category(category_id: int, data: CategoryRequest, user=Depends(get_current_user)):
+async def update_category(
+    category_id: int, data: CategoryRequest, user=Depends(get_current_user)
+):
     require_role(user, "admin", "accountant")
 
-    if not data.name or not data.name.strip():
-        raise HTTPException(status_code=400, detail="الاسم مطلوب")
+    name = (data.name or "").strip()
+    icon = (data.icon or "ðŸ“¦").strip() or "ðŸ“¦"
+
+    if not name:
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ø§Ø³Ù… Ù…Ø·Ù„ÙˆØ¨")
 
     pool = await get_pool()
 
     try:
-        row = await pool.fetchrow(
-            """
-            UPDATE warehouse_categories
-            SET name = $1, icon = $2
-            WHERE id = $3
-            RETURNING *
-            """,
-            data.name.strip(),
-            data.icon or "📦",
-            category_id
-        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                duplicate = await conn.fetchrow(
+                    """
+                    SELECT id
+                    FROM warehouse_categories
+                    WHERE LOWER(name) = LOWER($1)
+                      AND id <> $2
+                    LIMIT 1
+                    """,
+                    name,
+                    category_id,
+                )
 
-        if not row:
-            raise HTTPException(status_code=404, detail="الفئة غير موجودة")
+                if duplicate:
+                    raise HTTPException(
+                        status_code=409, detail="Ø§Ø³Ù… Ø§Ù„ÙØ¦Ø© Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³Ø¨Ù‚Ø§Ù‹"
+                    )
 
-        return row_to_dict(row)
+                row = await conn.fetchrow(
+                    """
+                    UPDATE warehouse_categories
+                    SET name = $1,
+                        icon = $2
+                    WHERE id = $3
+                    RETURNING *
+                    """,
+                    name,
+                    icon,
+                    category_id,
+                )
+
+                if not row:
+                    raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ¦Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
+
+                await conn.execute(
+                    """
+                    UPDATE products
+                    SET category = $1
+                    WHERE category_id = $2
+                    """,
+                    name,
+                    category_id,
+                )
+
+                await insert_category_audit(
+                    conn, user, "ØªØ¹Ø¯ÙŠÙ„ ÙØ¦Ø© Ù…Ø³ØªÙˆØ¯Ø¹", f"ÙØ¦Ø©: {name}"
+                )
+
+                return row_to_dict(row)
 
     except HTTPException:
         raise
@@ -200,29 +273,64 @@ async def delete_category(category_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
 
     pool = await get_pool()
-    conn = await pool.acquire()
 
     try:
-        async with conn.transaction():
-            await conn.execute(
-                "UPDATE products SET category_id = NULL WHERE category_id = $1",
-                category_id
-            )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                category = await conn.fetchrow(
+                    """
+                    SELECT id, name
+                    FROM warehouse_categories
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    category_id,
+                )
 
-            deleted = await conn.fetchrow(
-                "DELETE FROM warehouse_categories WHERE id = $1 RETURNING id",
-                category_id
-            )
+                if not category:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Ø§Ù„ÙØ¦Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© Ø£Ùˆ ØªÙ… Ø­Ø°ÙÙ‡Ø§ Ù…Ø³Ø¨Ù‚Ø§Ù‹",
+                    )
 
-            if not deleted:
-                raise HTTPException(status_code=404, detail="الفئة غير موجودة")
+                unlinked_result = await conn.execute(
+                    """
+                    UPDATE products
+                    SET category_id = NULL,
+                        category = NULL
+                    WHERE category_id = $1
+                    """,
+                    category_id,
+                )
 
-        return {"success": True}
+                deleted = await conn.fetchrow(
+                    """
+                    DELETE FROM warehouse_categories
+                    WHERE id = $1
+                    RETURNING id
+                    """,
+                    category_id,
+                )
+
+                if not deleted:
+                    raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ¦Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
+
+                await insert_category_audit(
+                    conn,
+                    user,
+                    "Ø­Ø°Ù ÙØ¦Ø© Ù…Ø³ØªÙˆØ¯Ø¹",
+                    f"Ø­Ø°Ù ÙØ¦Ø©: {category['name']} â€” ØªÙ… Ø¥Ù„ØºØ§Ø¡ Ø±Ø¨Ø· Ø§Ù„Ø£ØµÙ†Ø§Ù Ø§Ù„ØªØ§Ø¨Ø¹Ø© Ø¨Ù‡Ø§",
+                )
+
+        return {
+            "success": True,
+            "message": "ØªÙ… Ø­Ø°Ù Ø§Ù„ÙØ¦Ø© ÙˆØ¥Ù„ØºØ§Ø¡ Ø±Ø¨Ø· Ø§Ù„Ø£ØµÙ†Ø§Ù Ø§Ù„ØªØ§Ø¨Ø¹Ø© Ø¨Ù‡Ø§",
+            "deleted_category_id": category_id,
+            "unlinked_products": int(unlinked_result.split()[-1]),
+        }
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    finally:
-        await pool.release(conn)

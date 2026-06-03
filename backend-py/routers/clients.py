@@ -1,4 +1,4 @@
-from decimal import Decimal
+﻿from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
@@ -48,7 +48,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
         VALUES ($1, $2, $3, 'client', $4, $5)
         """,
         safe_uuid(user.get("id")),
-        user.get("full_name") or user.get("username") or "مستخدم",
+        user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
         action,
         entity_id,
         detail,
@@ -63,7 +63,7 @@ class ClientRequest(BaseModel):
     phone: Optional[str] = None
 
 
-@router.get("/")
+@router.get("")
 async def get_clients(user=Depends(get_current_user)):
     pool = await get_pool()
 
@@ -96,8 +96,7 @@ async def get_clients(user=Depends(get_current_user)):
                 user.get("client_id"),
             )
         else:
-            rows = await pool.fetch(
-                """
+            rows = await pool.fetch("""
                 SELECT c.*,
                        COALESCE((
                          SELECT SUM(i.total_amount)
@@ -119,13 +118,13 @@ async def get_clients(user=Depends(get_current_user)):
                        ), 0) AS balance
                 FROM clients c
                 ORDER BY c.name ASC
-                """
-            )
+                """)
 
         return [row_to_dict(r) for r in rows]
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{client_id}")
 async def get_client(client_id: int, user=Depends(get_current_user)):
@@ -154,7 +153,7 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
         )
 
         if not row:
-            raise HTTPException(status_code=404, detail="العميل غير موجود")
+            raise HTTPException(status_code=404, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
 
         return row_to_dict(row)
 
@@ -175,9 +174,9 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
         )
 
         if not client:
-            raise HTTPException(status_code=404, detail="العميل غير موجود")
+            raise HTTPException(status_code=404, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
 
-        # جلب كل الفواتير مع حساب المدفوع لكل فاتورة
+        # Ø¬Ù„Ø¨ ÙƒÙ„ Ø§Ù„ÙÙˆØ§ØªÙŠØ± Ù…Ø¹ Ø­Ø³Ø§Ø¨ Ø§Ù„Ù…Ø¯ÙÙˆØ¹ Ù„ÙƒÙ„ ÙØ§ØªÙˆØ±Ø©
         invoices = await pool.fetch(
             """
             SELECT 
@@ -203,7 +202,7 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
             client_id,
         )
 
-        # جلب كل الدفعات
+        # Ø¬Ù„Ø¨ ÙƒÙ„ Ø§Ù„Ø¯ÙØ¹Ø§Øª
         payments = await pool.fetch(
             """
             SELECT 
@@ -224,32 +223,28 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
             client_id,
         )
 
-        # إجماليات
+        # Ø¥Ø¬Ù…Ø§Ù„ÙŠØ§Øª
         total_invoiced = sum(float(i["total_amount"] or 0) for i in invoices)
         total_paid = sum(float(p["amount"] or 0) for p in payments)
         total_remaining = total_invoiced - total_paid
 
-        # إجمالي الذمم (فواتير آجلة غير مسددة بالكامل)
+        # Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø°Ù…Ù… (ÙÙˆØ§ØªÙŠØ± Ø¢Ø¬Ù„Ø© ØºÙŠØ± Ù…Ø³Ø¯Ø¯Ø© Ø¨Ø§Ù„ÙƒØ§Ù…Ù„)
         total_credit_invoices = sum(
             float(i["total_amount"] or 0) - float(i["paid_from_invoice"] or 0)
             for i in invoices
             if float(i["total_amount"] or 0) > float(i["paid_from_invoice"] or 0)
         )
 
-        # إجمالي النقد المدفوع فوراً عند الفواتير
+        # Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù†Ù‚Ø¯ Ø§Ù„Ù…Ø¯ÙÙˆØ¹ ÙÙˆØ±Ø§Ù‹ Ø¹Ù†Ø¯ Ø§Ù„ÙÙˆØ§ØªÙŠØ±
         total_cash_on_invoices = sum(
-            float(i["paid_from_invoice"] or 0)
-            for i in invoices
+            float(i["paid_from_invoice"] or 0) for i in invoices
         )
 
-        # الدفعات المستقلة (مش مرتبطة بفاتورة)
-        standalone_payments = [
-            p for p in payments
-            if not p["is_invoice_payment"]
-        ]
+        # Ø§Ù„Ø¯ÙØ¹Ø§Øª Ø§Ù„Ù…Ø³ØªÙ‚Ù„Ø© (Ù…Ø´ Ù…Ø±ØªØ¨Ø·Ø© Ø¨ÙØ§ØªÙˆØ±Ø©)
+        standalone_payments = [p for p in payments if not p["is_invoice_payment"]]
         total_standalone = sum(float(p["amount"] or 0) for p in standalone_payments)
 
-        # بناء قائمة الحركات
+        # Ø¨Ù†Ø§Ø¡ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ø­Ø±ÙƒØ§Øª
         transactions = []
 
         for inv in invoices:
@@ -257,35 +252,39 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
             paid_now = float(inv["paid_from_invoice"] or 0)
             remaining = max(total - paid_now, 0)
 
-            transactions.append({
-                "id": inv["id"],
-                "type": "invoice",
-                "amount": total,
-                "paid_amount": paid_now,
-                "remaining_amount": remaining,
-                "date": inv["date"].isoformat() if inv["date"] else None,
-                "description": inv["invoice_number"],
-                "notes": inv["notes"] or "",
-                "payment_method": inv["payment_method"] or "credit",
-            })
+            transactions.append(
+                {
+                    "id": inv["id"],
+                    "type": "invoice",
+                    "amount": total,
+                    "paid_amount": paid_now,
+                    "remaining_amount": remaining,
+                    "date": inv["date"].isoformat() if inv["date"] else None,
+                    "description": inv["invoice_number"],
+                    "notes": inv["notes"] or "",
+                    "payment_method": inv["payment_method"] or "credit",
+                }
+            )
 
         for pay in payments:
-            transactions.append({
-                "id": pay["id"],
-                "type": "payment",
-                "amount": float(pay["amount"] or 0),
-                "paid_amount": 0,
-                "remaining_amount": 0,
-                "date": pay["date"].isoformat() if pay["date"] else None,
-                "description": pay["notes"] or "مقبوضة",
-                "notes": pay["notes"] or "",
-                "is_invoice_payment": pay["is_invoice_payment"],
-                "payment_method": pay["payment_method"] or "cash",
-            })
+            transactions.append(
+                {
+                    "id": pay["id"],
+                    "type": "payment",
+                    "amount": float(pay["amount"] or 0),
+                    "paid_amount": 0,
+                    "remaining_amount": 0,
+                    "date": pay["date"].isoformat() if pay["date"] else None,
+                    "description": pay["notes"] or "Ù…Ù‚Ø¨ÙˆØ¶Ø©",
+                    "notes": pay["notes"] or "",
+                    "is_invoice_payment": pay["is_invoice_payment"],
+                    "payment_method": pay["payment_method"] or "cash",
+                }
+            )
 
         transactions.sort(key=lambda x: (x["date"] or "", x["id"]))
 
-        # حساب الرصيد الجاري
+        # Ø­Ø³Ø§Ø¨ Ø§Ù„Ø±ØµÙŠØ¯ Ø§Ù„Ø¬Ø§Ø±ÙŠ
         running_balance = 0.0
         for tx in transactions:
             if tx["type"] == "invoice":
@@ -314,7 +313,8 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/")
+
+@router.post("")
 async def create_client(data: ClientRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
@@ -322,7 +322,7 @@ async def create_client(data: ClientRequest, user=Depends(get_current_user)):
     phone = clean_text(data.phone)
 
     if not name:
-        raise HTTPException(status_code=400, detail="اسم العميل مطلوب")
+        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ø¹Ù…ÙŠÙ„ Ù…Ø·Ù„ÙˆØ¨")
 
     pool = await get_pool()
 
@@ -336,8 +336,7 @@ async def create_client(data: ClientRequest, user=Depends(get_current_user)):
 
                 if duplicate:
                     raise HTTPException(
-                        status_code=400,
-                        detail="عميل بهذا الاسم موجود مسبقاً"
+                        status_code=400, detail="Ø¹Ù…ÙŠÙ„ Ø¨Ù‡Ø°Ø§ Ø§Ù„Ø§Ø³Ù… Ù…ÙˆØ¬ÙˆØ¯ Ù…Ø³Ø¨Ù‚Ø§Ù‹"
                     )
 
                 row = await conn.fetchrow(
@@ -354,7 +353,7 @@ async def create_client(data: ClientRequest, user=Depends(get_current_user)):
                 )
 
                 await insert_audit(
-                    conn, user, "أضاف عميل", row["id"], f"إضافة عميل: {name}"
+                    conn, user, "Ø£Ø¶Ø§Ù Ø¹Ù…ÙŠÙ„", row["id"], f"Ø¥Ø¶Ø§ÙØ© Ø¹Ù…ÙŠÙ„: {name}"
                 )
 
                 return row_to_dict(row)
@@ -366,14 +365,16 @@ async def create_client(data: ClientRequest, user=Depends(get_current_user)):
 
 
 @router.put("/{client_id}")
-async def update_client(client_id: int, data: ClientRequest, user=Depends(get_current_user)):
+async def update_client(
+    client_id: int, data: ClientRequest, user=Depends(get_current_user)
+):
     require_role(user, "admin", "accountant")
 
     name = clean_text(data.name)
     phone = clean_text(data.phone)
 
     if not name:
-        raise HTTPException(status_code=400, detail="اسم العميل مطلوب")
+        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ø¹Ù…ÙŠÙ„ Ù…Ø·Ù„ÙˆØ¨")
 
     pool = await get_pool()
 
@@ -386,7 +387,7 @@ async def update_client(client_id: int, data: ClientRequest, user=Depends(get_cu
                 )
 
                 if not existing:
-                    raise HTTPException(status_code=404, detail="العميل غير موجود")
+                    raise HTTPException(status_code=404, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
 
                 row = await conn.fetchrow(
                     """
@@ -408,7 +409,7 @@ async def update_client(client_id: int, data: ClientRequest, user=Depends(get_cu
                 )
 
                 await insert_audit(
-                    conn, user, "تعديل عميل", client_id, f"تعديل بيانات العميل: {name}"
+                    conn, user, "ØªØ¹Ø¯ÙŠÙ„ Ø¹Ù…ÙŠÙ„", client_id, f"ØªØ¹Ø¯ÙŠÙ„ Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¹Ù…ÙŠÙ„: {name}"
                 )
 
                 return row_to_dict(row)
@@ -434,9 +435,9 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
                 )
 
                 if not client:
-                    raise HTTPException(status_code=404, detail="العميل غير موجود")
+                    raise HTTPException(status_code=404, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
 
-                # اجلب فواتير العميل
+                # Ø§Ø¬Ù„Ø¨ ÙÙˆØ§ØªÙŠØ± Ø§Ù„Ø¹Ù…ÙŠÙ„
                 invoices = await conn.fetch(
                     """
                     SELECT id, invoice_number
@@ -449,7 +450,7 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
 
                 invoice_ids = [row["id"] for row in invoices]
 
-                # رجّع مخزون أصناف فواتير العميل قبل حذفها
+                # Ø±Ø¬Ù‘Ø¹ Ù…Ø®Ø²ÙˆÙ† Ø£ØµÙ†Ø§Ù ÙÙˆØ§ØªÙŠØ± Ø§Ù„Ø¹Ù…ÙŠÙ„ Ù‚Ø¨Ù„ Ø­Ø°ÙÙ‡Ø§
                 if invoice_ids:
                     items = await conn.fetch(
                         """
@@ -496,7 +497,7 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
                                 """,
                                 item["product_id"],
                                 quantity,
-                                f"إرجاع مخزون بسبب حذف العميل {client['name']} / فاتورة #{item['invoice_number']}",
+                                f"Ø¥Ø±Ø¬Ø§Ø¹ Ù…Ø®Ø²ÙˆÙ† Ø¨Ø³Ø¨Ø¨ Ø­Ø°Ù Ø§Ù„Ø¹Ù…ÙŠÙ„ {client['name']} / ÙØ§ØªÙˆØ±Ø© #{item['invoice_number']}",
                                 safe_uuid(user.get("id")),
                             )
 
@@ -505,26 +506,26 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
                         invoice_ids,
                     )
 
-                # حذف حركات العميل المالية
+                # Ø­Ø°Ù Ø­Ø±ÙƒØ§Øª Ø§Ù„Ø¹Ù…ÙŠÙ„ Ø§Ù„Ù…Ø§Ù„ÙŠØ©
                 await conn.execute("DELETE FROM payments WHERE client_id=$1", client_id)
                 await conn.execute("DELETE FROM checks WHERE client_id=$1", client_id)
                 await conn.execute("DELETE FROM invoices WHERE client_id=$1", client_id)
 
-                # فك ربط أي مستخدم مربوط بهذا العميل
+                # ÙÙƒ Ø±Ø¨Ø· Ø£ÙŠ Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø±Ø¨ÙˆØ· Ø¨Ù‡Ø°Ø§ Ø§Ù„Ø¹Ù…ÙŠÙ„
                 await conn.execute(
                     "UPDATE users SET client_id=NULL WHERE client_id=$1",
                     client_id,
                 )
 
-                # حذف العميل نفسه
+                # Ø­Ø°Ù Ø§Ù„Ø¹Ù…ÙŠÙ„ Ù†ÙØ³Ù‡
                 await conn.execute("DELETE FROM clients WHERE id=$1", client_id)
 
                 await insert_audit(
                     conn,
                     user,
-                    "حذف عميل",
+                    "Ø­Ø°Ù Ø¹Ù…ÙŠÙ„",
                     client_id,
-                    f"حذف العميل وكل حركاته التجريبية: {client['name']}",
+                    f"Ø­Ø°Ù Ø§Ù„Ø¹Ù…ÙŠÙ„ ÙˆÙƒÙ„ Ø­Ø±ÙƒØ§ØªÙ‡ Ø§Ù„ØªØ¬Ø±ÙŠØ¨ÙŠØ©: {client['name']}",
                 )
 
                 return {"success": True}
@@ -533,3 +534,4 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

@@ -1,4 +1,4 @@
-import os
+﻿import os
 import random
 import string
 from datetime import datetime, timedelta
@@ -37,38 +37,33 @@ class CreateUserRequest(BaseModel):
     client_id: Optional[int] = None
     recipient_name: Optional[str] = None
 
+
 @router.post("/login")
 async def login(data: LoginRequest):
     pool = await get_pool()
 
     if not data.username or not data.password:
-        raise HTTPException(
-            status_code=400,
-            detail="اسم المستخدم وكلمة المرور مطلوبان"
-        )
+        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙˆÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ù…Ø·Ù„ÙˆØ¨Ø§Ù†")
 
-    user = await pool.fetchrow(
-        "SELECT * FROM users WHERE username = $1",
-        data.username
-    )
+    user = await pool.fetchrow("SELECT * FROM users WHERE username = $1", data.username)
 
     if not user:
-        raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+        raise HTTPException(status_code=401, detail="Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¯Ø®ÙˆÙ„ ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
 
     valid = pwd_context.verify(data.password, user["password_hash"])
 
     if not valid:
-        raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
+        raise HTTPException(status_code=401, detail="Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¯Ø®ÙˆÙ„ ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
 
     payload = {
-    "id": user["id"],
-    "username": user["username"],
-    "role": user["role"],
-    "full_name": user["full_name"],
-    "client_id": user["client_id"],
-    "recipient_name": user["recipient_name"],
-    "exp": datetime.utcnow() + timedelta(days=7)
-}
+        "id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "full_name": user["full_name"],
+        "client_id": user["client_id"],
+        "recipient_name": user["recipient_name"],
+        "exp": datetime.utcnow() + timedelta(days=7),
+    }
 
     token = jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
 
@@ -76,11 +71,11 @@ async def login(data: LoginRequest):
         await pool.execute(
             """
             INSERT INTO audit_log (user_id, user_name, action, detail)
-            VALUES ($1, $2, 'تسجيل دخول', $3)
+            VALUES ($1, $2, 'ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„', $3)
             """,
             user["id"],
             user["full_name"],
-            f"دخول من قِبل {user['full_name']}"
+            f"Ø¯Ø®ÙˆÙ„ Ù…Ù† Ù‚ÙØ¨Ù„ {user['full_name']}",
         )
     except Exception:
         pass
@@ -93,8 +88,8 @@ async def login(data: LoginRequest):
             "full_name": user["full_name"],
             "recipient_name": user["recipient_name"],
             "role": user["role"],
-            "client_id": user["client_id"]
-        }
+            "client_id": user["client_id"],
+        },
     }
 
 
@@ -104,13 +99,11 @@ async def get_users(user=Depends(get_current_user)):
 
     pool = await get_pool()
 
-    rows = await pool.fetch(
-        """
+    rows = await pool.fetch("""
         SELECT id, username, full_name, role, client_id, recipient_name, created_at
         FROM users
         ORDER BY created_at DESC
-        """
-    )
+        """)
 
     return [dict(row) for row in rows]
 
@@ -122,23 +115,26 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
     valid_roles = ["admin", "accountant", "employee", "client", "recipient"]
 
     if data.role not in valid_roles:
-        raise HTTPException(status_code=400, detail="الصلاحية المحددة غير صالحة")
+        raise HTTPException(status_code=400, detail="Ø§Ù„ØµÙ„Ø§Ø­ÙŠØ© Ø§Ù„Ù…Ø­Ø¯Ø¯Ø© ØºÙŠØ± ØµØ§Ù„Ø­Ø©")
 
     if data.role == "client" and not data.client_id:
-        raise HTTPException(status_code=400, detail="حساب العميل يحتاج ربطه بعميل رئيسي")
+        raise HTTPException(
+            status_code=400, detail="Ø­Ø³Ø§Ø¨ Ø§Ù„Ø¹Ù…ÙŠÙ„ ÙŠØ­ØªØ§Ø¬ Ø±Ø¨Ø·Ù‡ Ø¨Ø¹Ù…ÙŠÙ„ Ø±Ø¦ÙŠØ³ÙŠ"
+        )
 
     if data.role == "recipient" and not data.recipient_name:
-        raise HTTPException(status_code=400, detail="حساب الزبون يحتاج اسم الزبون كما يظهر في الفواتير")
+        raise HTTPException(
+            status_code=400, detail="Ø­Ø³Ø§Ø¨ Ø§Ù„Ø²Ø¨ÙˆÙ† ÙŠØ­ØªØ§Ø¬ Ø§Ø³Ù… Ø§Ù„Ø²Ø¨ÙˆÙ† ÙƒÙ…Ø§ ÙŠØ¸Ù‡Ø± ÙÙŠ Ø§Ù„ÙÙˆØ§ØªÙŠØ±"
+        )
 
     pool = await get_pool()
 
     existing = await pool.fetchrow(
-        "SELECT id FROM users WHERE username = $1",
-        data.username
+        "SELECT id FROM users WHERE username = $1", data.username
     )
 
     if existing:
-        raise HTTPException(status_code=409, detail="اسم المستخدم محجوز بالفعل")
+        raise HTTPException(status_code=409, detail="Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø­Ø¬ÙˆØ² Ø¨Ø§Ù„ÙØ¹Ù„")
 
     hashed_password = pwd_context.hash(data.password)
 
@@ -160,11 +156,11 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
         await pool.execute(
             """
             INSERT INTO audit_log (user_id, user_name, action, detail)
-            VALUES ($1, $2, 'إنشاء مستخدم', $3)
+            VALUES ($1, $2, 'Ø¥Ù†Ø´Ø§Ø¡ Ù…Ø³ØªØ®Ø¯Ù…', $3)
             """,
             user["id"],
             user["full_name"],
-            f"إنشاء مستخدم جديد: {data.username} ({data.role})"
+            f"Ø¥Ù†Ø´Ø§Ø¡ Ù…Ø³ØªØ®Ø¯Ù… Ø¬Ø¯ÙŠØ¯: {data.username} ({data.role})",
         )
     except Exception:
         pass
@@ -177,27 +173,26 @@ async def delete_user(user_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
 
     if int(user_id) == int(user["id"]):
-        raise HTTPException(status_code=400, detail="لا يمكنك حذف حسابك الخاص")
+        raise HTTPException(status_code=400, detail="Ù„Ø§ ÙŠÙ…ÙƒÙ†Ùƒ Ø­Ø°Ù Ø­Ø³Ø§Ø¨Ùƒ Ø§Ù„Ø®Ø§Øµ")
 
     pool = await get_pool()
 
     deleted = await pool.fetchrow(
-        "DELETE FROM users WHERE id = $1 RETURNING username",
-        user_id
+        "DELETE FROM users WHERE id = $1 RETURNING username", user_id
     )
 
     if not deleted:
-        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+        raise HTTPException(status_code=404, detail="Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
 
     try:
         await pool.execute(
             """
             INSERT INTO audit_log (user_id, user_name, action, detail)
-            VALUES ($1, $2, 'حذف مستخدم', $3)
+            VALUES ($1, $2, 'Ø­Ø°Ù Ù…Ø³ØªØ®Ø¯Ù…', $3)
             """,
             user["id"],
             user["full_name"],
-            f"حذف مستخدم: {deleted['username']}"
+            f"Ø­Ø°Ù Ù…Ø³ØªØ®Ø¯Ù…: {deleted['username']}",
         )
     except Exception:
         pass
@@ -212,9 +207,8 @@ async def telegram_code(user=Depends(get_current_user)):
     code = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
 
     await pool.execute(
-        "UPDATE users SET telegram_link_code = $1 WHERE id = $2",
-        code,
-        user["id"]
+        "UPDATE users SET telegram_link_code = $1 WHERE id = $2", code, user["id"]
     )
 
     return {"code": code}
+

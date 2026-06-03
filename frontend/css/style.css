@@ -323,7 +323,32 @@ body {
   align-items: center;
   gap: 8px;
 }
+.product-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
 
+.product-main-name {
+  font-weight: 700;
+  color: #111827;
+}
+
+.product-mini-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 11px;
+  color: #374151;
+}
+
+.product-mini-details span {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 3px 7px;
+  white-space: nowrap;
+}
 /* ── METRICS ──────────────────────────────────────────── */
 .metrics-grid {
   display: grid;

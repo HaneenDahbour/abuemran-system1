@@ -1,4 +1,4 @@
-import os
+﻿import os
 from decimal import Decimal
 from datetime import date, datetime
 from typing import List, Optional
@@ -10,13 +10,13 @@ from pydantic import BaseModel
 
 from config.db import get_pool
 from middleware.auth import get_current_user
-from middleware.roles import require_role
 
 load_dotenv()
 
 router = APIRouter()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = "llama-3.3-70b-versatile"
+
 
 def to_json_value(value):
     if isinstance(value, Decimal):
@@ -41,14 +41,13 @@ class ChatRequest(BaseModel):
 
 
 async def get_system_context(user: dict, pool) -> dict:
-    """Build financial context based on user role — mirrors Node ai.js exactly."""
+    """Build financial context based on user role â€” mirrors Node ai.js exactly."""
     role = user.get("role")
     context = {}
 
     try:
         if role != "client":
-            stats = await pool.fetchrow(
-                """
+            stats = await pool.fetchrow("""
                 SELECT
                     COALESCE(SUM(i.total_amount), 0) AS total_sales,
                     COALESCE(SUM(i.total_amount), 0)
@@ -60,12 +59,10 @@ async def get_system_context(user: dict, pool) -> dict:
                     (SELECT COUNT(*) FROM checks WHERE status='pending') AS pending_checks,
                     (SELECT COUNT(*) FROM payments WHERE status='pending') AS pending_payments
                 FROM invoices i
-                """
-            )
+                """)
             context["stats"] = row_to_dict(stats)
 
-            upcoming_checks = await pool.fetch(
-                """
+            upcoming_checks = await pool.fetch("""
                 SELECT c.check_number, cl.name AS client_name, c.amount, c.due_date, c.status
                 FROM checks c
                 JOIN clients cl ON c.client_id = cl.id
@@ -73,12 +70,10 @@ async def get_system_context(user: dict, pool) -> dict:
                   AND c.due_date <= NOW() + INTERVAL '14 days'
                 ORDER BY c.due_date ASC
                 LIMIT 10
-                """
-            )
+                """)
             context["upcomingChecks"] = [row_to_dict(r) for r in upcoming_checks]
 
-            top_debts = await pool.fetch(
-                """
+            top_debts = await pool.fetch("""
                 SELECT cl.name, cl.risk_level,
                     COALESCE(SUM(i.total_amount), 0)
                         - COALESCE((SELECT SUM(amount) FROM payments p WHERE p.client_id=cl.id AND p.status='approved'), 0)
@@ -90,24 +85,20 @@ async def get_system_context(user: dict, pool) -> dict:
                     - COALESCE((SELECT SUM(amount) FROM payments p WHERE p.client_id=cl.id AND p.status='approved'), 0) > 0
                 ORDER BY balance DESC
                 LIMIT 8
-                """
-            )
+                """)
             context["topDebts"] = [row_to_dict(r) for r in top_debts]
 
         if role in ("admin", "accountant"):
-            recent_invoices = await pool.fetch(
-                """
+            recent_invoices = await pool.fetch("""
                 SELECT inv.invoice_number, cl.name AS client_name, inv.total_amount, inv.date
                 FROM invoices inv
                 JOIN clients cl ON inv.client_id = cl.id
                 ORDER BY inv.created_at DESC
                 LIMIT 5
-                """
-            )
+                """)
             context["recentInvoices"] = [row_to_dict(r) for r in recent_invoices]
 
-            pending_payments = await pool.fetch(
-                """
+            pending_payments = await pool.fetch("""
                 SELECT p.amount, p.payment_date, cl.name AS client_name, u.full_name AS employee_name
                 FROM payments p
                 JOIN clients cl ON p.client_id = cl.id
@@ -115,19 +106,16 @@ async def get_system_context(user: dict, pool) -> dict:
                 WHERE p.status = 'pending'
                 ORDER BY p.created_at DESC
                 LIMIT 5
-                """
-            )
+                """)
             context["pendingPayments"] = [row_to_dict(r) for r in pending_payments]
 
         if role == "admin":
-            audit = await pool.fetch(
-                """
+            audit = await pool.fetch("""
                 SELECT user_name, action, detail, created_at
                 FROM audit_log
                 ORDER BY created_at DESC
                 LIMIT 10
-                """
-            )
+                """)
             context["recentAudit"] = [row_to_dict(r) for r in audit]
 
         if role == "client":
@@ -142,11 +130,13 @@ async def get_system_context(user: dict, pool) -> dict:
                 WHERE cl.id = $1
                 GROUP BY cl.id
                 """,
-                user.get("client_id")
+                user.get("client_id"),
             )
             if client_data:
                 r = row_to_dict(client_data)
-                context["myBalance"] = float(r.get("total_invoiced", 0)) - float(r.get("total_paid", 0))
+                context["myBalance"] = float(r.get("total_invoiced", 0)) - float(
+                    r.get("total_paid", 0)
+                )
                 context["myName"] = r.get("name")
                 context["creditLimit"] = r.get("credit_limit")
 
@@ -158,12 +148,12 @@ async def get_system_context(user: dict, pool) -> dict:
                 ORDER BY due_date ASC
                 LIMIT 5
                 """,
-                user.get("client_id")
+                user.get("client_id"),
             )
             context["myChecks"] = [row_to_dict(r) for r in my_checks]
 
     except Exception as err:
-        context["error"] = f"بعض البيانات غير متاحة: {str(err)}"
+        context["error"] = f"Ø¨Ø¹Ø¶ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª ØºÙŠØ± Ù…ØªØ§Ø­Ø©: {str(err)}"
 
     return context
 
@@ -173,41 +163,39 @@ def build_system_prompt(user: dict, context: dict) -> str:
     full_name = user.get("full_name", "")
 
     role_instructions = {
-        "admin": f"""أنت مساعد مالي ذكي لنظام أبو عمران التجاري. تتحدث مع المدير العام {full_name}.
-لديك صلاحية الوصول الكامل لجميع بيانات النظام: العملاء، الفواتير، المقبوضات، الشيكات، المستخدمين، وسجل العمليات.
-يمكنك تحليل الديون، تقييم المخاطر، إعطاء توصيات استراتيجية، وتلخيص الوضع المالي الكامل.""",
-
-        "accountant": f"""أنت مساعد مالي ذكي لنظام أبو عمران التجاري. تتحدث مع المحاسب {full_name}.
-لديك صلاحية الوصول لبيانات العملاء، الفواتير، المقبوضات، والشيكات.
-ساعد في التحليل المالي، تتبع الديون، ومتابعة الشيكات المستحقة.""",
-
-        "employee": f"""أنت مساعد ذكي لنظام أبو عمران التجاري. تتحدث مع الموظف {full_name}.
-يمكنك مساعدته في متابعة المقبوضات التي سجّلها والشيكات المعلّقة.
-لا تكشف بيانات مالية تفصيلية لعملاء آخرين.""",
-
-        "client": f"""أنت مساعد خدمة عملاء لنظام أبو عمران التجاري. تتحدث مع العميل {context.get('myName', full_name)}.
-أجب فقط عن رصيده وفواتيره وشيكاته الخاصة. لا تذكر أي بيانات لعملاء آخرين مطلقاً.""",
+        "admin": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ù…Ø§Ù„ÙŠ Ø°ÙƒÙŠ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ù…Ø¯ÙŠØ± Ø§Ù„Ø¹Ø§Ù… {full_name}.
+Ù„Ø¯ÙŠÙƒ ØµÙ„Ø§Ø­ÙŠØ© Ø§Ù„ÙˆØµÙˆÙ„ Ø§Ù„ÙƒØ§Ù…Ù„ Ù„Ø¬Ù…ÙŠØ¹ Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù†Ø¸Ø§Ù…: Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡ØŒ Ø§Ù„ÙÙˆØ§ØªÙŠØ±ØŒ Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø§ØªØŒ Ø§Ù„Ø´ÙŠÙƒØ§ØªØŒ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù…ÙŠÙ†ØŒ ÙˆØ³Ø¬Ù„ Ø§Ù„Ø¹Ù…Ù„ÙŠØ§Øª.
+ÙŠÙ…ÙƒÙ†Ùƒ ØªØ­Ù„ÙŠÙ„ Ø§Ù„Ø¯ÙŠÙˆÙ†ØŒ ØªÙ‚ÙŠÙŠÙ… Ø§Ù„Ù…Ø®Ø§Ø·Ø±ØŒ Ø¥Ø¹Ø·Ø§Ø¡ ØªÙˆØµÙŠØ§Øª Ø§Ø³ØªØ±Ø§ØªÙŠØ¬ÙŠØ©ØŒ ÙˆØªÙ„Ø®ÙŠØµ Ø§Ù„ÙˆØ¶Ø¹ Ø§Ù„Ù…Ø§Ù„ÙŠ Ø§Ù„ÙƒØ§Ù…Ù„.""",
+        "accountant": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ù…Ø§Ù„ÙŠ Ø°ÙƒÙŠ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ù…Ø­Ø§Ø³Ø¨ {full_name}.
+Ù„Ø¯ÙŠÙƒ ØµÙ„Ø§Ø­ÙŠØ© Ø§Ù„ÙˆØµÙˆÙ„ Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡ØŒ Ø§Ù„ÙÙˆØ§ØªÙŠØ±ØŒ Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø§ØªØŒ ÙˆØ§Ù„Ø´ÙŠÙƒØ§Øª.
+Ø³Ø§Ø¹Ø¯ ÙÙŠ Ø§Ù„ØªØ­Ù„ÙŠÙ„ Ø§Ù„Ù…Ø§Ù„ÙŠØŒ ØªØªØ¨Ø¹ Ø§Ù„Ø¯ÙŠÙˆÙ†ØŒ ÙˆÙ…ØªØ§Ø¨Ø¹Ø© Ø§Ù„Ø´ÙŠÙƒØ§Øª Ø§Ù„Ù…Ø³ØªØ­Ù‚Ø©.""",
+        "employee": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ø°ÙƒÙŠ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ù…ÙˆØ¸Ù {full_name}.
+ÙŠÙ…ÙƒÙ†Ùƒ Ù…Ø³Ø§Ø¹Ø¯ØªÙ‡ ÙÙŠ Ù…ØªØ§Ø¨Ø¹Ø© Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø§Øª Ø§Ù„ØªÙŠ Ø³Ø¬Ù‘Ù„Ù‡Ø§ ÙˆØ§Ù„Ø´ÙŠÙƒØ§Øª Ø§Ù„Ù…Ø¹Ù„Ù‘Ù‚Ø©.
+Ù„Ø§ ØªÙƒØ´Ù Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø§Ù„ÙŠØ© ØªÙØµÙŠÙ„ÙŠØ© Ù„Ø¹Ù…Ù„Ø§Ø¡ Ø¢Ø®Ø±ÙŠÙ†.""",
+        "client": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ø®Ø¯Ù…Ø© Ø¹Ù…Ù„Ø§Ø¡ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ø¹Ù…ÙŠÙ„ {context.get('myName', full_name)}.
+Ø£Ø¬Ø¨ ÙÙ‚Ø· Ø¹Ù† Ø±ØµÙŠØ¯Ù‡ ÙˆÙÙˆØ§ØªÙŠØ±Ù‡ ÙˆØ´ÙŠÙƒØ§ØªÙ‡ Ø§Ù„Ø®Ø§ØµØ©. Ù„Ø§ ØªØ°ÙƒØ± Ø£ÙŠ Ø¨ÙŠØ§Ù†Ø§Øª Ù„Ø¹Ù…Ù„Ø§Ø¡ Ø¢Ø®Ø±ÙŠÙ† Ù…Ø·Ù„Ù‚Ø§Ù‹.""",
     }
 
     import json
+
     context_str = json.dumps(context, ensure_ascii=False, default=str, indent=2)
 
     return f"""{role_instructions.get(role, role_instructions['employee'])}
 
-بيانات النظام الحالية:
+Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù†Ø¸Ø§Ù… Ø§Ù„Ø­Ø§Ù„ÙŠØ©:
 {context_str}
 
-قواعد المساعد:
-- أجب دائماً بالعربية بأسلوب مهني ومختصر
-- استخدم الأرقام الفعلية من البيانات أعلاه عند الإجابة
-- إذا طُلب تقرير أو تحليل، قدّمه بشكل منظّم مع النقاط الرئيسية
-- لا تخترع أرقاماً غير موجودة في البيانات
-- إذا سُئلت عن شيء خارج صلاحياتك، أخبر المستخدم بذلك بأدب"""
+Ù‚ÙˆØ§Ø¹Ø¯ Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯:
+- Ø£Ø¬Ø¨ Ø¯Ø§Ø¦Ù…Ø§Ù‹ Ø¨Ø§Ù„Ø¹Ø±Ø¨ÙŠØ© Ø¨Ø£Ø³Ù„ÙˆØ¨ Ù…Ù‡Ù†ÙŠ ÙˆÙ…Ø®ØªØµØ±
+- Ø§Ø³ØªØ®Ø¯Ù… Ø§Ù„Ø£Ø±Ù‚Ø§Ù… Ø§Ù„ÙØ¹Ù„ÙŠØ© Ù…Ù† Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø£Ø¹Ù„Ø§Ù‡ Ø¹Ù†Ø¯ Ø§Ù„Ø¥Ø¬Ø§Ø¨Ø©
+- Ø¥Ø°Ø§ Ø·ÙÙ„Ø¨ ØªÙ‚Ø±ÙŠØ± Ø£Ùˆ ØªØ­Ù„ÙŠÙ„ØŒ Ù‚Ø¯Ù‘Ù…Ù‡ Ø¨Ø´ÙƒÙ„ Ù…Ù†Ø¸Ù‘Ù… Ù…Ø¹ Ø§Ù„Ù†Ù‚Ø§Ø· Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠØ©
+- Ù„Ø§ ØªØ®ØªØ±Ø¹ Ø£Ø±Ù‚Ø§Ù…Ø§Ù‹ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© ÙÙŠ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
+- Ø¥Ø°Ø§ Ø³ÙØ¦Ù„Øª Ø¹Ù† Ø´ÙŠØ¡ Ø®Ø§Ø±Ø¬ ØµÙ„Ø§Ø­ÙŠØ§ØªÙƒØŒ Ø£Ø®Ø¨Ø± Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø¨Ø°Ù„Ùƒ Ø¨Ø£Ø¯Ø¨"""
 
 
 async def call_groq(system_prompt: str, messages: list) -> str:
     if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY مفقود من .env")
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY Ù…ÙÙ‚ÙˆØ¯ Ù…Ù† .env")
 
     groq_messages = [{"role": "system", "content": system_prompt}]
 
@@ -232,29 +220,27 @@ async def call_groq(system_prompt: str, messages: list) -> str:
                     "messages": groq_messages,
                     "temperature": 0.2,
                     "max_tokens": 700,
-                }
+                },
             )
 
         if response.status_code != 200:
             raise HTTPException(
                 status_code=500,
-                detail=f"Groq error {response.status_code}: {response.text[:300]}"
+                detail=f"Groq error {response.status_code}: {response.text[:300]}",
             )
 
         data = response.json()
         return data["choices"][0]["message"]["content"]
 
     except httpx.ConnectError:
-        raise HTTPException(status_code=500, detail="تعذّر الاتصال بـ Groq API")
-
-    
+        raise HTTPException(status_code=500, detail="ØªØ¹Ø°Ù‘Ø± Ø§Ù„Ø§ØªØµØ§Ù„ Ø¨Ù€ Groq API")
 
 
 # POST /api/ai/chat
 @router.post("/chat")
 async def ai_chat(data: ChatRequest, user=Depends(get_current_user)):
     if not data.message:
-        raise HTTPException(status_code=400, detail="الرسالة مطلوبة")
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ø±Ø³Ø§Ù„Ø© Ù…Ø·Ù„ÙˆØ¨Ø©")
 
     pool = await get_pool()
 
@@ -263,8 +249,11 @@ async def ai_chat(data: ChatRequest, user=Depends(get_current_user)):
         system_prompt = build_system_prompt(user, context)
 
         messages = [
-            *[{"role": msg.role, "content": msg.content} for msg in (data.history or [])[-10:]],
-            {"role": "user", "content": data.message}
+            *[
+                {"role": msg.role, "content": msg.content}
+                for msg in (data.history or [])[-10:]
+            ],
+            {"role": "user", "content": data.message},
         ]
 
         reply = await call_groq(system_prompt, messages)
@@ -274,17 +263,14 @@ async def ai_chat(data: ChatRequest, user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"خطأ في المساعد الذكي: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯ Ø§Ù„Ø°ÙƒÙŠ: {str(e)}")
 
 
 # POST /api/ai/analyze
 @router.post("/analyze")
 async def ai_analyze(user=Depends(get_current_user)):
     if user.get("role") not in ("admin", "accountant"):
-        raise HTTPException(status_code=403, detail="غير مصرح")
+        raise HTTPException(status_code=403, detail="ØºÙŠØ± Ù…ØµØ±Ø­")
 
     pool = await get_pool()
 
@@ -292,10 +278,12 @@ async def ai_analyze(user=Depends(get_current_user)):
         context = await get_system_context(user, pool)
         system_prompt = build_system_prompt(user, context)
 
-        messages = [{
-            "role": "user",
-            "content": "أعطني ملخصاً سريعاً في 3-4 نقاط عن الوضع المالي الحالي مع أهم التنبيهات التي تستوجب الانتباه الفوري."
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": "Ø£Ø¹Ø·Ù†ÙŠ Ù…Ù„Ø®ØµØ§Ù‹ Ø³Ø±ÙŠØ¹Ø§Ù‹ ÙÙŠ 3-4 Ù†Ù‚Ø§Ø· Ø¹Ù† Ø§Ù„ÙˆØ¶Ø¹ Ø§Ù„Ù…Ø§Ù„ÙŠ Ø§Ù„Ø­Ø§Ù„ÙŠ Ù…Ø¹ Ø£Ù‡Ù… Ø§Ù„ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ø§Ù„ØªÙŠ ØªØ³ØªÙˆØ¬Ø¨ Ø§Ù„Ø§Ù†ØªØ¨Ø§Ù‡ Ø§Ù„ÙÙˆØ±ÙŠ.",
+            }
+        ]
 
         analysis = await call_groq(system_prompt, messages)
 
@@ -304,17 +292,16 @@ async def ai_analyze(user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ في التحليل: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„ØªØ­Ù„ÙŠÙ„: {str(e)}")
 
 
 # GET /api/ai/analytics
 @router.get("/analytics")
 async def ai_analytics(
-    period: str = Query(default="weekly"),
-    user=Depends(get_current_user)
+    period: str = Query(default="weekly"), user=Depends(get_current_user)
 ):
     if user.get("role") not in ("admin", "accountant"):
-        raise HTTPException(status_code=403, detail="غير مصرح")
+        raise HTTPException(status_code=403, detail="ØºÙŠØ± Ù…ØµØ±Ø­")
 
     intervals = {"daily": "30 days", "weekly": "12 weeks", "monthly": "12 months"}
     trunc_map = {"daily": "day", "weekly": "week", "monthly": "month"}
@@ -325,9 +312,8 @@ async def ai_analytics(
     pool = await get_pool()
 
     try:
-        # Use string interpolation safely — trunc_unit is from a whitelist
-        sales_rows = await pool.fetch(
-            f"""
+        # Use string interpolation safely â€” trunc_unit is from a whitelist
+        sales_rows = await pool.fetch(f"""
             SELECT
                 DATE_TRUNC('{trunc_unit}', date) AS period,
                 COALESCE(SUM(total_amount), 0) AS total_sales,
@@ -336,11 +322,9 @@ async def ai_analytics(
             WHERE date >= NOW() - INTERVAL '{interval}'
             GROUP BY 1
             ORDER BY 1 ASC
-            """
-        )
+            """)
 
-        payments_rows = await pool.fetch(
-            f"""
+        payments_rows = await pool.fetch(f"""
             SELECT
                 DATE_TRUNC('{trunc_unit}', payment_date) AS period,
                 COALESCE(SUM(amount), 0) AS total_collected
@@ -349,11 +333,9 @@ async def ai_analytics(
               AND payment_date >= NOW() - INTERVAL '{interval}'
             GROUP BY 1
             ORDER BY 1 ASC
-            """
-        )
+            """)
 
-        checks_rows = await pool.fetch(
-            f"""
+        checks_rows = await pool.fetch(f"""
             SELECT
                 DATE_TRUNC('{trunc_unit}', due_date) AS period,
                 COUNT(*) FILTER (WHERE status='cashed') AS cashed,
@@ -363,8 +345,7 @@ async def ai_analytics(
             WHERE due_date >= NOW() - INTERVAL '{interval}'
             GROUP BY 1
             ORDER BY 1 ASC
-            """
-        )
+            """)
 
         return {
             "period": period,
@@ -374,4 +355,5 @@ async def ai_analytics(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"خطأ في الإحصائيات: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª: {str(e)}")
+
