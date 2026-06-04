@@ -68,9 +68,11 @@ async def get_categories(user=Depends(get_current_user)):
                 FROM products p
                 LEFT JOIN (
                     SELECT
-                        product_id,
-                        COALESCE(line_total, quantity * unit_price, 0) AS total
-                    FROM invoice_items
+    ii.product_id,
+    COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0) AS total
+FROM invoice_items ii
+JOIN invoices i ON i.id = ii.invoice_id
+WHERE COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
 
                     UNION ALL
 
