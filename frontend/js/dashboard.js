@@ -2511,8 +2511,18 @@ async function saveInvoice() {
 
     const tbody = document.getElementById('inv-tbody');
     if (tbody && result) {
+      if (!window._invoicesCache) window._invoicesCache = [];
+
+      if (invoiceId) {
+        const idx = window._invoicesCache.findIndex(x => String(x.id) === String(invoiceId));
+        if (idx !== -1) window._invoicesCache[idx] = result;
+      } else {
+        window._invoicesCache.unshift(result);
+      }
+
       result.client_name = result.client_name ||
         (window._clientsCache || []).find(c => c.id === result.client_id)?.name || '—';
+
       if (invoiceId) {
         const existing = document.querySelector(`#inv-tbody tr[data-invoice-id="${invoiceId}"]`);
         if (existing) existing.outerHTML = renderInvoiceRow(result);
