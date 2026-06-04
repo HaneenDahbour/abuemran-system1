@@ -456,6 +456,8 @@ async function navigateTo(section) {
   const renderers = {
     dashboard: renderDashboard,
     cashbox: renderCashbox,
+    employees: renderEmployees,
+    expenses: renderExpenses,
     clients: renderClients,
     invoices: renderInvoices,
     recipients: renderRecipients,
@@ -553,7 +555,8 @@ function renderSidebar() {
   if (isAccountant()) {
     html += '<div class="nav-section-title">إدارة الأعمال</div>';
     html += navItem('cashbox', '💼', 'صندوق خالد');
-    html += navItem('clients', '👥', 'العملاء');
+    html += navItem('employees', '👷', 'الموظفون');
+    html += navItem('expenses', '📋', 'المصاريف والرواتب');
     html += navItem('invoices', '🧾', 'الفواتير');
     html += navItem('recipients', '🧑‍🤝‍🧑', 'زبائن الفواتير');
     html += navItem('payments', '💰', 'المقبوضات');
@@ -1319,8 +1322,7 @@ async function renderInvoices(container) {
         <table>
           <thead>
             <tr>
-              <th>رقم الفاتورة</th><th>العميل الرئيسي</th><th>الزبون</th>
-              <th>الإجمالي</th><th>المدفوع</th><th>الباقي</th>
+              <th>رقم الفاتورة</th><th>كتبها الموظف</th><th>الزبون / مطلوب من السادة</th>              <th>الإجمالي</th><th>المدفوع</th><th>الباقي</th>
               <th>الحالة</th><th>التاريخ</th><th>الإجراءات</th>
             </tr>
           </thead>
@@ -1385,8 +1387,7 @@ function _invoiceActionButtons(inv) {
     html += `<button class="btn btn-ghost btn-sm" onclick="printInvoiceFromEncoded(${jsString(encoded)})">🖨️ طباعة</button>`;
     if (isAccountant()) {
       html += `
-        <button class="btn btn-success btn-sm" onclick="openPaymentModal(${inv.client_id}, ${inv.id})">💰 قبض</button>
-        <button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
+<button class="btn btn-success btn-sm" onclick="openRecipientPayment(${jsString(getInvoiceRecipient(inv) || inv.recipient_name || '')}, null)">💰 قبض</button>        <button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
       `;
     }
     if (isAdmin()) {
@@ -1450,8 +1451,7 @@ function openInvoiceModal(invoice = null) {
 
     <div class="form-group">
       <label class="form-label">المطلوب من السادة</label>
-      <input class="form-input" id="inv_recipient" value="${escHtml(recipient)}" placeholder="اسم العميل أو الجهة المستلمة — اختياري">
-    </div>
+    <input class="form-input" id="inv_recipient" value="${escHtml(recipient)}" placeholder="اسم الزبون الذي عليه الدفع" required>    </div>
 
     <div class="form-row">
       <div class="form-group">
@@ -2333,13 +2333,7 @@ async function saveInvoice() {
   const btn = document.getElementById('save-invoice-btn');
   const invoiceId = window._editingInvoiceId || null;
 
-  const clientRaw = document.getElementById('inv_client')?.value;
-  const client_id = Number(clientRaw);
-
-  if (!Number.isInteger(client_id) || client_id <= 0) {
-    toast('الرجاء اختيار عميل', 'error');
-    return;
-  }
+  const client_id = null;
 
   const hasItems = document.getElementById('inv_has_items')?.checked;
   const invNum = document.getElementById('inv_num')?.value.trim() || `INV-${Date.now()}`;
@@ -2425,6 +2419,10 @@ async function saveInvoice() {
   }
 
   const recipientName = document.getElementById('inv_recipient')?.value?.trim() || '';
+  if (!recipientName) {
+    toast('اسم الزبون / مطلوب من السادة مطلوب', 'error');
+    return;
+  }
   const normalNotes = document.getElementById('inv_notes')?.value?.trim() || '';
 
   const payload = {
@@ -2682,12 +2680,9 @@ function openPaymentModal(clientId = null, invoiceId = null) {
     `}
 
     <div class="form-group">
-      <label class="form-label">العميل *</label>
-      <select class="form-select" id="pay_client">
-        <option value="">اختر عميلاً</option>
-        ${clientOpts}
-      </select>
-    </div>
+  <label class="form-label">كتبها الموظف</label>
+  <input class="form-input" value="${escHtml((getUser() || {}).full_name || '—')}" disabled>
+</div>
 
     <div class="form-row">
       <div class="form-group">
@@ -6279,4 +6274,293 @@ async function saveNewSupplier() {
     closeModal();
     navigateTo('purchases');
   } catch (e) { toast(e.message, 'error'); }
+}
+async function renderExpenses(container) {
+  let expenses = [];
+  let salaries = [];
+
+  try {
+    [expenses, salaries] = await Promise.all([
+      API.getExpenses(),
+      API.getSalaries()
+    ]);
+  } catch (e) {
+    expenses = [];
+    salaries = [];
+  }
+
+  const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">📋 المصاريف والرواتب</div>
+        <div class="page-sub">مصاريف يومية / شهرية / ثابتة + رواتب الموظفين</div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary" onclick="openExpensePageModal()">+ مصروف</button>
+        <button class="btn btn-ghost" onclick="openSalaryModal()">+ راتب موظف</button>
+      </div>
+    </div>
+
+    <div class="metrics-grid" style="margin-bottom:18px">
+      <div class="metric-card red">
+        <div class="metric-icon">📋</div>
+        <div class="metric-label">إجمالي المصاريف</div>
+        <div class="metric-value">${fmt(totalExpenses)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card amber">
+        <div class="metric-icon">👷</div>
+        <div class="metric-label">إجمالي الرواتب</div>
+        <div class="metric-value">${fmt(totalSalaries)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:18px">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--brd);font-weight:800">
+        المصاريف
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>اسم المصروف</th>
+              <th>النوع</th>
+              <th>التصنيف</th>
+              <th>المبلغ</th>
+              <th>ملاحظات</th>
+              <th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${expenses.length ? expenses.map(e => `
+              <tr>
+                <td>${fmtDate(e.expense_date)}</td>
+                <td><strong>${escHtml(e.name || e.description || '—')}</strong></td>
+                <td>${escHtml(e.expense_type || 'daily')}</td>
+                <td>${escHtml(e.category || '—')}</td>
+                <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
+                <td>${escHtml(e.notes || '—')}</td>
+                <td>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">🗑️</button>` : '—'}
+                </td>
+              </tr>
+            `).join('') : emptyRow('لا توجد مصاريف', 7)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:14px 18px;border-bottom:1px solid var(--brd);font-weight:800">
+        رواتب الموظفين
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الشهر</th>
+              <th>اسم الموظف</th>
+              <th>الراتب</th>
+              <th>تاريخ الدفع</th>
+              <th>الحالة</th>
+              <th>ملاحظات</th>
+              <th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${salaries.length ? salaries.map(s => `
+              <tr>
+                <td>${fmtDate(s.salary_month)}</td>
+                <td><strong>${escHtml(s.employee_name || '—')}</strong></td>
+                <td style="font-weight:800;color:var(--rd)">${fmt(s.salary_amount)} د.أ</td>
+                <td>${fmtDate(s.paid_date)}</td>
+                <td>${escHtml(s.status || 'paid')}</td>
+                <td>${escHtml(s.notes || '—')}</td>
+                <td>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary(${s.id})">🗑️</button>` : '—'}
+                </td>
+              </tr>
+            `).join('') : emptyRow('لا توجد رواتب مسجلة', 7)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+function openExpensePageModal() {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">📋 إضافة مصروف</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اسم المصروف *</label>
+      <input class="form-input" id="pg_exp_name" placeholder="مثال: كهرباء، أجار، بنزين، توصيل">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="pg_exp_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="pg_exp_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">نوع المصروف</label>
+        <select class="form-select" id="pg_exp_type">
+          <option value="daily">يومي</option>
+          <option value="monthly">شهري</option>
+          <option value="fixed">ثابت</option>
+          <option value="other">آخر</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">التصنيف</label>
+        <input class="form-input" id="pg_exp_category" placeholder="تشغيل، نقل، مكتب...">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pg_exp_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePageExpense()">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function savePageExpense() {
+  const name = document.getElementById('pg_exp_name')?.value?.trim();
+  const amount = parseFloat(document.getElementById('pg_exp_amount')?.value);
+
+  if (!name) { toast('اسم المصروف مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  try {
+    await API.createExpense({
+      name,
+      amount,
+      expense_type: document.getElementById('pg_exp_type')?.value || 'daily',
+      category: document.getElementById('pg_exp_category')?.value || null,
+      expense_date: document.getElementById('pg_exp_date')?.value,
+      notes: document.getElementById('pg_exp_notes')?.value || null,
+      is_fixed: document.getElementById('pg_exp_type')?.value === 'fixed',
+    });
+
+    toast('تم حفظ المصروف ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function openSalaryModal() {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">👷 إضافة راتب موظف</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اسم الموظف *</label>
+      <input class="form-input" id="sal_employee_name" placeholder="اسم الموظف">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">قيمة الراتب *</label>
+        <input class="form-input" id="sal_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">شهر الراتب</label>
+        <input class="form-input" id="sal_month" type="date" value="${new Date().toISOString().slice(0, 8)}01">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">تاريخ الدفع</label>
+        <input class="form-input" id="sal_paid_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">الحالة</label>
+        <select class="form-select" id="sal_status">
+          <option value="paid">مدفوع</option>
+          <option value="pending">غير مدفوع</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="sal_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveSalary()">حفظ الراتب</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveSalary() {
+  const employeeName = document.getElementById('sal_employee_name')?.value?.trim();
+  const amount = parseFloat(document.getElementById('sal_amount')?.value);
+
+  if (!employeeName) { toast('اسم الموظف مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('قيمة الراتب غير صحيحة', 'error'); return; }
+
+  try {
+    await API.createSalary({
+      employee_name: employeeName,
+      salary_amount: amount,
+      salary_month: document.getElementById('sal_month')?.value,
+      paid_date: document.getElementById('sal_paid_date')?.value,
+      status: document.getElementById('sal_status')?.value || 'paid',
+      notes: document.getElementById('sal_notes')?.value || null,
+    });
+
+    toast('تم حفظ الراتب ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function deleteExpense(id) {
+  if (!confirm('حذف هذا المصروف؟')) return;
+  try {
+    await API.deleteExpense(id);
+    toast('تم حذف المصروف ✅', 'success');
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function deleteSalary(id) {
+  if (!confirm('حذف هذا الراتب؟')) return;
+  try {
+    await API.deleteSalary(id);
+    toast('تم حذف الراتب ✅', 'success');
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }

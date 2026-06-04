@@ -145,6 +145,18 @@
         method: 'POST',
         body: JSON.stringify({ reason }),
       }),
+    // ── Expenses / Salaries ─────────────────────────────────────
+    getExpenses: () => apiFetch('/expenses'),
+    createExpense: data =>
+      apiFetch('/expenses', { method: 'POST', body: JSON.stringify(data) }),
+    deleteExpense: id =>
+      apiFetch(`/expenses/${requireId(id, 'معرّف المصروف')}`, { method: 'DELETE' }),
+
+    getSalaries: () => apiFetch('/expenses/salaries'),
+    createSalary: data =>
+      apiFetch('/expenses/salaries', { method: 'POST', body: JSON.stringify(data) }),
+    deleteSalary: id =>
+      apiFetch(`/expenses/salaries/${requireId(id, 'معرّف الراتب')}`, { method: 'DELETE' }),
 
     // ── Payments ──────────────────────────────────────────────────
     getPayments: () => apiFetch('/payments'),

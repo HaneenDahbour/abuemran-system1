@@ -10,6 +10,7 @@ from routers import (
     audit,
     auth,
     checks,
+    expenses,
     clients,
     invoices,
     notifications,
@@ -90,7 +91,7 @@ app.include_router(invoices.router, prefix="/api/invoices", tags=["Invoices"])
 app.include_router(payments.router, prefix="/api/payments", tags=["Payments"])
 app.include_router(checks.router, prefix="/api/checks", tags=["Checks"])
 app.include_router(recipients.router, prefix="/api/recipients", tags=["Recipients"])
-
+app.include_router(expenses.router, prefix="/api/expenses", tags=["Expenses"])
 # ── System ────────────────────────────────────────────────────
 app.include_router(audit.router, prefix="/api/audit", tags=["Audit"])
 app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])

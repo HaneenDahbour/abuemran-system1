@@ -45,45 +45,35 @@ class PaymentIn(BaseModel):
 @router.get("")
 async def list_recipients(user=Depends(get_current_user)):
     pool = await get_pool()
+
     try:
         rows = await pool.fetch("""
             WITH inv_sum AS (
                 SELECT
                     TRIM(i.recipient_name) AS name,
-                    i.client_id,
-                    c.name AS client_name,
                     COUNT(i.id) AS invoice_count,
-                    COALESCE(SUM(i.total_amount), 0) AS total_invoiced
+                    COALESCE(SUM(i.total_amount), 0) AS total_invoiced,
+                    STRING_AGG(
+                        DISTINCT COALESCE(u.full_name, 'غير معروف'),
+                        ', '
+                    ) AS employee_names
                 FROM invoices i
-                JOIN clients c ON c.id = i.client_id
+                LEFT JOIN users u ON u.id = i.created_by
                 WHERE i.recipient_name IS NOT NULL
                   AND TRIM(i.recipient_name) <> ''
-                GROUP BY TRIM(i.recipient_name), i.client_id, c.name
+                  AND COALESCE(i.status, 'approved') = 'approved'
+                GROUP BY TRIM(i.recipient_name)
             )
             SELECT
                 inv_sum.name,
-                inv_sum.client_id,
-                inv_sum.client_name,
                 inv_sum.invoice_count,
                 inv_sum.total_invoiced,
-
+                inv_sum.employee_names,
                 COALESCE((
                     SELECT SUM(rp.amount)
                     FROM recipient_payments rp
                     WHERE LOWER(TRIM(rp.recipient_name)) = LOWER(TRIM(inv_sum.name))
-                      AND (rp.client_id = inv_sum.client_id OR rp.client_id IS NULL)
-                ), 0)
-                +
-                COALESCE((
-                    SELECT SUM(p.amount)
-                    FROM payments p
-                    JOIN invoices i2 ON i2.client_id = p.client_id
-                    WHERE p.status = 'approved'
-                      AND COALESCE(p.notes, '') ILIKE ('%invoice_id:' || i2.id::text || '%')
-                      AND LOWER(TRIM(i2.recipient_name)) = LOWER(TRIM(inv_sum.name))
-                      AND i2.client_id = inv_sum.client_id
                 ), 0) AS total_paid
-
             FROM inv_sum
             ORDER BY inv_sum.total_invoiced DESC
         """)
@@ -92,7 +82,8 @@ async def list_recipients(user=Depends(get_current_user)):
         for r in rows:
             d = row_to_dict(r)
             d["balance"] = round(
-                float(d["total_invoiced"] or 0) - float(d["total_paid"] or 0), 3
+                float(d["total_invoiced"] or 0) - float(d["total_paid"] or 0),
+                3,
             )
             result.append(d)
 
@@ -101,14 +92,13 @@ async def list_recipients(user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.get("/{recipient_name}/statement")
 async def recipient_statement(recipient_name: str, user=Depends(get_current_user)):
     pool = await get_pool()
     try:
         inv_rows = await pool.fetch(
             """
-            SELECT
+                    SELECT
                 i.id,
                 i.invoice_number,
                 i.date,
@@ -116,13 +106,14 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
                 i.payment_method,
                 i.notes,
                 i.recipient_name,
-                c.name AS client_name,
-                i.client_id
+                i.created_by,
+                u.full_name AS employee_name
             FROM invoices i
-            JOIN clients c ON c.id = i.client_id
+            LEFT JOIN users u ON u.id = i.created_by
             WHERE LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
+            AND COALESCE(i.status, 'approved') = 'approved'
             ORDER BY i.date ASC, i.id ASC
-        """,
+            """,
             recipient_name,
         )
 
@@ -142,27 +133,6 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
             recipient_name,
         )
 
-        invoice_pay_rows = await pool.fetch(
-            """
-            SELECT
-                p.id,
-                p.amount,
-                p.payment_date AS date,
-                p.notes,
-                p.client_id,
-                i.invoice_number,
-                i.recipient_name,
-                c.name AS client_name
-            FROM payments p
-            JOIN invoices i ON i.client_id = p.client_id
-            JOIN clients c ON c.id = i.client_id
-            WHERE p.status = 'approved'
-              AND COALESCE(p.notes, '') ILIKE ('%invoice_id:' || i.id::text || '%')
-              AND LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
-            ORDER BY p.payment_date ASC, p.id ASC
-        """,
-            recipient_name,
-        )
 
         transactions = []
 

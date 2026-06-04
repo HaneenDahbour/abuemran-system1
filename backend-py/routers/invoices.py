@@ -135,7 +135,7 @@ class InvoiceItem(BaseModel):
 
 
 class InvoiceRequest(BaseModel):
-    client_id: int
+    client_id: Optional[int] = None  # old compatibility only, not required anymore
     invoice_number: Optional[str] = None
     net_amount: Optional[float] = None
     tax_amount: Optional[float] = 0
@@ -144,10 +144,11 @@ class InvoiceRequest(BaseModel):
     payment_method: Optional[str] = "credit"
     paid_amount: Optional[float] = 0
     notes: Optional[str] = None
-    recipient_name: Optional[str] = None
+
+    # This is now required because this is the person who pays
+    recipient_name: str
+
     items: Optional[List[InvoiceItem]] = Field(default_factory=list)
-
-
 async def fetch_invoice_items(conn, invoice_id: int):
     rows = await conn.fetch(
         """
@@ -241,6 +242,18 @@ def normalize_items(items: List[InvoiceItem]) -> list[dict]:
 
 async def delete_auto_payment_for_invoice(conn, invoice_id: int):
     marker = f"%invoice_id:{invoice_id}%"
+
+    await conn.execute(
+        """
+        DELETE FROM recipient_payments
+        WHERE invoice_id = $1
+           OR COALESCE(notes, '') ILIKE $2
+        """,
+        invoice_id,
+        marker,
+    )
+
+    # legacy cleanup from old client-based payments
     await conn.execute(
         """
         DELETE FROM payments
@@ -250,7 +263,6 @@ async def delete_auto_payment_for_invoice(conn, invoice_id: int):
         invoice_id,
         marker,
     )
-
 
 async def restore_stock_from_invoice_items(conn, invoice_id: int, user):
     old_items = await conn.fetch(
@@ -388,22 +400,27 @@ async def insert_auto_payment(
     if paid <= 0:
         return
 
+    recipient_name = clean_text(data.recipient_name)
+    if not recipient_name:
+        raise HTTPException(status_code=400, detail="اسم الزبون / مطلوب من السادة مطلوب")
+
     await conn.execute(
         """
-        INSERT INTO payments
-          (client_id, invoice_id, submitted_by, approved_by, amount, status, notes, payment_date, approved_at)
+        INSERT INTO recipient_payments
+          (recipient_name, client_id, invoice_id, amount, payment_method,
+           payment_date, notes, created_by)
         VALUES
-          ($1, $2, $3, $4, $5, 'approved', $6, $7, NOW())
+          ($1, $2, $3, $4, $5, $6, $7, $8)
         """,
+        recipient_name,
         data.client_id,
         invoice_id,
-        user.get("id"),
-        user.get("id"),
-        paid,
-        f"Ø¯ÙØ¹Ø© ØªÙ„Ù‚Ø§Ø¦ÙŠØ© Ù…Ù† ÙØ§ØªÙˆØ±Ø© #{invoice_number} | invoice_id:{invoice_id} | method:{payment_method}",
+        money3(paid),
+        payment_method,
         invoice_date,
+        f"دفعة تلقائية من فاتورة #{invoice_number} | invoice_id:{invoice_id} | method:{payment_method}",
+        user.get("id"),
     )
-
 async def insert_invoice_items_only(conn, invoice_id: int, items: list[dict]):
     """Save invoice items WITHOUT touching stock â€” for pending invoices."""
     for item in items:
@@ -558,8 +575,9 @@ async def get_invoices(user=Depends(get_current_user)):
 async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant", "employee")
 
-    if not data.client_id:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ Ù…Ø·Ù„ÙˆØ¨")
+    recipient_name = clean_text(data.recipient_name)
+    if not recipient_name:
+     raise HTTPException(status_code=400, detail="اسم الزبون / مطلوب من السادة مطلوب")
 
     items = normalize_items(data.items or [])
 
@@ -599,25 +617,33 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                await ensure_client_exists(conn, data.client_id)
+                if data.client_id:
+                    await ensure_client_exists(conn, data.client_id)
 
                 inv = await conn.fetchrow(
                     """
                     INSERT INTO invoices
-                      (client_id, invoice_number, amount, net_amount, tax_amount, total_amount,
-                       date, payment_method, notes, recipient_name, created_by,
-                       status, approved_by, approved_at)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+                    (client_id, invoice_number, amount, net_amount, tax_amount, total_amount,
+            date, payment_method, notes, recipient_name, created_by,
+            status, approved_by, approved_at, initial_paid_amount)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
                     RETURNING *
                     """,
-                    data.client_id, invoice_number, net, net, tax, total,
-                    invoice_date, payment_method,
-                    clean_text(data.notes), clean_text(data.recipient_name),
+                    data.client_id,
+                    invoice_number,
+                    net,
+                    net,
+                    tax,
+                    total,
+                    invoice_date,
+                    payment_method,
+                    clean_text(data.notes),
+                    recipient_name,
                     user.get("id"),
                     invoice_status,
                     user.get("id") if invoice_status == "approved" else None,
                     datetime.now() if invoice_status == "approved" else None,
-                )
+                    paid,)
 
                 if invoice_status == "approved":
                     # Immediate: deduct stock + auto-payment (existing behaviour)
@@ -666,8 +692,9 @@ async def update_invoice(
 ):
     require_role(user, "admin", "accountant")
 
-    if not data.client_id:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ Ù…Ø·Ù„ÙˆØ¨")
+    recipient_name = clean_text(data.recipient_name)
+    if not recipient_name:
+        raise HTTPException(status_code=400, detail="اسم الزبون / مطلوب من السادة مطلوب")
 
     items = normalize_items(data.items or [])
 
@@ -725,13 +752,21 @@ async def update_invoice(
                     UPDATE invoices
                     SET client_id=$1, invoice_number=$2, amount=$3, net_amount=$4,
                         tax_amount=$5, total_amount=$6, date=$7, payment_method=$8,
-                        notes=$9, recipient_name=$10
-                    WHERE id=$11
+                        notes=$9, recipient_name=$10, initial_paid_amount=$11
+WHERE id=$12
                     RETURNING *
                     """,
-                    data.client_id, invoice_number, net, net, tax, total,
-                    invoice_date, payment_method,
-                    clean_text(data.notes), clean_text(data.recipient_name),
+                    data.client_id,
+                    invoice_number,
+                    net,
+                    net,
+                    tax,
+                    total,
+                    invoice_date,
+                    payment_method,
+                    clean_text(data.notes),
+                    recipient_name,
+                    paid,
                     invoice_id,
                 )
 
@@ -895,7 +930,7 @@ async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_u
 
     reason = str(data.get("reason") or "").strip()
     if not reason:
-        raise HTTPException(status_code=400, detail="Ø³Ø¨Ø¨ Ø§Ù„Ø±ÙØ¶ Ù…Ø·Ù„ÙˆØ¨")
+        raise HTTPException(status_code=400, detail="سبب الرفض مطلوب")
 
     pool = await get_pool()
 
@@ -906,28 +941,29 @@ async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_u
                     "SELECT * FROM invoices WHERE id=$1 FOR UPDATE",
                     invoice_id,
                 )
-                if not invoice:
-                    raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
 
-                if (invoice.get("status") or "approved") != "pending":
+                if not invoice:
+                    raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+
+                current_status = invoice["status"] or "approved"
+
+                if current_status != "pending":
                     raise HTTPException(
                         status_code=400,
-                        detail="ÙŠÙ…ÙƒÙ† Ø±ÙØ¶ Ø§Ù„ÙÙˆØ§ØªÙŠØ± Ø§Ù„Ù…Ø¹Ù„Ù‘Ù‚Ø© ÙÙ‚Ø·",
+                        detail="يمكن رفض وحذف الفواتير المعلّقة فقط",
                     )
 
-                # No stock to restore â€” it was never deducted for pending invoices
-                updated = await conn.fetchrow(
-                    """
-                    UPDATE invoices
-                    SET status='rejected', rejection_reason=$1,
-                        approved_by=$2, approved_at=NOW()
-                    WHERE id=$3
-                    RETURNING *
-                    """,
-                    reason, safe_uuid(user.get("id")), invoice_id,
+                # Pending invoice did not touch stock, so safe delete
+                await conn.execute(
+                    "DELETE FROM invoice_items WHERE invoice_id=$1",
+                    invoice_id,
                 )
 
-                # Notify creator
+                await conn.execute(
+                    "DELETE FROM invoices WHERE id=$1",
+                    invoice_id,
+                )
+
                 try:
                     await conn.execute(
                         """
@@ -935,25 +971,29 @@ async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_u
                         VALUES ($1, $2, 'rejected')
                         """,
                         invoice["created_by"],
-                        f"âœ— Ø±ÙÙØ¶Øª ÙØ§ØªÙˆØ±ØªÙƒ #{invoice['invoice_number']} â€” Ø§Ù„Ø³Ø¨Ø¨: {reason}",
+                        f"✗ رُفضت فاتورتك #{invoice['invoice_number']} وتم حذفها — السبب: {reason}",
                     )
                 except Exception:
                     pass
 
                 await insert_audit(
-                    conn, user, "Ø±ÙØ¶ ÙØ§ØªÙˆØ±Ø©", invoice_id,
-                    f"Ø±ÙØ¶ ÙØ§ØªÙˆØ±Ø© #{invoice['invoice_number']} â€” Ø§Ù„Ø³Ø¨Ø¨: {reason}",
+                    conn,
+                    user,
+                    "رفض وحذف فاتورة",
+                    invoice_id,
+                    f"رفض وحذف فاتورة #{invoice['invoice_number']} — السبب: {reason}",
                 )
 
-                out = row_to_dict(updated)
-                out["items"] = await fetch_invoice_items(conn, invoice_id)
-                return out
+                return {
+                    "success": True,
+                    "deleted": True,
+                    "message": "تم رفض الفاتورة وحذفها لأنها كانت معلّقة",
+                }
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 @router.delete("/{invoice_id}")
 async def delete_invoice(invoice_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
