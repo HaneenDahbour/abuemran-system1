@@ -1366,8 +1366,7 @@ function _invoiceActionButtons(inv) {
       html += `
         <button class="btn btn-success btn-sm" onclick="approveInvoice(${inv.id})">✅ اعتماد</button>
         <button class="btn btn-danger btn-sm"  onclick="rejectInvoiceModal(${inv.id})">✗ رفض</button>
-        <button class="btn btn-ghost btn-sm" onclick="showInvoiceDetails(${inv.id})">📄 تفاصيل</button>
-      `;
+<button class="btn btn-ghost btn-sm" onclick="showInvoiceDetails(${jsString(inv.id)})">📄 تفاصيل</button>      `;
     }
     // Creator or admin can delete pending
     html += `<button class="btn btn-ghost btn-sm" onclick="deleteInvoice(${inv.id})">🗑️</button>`;
@@ -1398,8 +1397,9 @@ function _invoiceActionButtons(inv) {
   return `<div style="display:flex;gap:6px;flex-wrap:wrap">${html}</div>`;
 }
 function showInvoiceDetails(invoiceId) {
-  const inv = (window._invoicesCache || []).find(x => Number(x.id) === Number(invoiceId));
-  if (!inv) {
+  const inv = (window._invoicesCache || []).find(
+    x => String(x.id) === String(invoiceId)
+  ); if (!inv) {
     toast('لم يتم العثور على الفاتورة', 'error');
     return;
   }
