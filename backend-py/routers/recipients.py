@@ -54,7 +54,7 @@ async def list_recipients(user=Depends(get_current_user)):
                     TRIM(i.recipient_name) AS name,
                     COUNT(i.id) AS invoice_count,
                     COALESCE(SUM(i.total_amount), 0) AS total_invoiced,
-                    COALESCE(SUM(COALESCE(i.paid_amount, 0)), 0) AS invoice_paid,
+                    COALESCE(SUM(COALESCE(i.initial_paid_amount, 0)), 0) AS invoice_paid,
                     STRING_AGG(
                         DISTINCT COALESCE(u.full_name, 'غير معروف'),
                         ', '

@@ -41,10 +41,10 @@ async def get_stats(user=Depends(get_current_user)):
                 WITH approved_inv AS (
                     SELECT
                         COALESCE(SUM(total_amount), 0) AS total_sales,
-                        COALESCE(SUM(COALESCE(paid_amount, 0)), 0) AS invoice_paid,
+                        COALESCE(SUM(COALESCE(initial_paid_amount, 0)), 0) AS invoice_paid,
                         COALESCE(SUM(
                             GREATEST(
-                                COALESCE(total_amount, 0) - COALESCE(paid_amount, 0),
+                                COALESCE(total_amount, 0) - COALESCE(initial_paid_amount, 0),
                                 0
                             )
                         ), 0) AS invoice_remaining
