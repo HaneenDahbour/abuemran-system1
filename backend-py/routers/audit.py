@@ -39,31 +39,37 @@ async def get_stats(user=Depends(get_current_user)):
     try:
         row = await pool.fetchrow("""
             SELECT
-              COALESCE((SELECT SUM(total_amount) FROM invoices), 0) AS total_sales,
+            COALESCE((
+                SELECT SUM(total_amount)
+                FROM invoices
+                WHERE COALESCE(status, '') = 'approved'
+            ), 0) AS total_sales,
 
-              COALESCE((SELECT SUM(total_amount) FROM invoices), 0)
-              -
-              (
-                COALESCE((SELECT SUM(amount) FROM payments WHERE status='approved'), 0)
-                +
-                COALESCE((SELECT SUM(amount) FROM recipient_payments), 0)
-              ) AS total_debts,
+            COALESCE((
+                SELECT SUM(total_amount)
+                FROM invoices
+                WHERE COALESCE(status, '') = 'approved'
+            ), 0)
+            -
+            COALESCE((
+                SELECT SUM(amount)
+                FROM recipient_payments
+            ), 0) AS total_debts,
 
-              COALESCE((SELECT SUM(amount) FROM payments WHERE status='approved'), 0)
-              +
-              COALESCE((SELECT SUM(amount) FROM recipient_payments), 0)
-              AS total_payments,
+            COALESCE((
+                SELECT SUM(amount)
+                FROM recipient_payments
+            ), 0) AS total_payments,
 
-              (SELECT COUNT(*) FROM checks WHERE due_date = CURRENT_DATE AND status='pending')
+            (SELECT COUNT(*) FROM checks WHERE due_date = CURRENT_DATE AND status='pending')
                 AS today_checks,
 
-              (SELECT COUNT(*) FROM clients)
+            (SELECT COUNT(*) FROM users WHERE role IN ('admin', 'accountant', 'employee'))
                 AS active_clients,
 
-              (SELECT COUNT(*) FROM payments WHERE status='pending')
+            (SELECT COUNT(*) FROM payments WHERE status='pending')
                 AS pending_payments
-            """)
-
+        """)
         return row_to_dict(row)
 
     except Exception as e:

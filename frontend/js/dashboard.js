@@ -1367,6 +1367,7 @@ function _invoiceActionButtons(inv) {
       html += `
         <button class="btn btn-success btn-sm" onclick="approveInvoice(${inv.id})">✅ اعتماد</button>
         <button class="btn btn-danger btn-sm"  onclick="rejectInvoiceModal(${inv.id})">✗ رفض</button>
+        <button class="btn btn-ghost btn-sm" onclick="showInvoiceDetails(${inv.id})">📄 تفاصيل</button>
       `;
     }
     // Creator or admin can delete pending
@@ -1397,7 +1398,57 @@ function _invoiceActionButtons(inv) {
 
   return `<div style="display:flex;gap:6px;flex-wrap:wrap">${html}</div>`;
 }
+function showInvoiceDetails(invoiceId) {
+  const inv = (window.invoicesCache || []).find(x => Number(x.id) === Number(invoiceId));
 
+  if (!inv) {
+    toast('لم يتم العثور على الفاتورة', 'error');
+    return;
+  }
+
+  const items = inv.items || [];
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">📄 تفاصيل الفاتورة #${escHtml(inv.invoice_number || inv.id)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div style="display:grid;gap:8px;margin-bottom:14px">
+      <div><strong>مطلوب من السادة:</strong> ${escHtml(inv.recipient_name || '—')}</div>
+      <div><strong>كتبها:</strong> ${escHtml(inv.created_by_name || '—')}</div>
+      <div><strong>الحالة:</strong> ${escHtml(inv.status || 'pending')}</div>
+      <div><strong>الإجمالي:</strong> ${fmt(inv.total_amount)} د.أ</div>
+      <div><strong>طريقة الدفع:</strong> ${escHtml(inv.payment_method || 'credit')}</div>
+      <div><strong>ملاحظات:</strong> ${escHtml(inv.notes || '—')}</div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>الصنف</th>
+            <th>الوصف</th>
+            <th>الكمية</th>
+            <th>سعر الوحدة</th>
+            <th>الإجمالي</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.length ? items.map(item => `
+            <tr>
+              <td>${escHtml(item.product_name || '—')}</td>
+              <td>${escHtml(item.description || '—')}</td>
+              <td>${fmt(item.quantity)}</td>
+              <td>${fmt(item.unit_price)} د.أ</td>
+              <td><strong>${fmt(item.line_total)} د.أ</strong></td>
+            </tr>
+          `).join('') : emptyRow('لا توجد أصناف داخل الفاتورة', 5)}
+        </tbody>
+      </table>
+    </div>
+  `);
+}
 function downloadInvoicePDF(invoiceId) {
   const token = localStorage.getItem('token');
   const url = `${window.API_BASE || window.ENV_API_BASE || (location.hostname === 'localhost' ? 'http://localhost:8000/api' : '/api')}/invoices/${invoiceId}/pdf`;

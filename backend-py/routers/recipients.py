@@ -74,7 +74,8 @@ async def list_recipients(user=Depends(get_current_user)):
                 COALESCE((
                     SELECT SUM(rp.amount)
                     FROM recipient_payments rp
-                    WHERE LOWER(TRIM(rp.recipient_name)) = LOWER(TRIM(inv_sum.name))
+                    WHERE LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
+  AND COALESCE(i.status, '') = 'approved'
                 ), 0) AS total_paid
             FROM inv_sum
             ORDER BY inv_sum.total_invoiced DESC
@@ -224,13 +225,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         """,
             data.recipient_name.strip(),
-data.client_id,
-data.invoice_id,
-round(data.amount, 3),
-data.payment_method or "cash",
-pay_date,
-data.notes,
-user.get("id"),
+            data.client_id,
+            data.invoice_id,
+            round(data.amount, 3),
+            data.payment_method or "cash",
+            pay_date,
+            data.notes,
+            user.get("id"),
         )
         return row_to_dict(row)
 
