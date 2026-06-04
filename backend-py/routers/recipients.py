@@ -43,7 +43,6 @@ class PaymentIn(BaseModel):
     payment_date: Optional[str] = None
     notes: Optional[str] = None
 
-
 @router.get("")
 async def list_recipients(user=Depends(get_current_user)):
     pool = await get_pool()
@@ -64,16 +63,22 @@ async def list_recipients(user=Depends(get_current_user)):
                 LEFT JOIN users u ON u.id = i.created_by
                 WHERE i.recipient_name IS NOT NULL
                   AND TRIM(i.recipient_name) <> ''
-AND COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'                GROUP BY TRIM(i.recipient_name)
+                  AND COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
+                GROUP BY TRIM(i.recipient_name)
             ),
             pay_sum AS (
                 SELECT
-                    TRIM(recipient_name) AS name,
-                    COALESCE(SUM(amount), 0) AS extra_paid
-                FROM recipient_payments
-                WHERE recipient_name IS NOT NULL
-                  AND TRIM(recipient_name) <> ''
-                GROUP BY TRIM(recipient_name)
+                    TRIM(rp.recipient_name) AS name,
+                    COALESCE(SUM(rp.amount), 0) AS extra_paid
+                FROM recipient_payments rp
+                LEFT JOIN invoices i ON i.id = rp.invoice_id
+                WHERE rp.recipient_name IS NOT NULL
+                  AND TRIM(rp.recipient_name) <> ''
+                  AND (
+                    rp.invoice_id IS NULL
+                    OR COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
+                  )
+                GROUP BY TRIM(rp.recipient_name)
             )
             SELECT
                 inv_sum.name,
@@ -100,6 +105,9 @@ AND COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'                GROUP
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/payments")
 async def list_recipient_payments(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
