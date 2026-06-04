@@ -1413,8 +1413,8 @@ function showInvoiceDetails(invoiceId) {
 
     <div style="display:grid;gap:8px;margin-bottom:14px">
       <div><strong>مطلوب من السادة:</strong> ${escHtml(inv.recipient_name || '—')}</div>
-      <div><strong>كتبها:</strong> ${escHtml(inv.created_by_name || '—')}</div>
-      <div><strong>الحالة:</strong> ${escHtml(inv.status || 'pending')}</div>
+<div><strong>كتبها الموظف:</strong> ${escHtml(inv.client_name || inv.created_by_name || '—')}</div>
+<div><strong>أدخلها على النظام:</strong> ${escHtml(inv.created_by_name || '—')}</div>      <div><strong>الحالة:</strong> ${escHtml(inv.status || 'pending')}</div>
       <div><strong>الإجمالي:</strong> ${fmt(inv.total_amount)} د.أ</div>
       <div><strong>طريقة الدفع:</strong> ${escHtml(inv.payment_method || 'credit')}</div>
       <div><strong>ملاحظات:</strong> ${escHtml(inv.notes || '—')}</div>
@@ -2372,8 +2372,13 @@ async function saveInvoice() {
   const btn = document.getElementById('save-invoice-btn');
   const invoiceId = window._editingInvoiceId || null;
 
-  const client_id = null;
+  const clientRaw = document.getElementById('inv_client')?.value;
+  const client_id = clientRaw ? Number(clientRaw) : null;
 
+  if (!client_id) {
+    toast('اختاري اسم الموظف الذي كتب الفاتورة', 'error');
+    return;
+  }
   const hasItems = document.getElementById('inv_has_items')?.checked;
   const invNum = document.getElementById('inv_num')?.value.trim() || `INV-${Date.now()}`;
   const taxRate = parseFloat(document.getElementById('inv_tax')?.value) || 0;
@@ -2931,11 +2936,11 @@ function openCheckModal() {
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="form-group">
-      <label class="form-label">العميل *</label>
-      <select class="form-select" id="chk_client">
-        <option value="">اختر عميلاً</option>
-        ${clientOpts}
-      </select>
+      <label class="form-label">كتبها الموظف *</label>
+<select class="form-select" id="inv_client">
+  <option value="">اختر الموظف</option>
+  ${clientOpts}
+</select>
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -2968,8 +2973,7 @@ function openCheckModal() {
       window._clientsCache = cls || [];
       const sel = document.getElementById('chk_client');
       if (sel) {
-        sel.innerHTML = '<option value="">اختر عميلاً</option>' +
-          cls.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+        sel.innerHTML = '<option value="">اختر الموظف</option>' + cls.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
       }
     }).catch(() => { });
   }
