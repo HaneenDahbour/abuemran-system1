@@ -1387,7 +1387,7 @@ function _invoiceActionButtons(inv) {
     html += `<button class="btn btn-ghost btn-sm" onclick="printInvoiceFromEncoded(${jsString(encoded)})">🖨️ طباعة</button>`;
     if (isAccountant()) {
       html += `
-<button class="btn btn-success btn-sm" onclick="openRecipientPayment(${jsString(getInvoiceRecipient(inv) || inv.recipient_name || '')}, null)">💰 قبض</button>        <button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
+<button class="btn btn-success btn-sm" onclick="openRecipientPayment(${jsString(getInvoiceRecipientName(inv) || inv.recipient_name || '')}, null)">💰 قبض</button>        <button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
       `;
     }
     if (isAdmin()) {
