@@ -64,8 +64,7 @@ async def list_recipients(user=Depends(get_current_user)):
                 LEFT JOIN users u ON u.id = i.created_by
                 WHERE i.recipient_name IS NOT NULL
                   AND TRIM(i.recipient_name) <> ''
-                  AND COALESCE(i.status, '') = 'approved'
-                GROUP BY TRIM(i.recipient_name)
+AND COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'                GROUP BY TRIM(i.recipient_name)
             ),
             pay_sum AS (
                 SELECT
