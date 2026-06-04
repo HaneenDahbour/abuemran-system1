@@ -63,7 +63,7 @@ async def list_recipients(user=Depends(get_current_user)):
                 LEFT JOIN users u ON u.id = i.created_by
                 WHERE i.recipient_name IS NOT NULL
                   AND TRIM(i.recipient_name) <> ''
-                  AND COALESCE(i.status, 'approved') = 'approved'
+                  AND COALESCE(i.status, '') = 'approved'
                 GROUP BY TRIM(i.recipient_name)
             )
             SELECT
@@ -74,8 +74,12 @@ async def list_recipients(user=Depends(get_current_user)):
                 COALESCE((
                     SELECT SUM(rp.amount)
                     FROM recipient_payments rp
-                    WHERE LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
-  AND COALESCE(i.status, '') = 'approved'
+                    LEFT JOIN invoices i2 ON i2.id = rp.invoice_id
+                    WHERE LOWER(TRIM(rp.recipient_name)) = LOWER(TRIM(inv_sum.name))
+                      AND (
+                        rp.invoice_id IS NULL
+                        OR COALESCE(i2.status, '') = 'approved'
+                      )
                 ), 0) AS total_paid
             FROM inv_sum
             ORDER BY inv_sum.total_invoiced DESC
@@ -94,6 +98,7 @@ async def list_recipients(user=Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/payments")
 async def list_recipient_payments(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
@@ -142,20 +147,27 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
         )
 
         manual_pay_rows = await pool.fetch(
-            """
-            SELECT
-                id,
-                amount,
-                payment_date AS date,
-                notes,
-                created_at,
-                client_id
-            FROM recipient_payments
-            WHERE LOWER(TRIM(recipient_name)) = LOWER(TRIM($1))
-            ORDER BY payment_date ASC, id ASC
-        """,
-            recipient_name,
-        )
+    """
+    SELECT
+        rp.id,
+        rp.amount,
+        rp.payment_date AS date,
+        rp.notes,
+        rp.created_at,
+        rp.client_id,
+        rp.invoice_id,
+        rp.payment_method
+    FROM recipient_payments rp
+    LEFT JOIN invoices i ON i.id = rp.invoice_id
+    WHERE LOWER(TRIM(rp.recipient_name)) = LOWER(TRIM($1))
+      AND (
+        rp.invoice_id IS NULL
+        OR COALESCE(i.status, '') = 'approved'
+      )
+    ORDER BY rp.payment_date ASC, rp.id ASC
+    """,
+    recipient_name,
+)
 
 
         transactions = []
