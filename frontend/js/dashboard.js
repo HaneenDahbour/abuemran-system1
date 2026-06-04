@@ -744,8 +744,7 @@ async function renderDashboard(container) {
         <div style="display:flex; flex-direction:column; gap:10px; margin-top:4px">
           ${isAccountant() ? `
           <button class="btn btn-primary btn-full" onclick="navigateTo('invoices'); setTimeout(openInvoiceModal,200)">➕ فاتورة جديدة</button>
-          <button class="btn btn-success btn-full" onclick="navigateTo('payments'); setTimeout(openPaymentModal,200)">💰 تسجيل مقبوضة</button>
-          <button class="btn btn-ghost btn-full" onclick="navigateTo('checks'); setTimeout(openCheckModal,200)">🏦 إضافة شيك</button>
+<button class="btn btn-success btn-full" onclick="navigateTo('payments'); setTimeout(() => openRecipientPayment('', null), 200)">💰 تسجيل مقبوضة</button>          <button class="btn btn-ghost btn-full" onclick="navigateTo('checks'); setTimeout(openCheckModal,200)">🏦 إضافة شيك</button>
           ` : ''}
         </div>
       </div>
@@ -1399,8 +1398,7 @@ function _invoiceActionButtons(inv) {
   return `<div style="display:flex;gap:6px;flex-wrap:wrap">${html}</div>`;
 }
 function showInvoiceDetails(invoiceId) {
-  const inv = (window.invoicesCache || []).find(x => Number(x.id) === Number(invoiceId));
-
+  const inv = (window._invoicesCache || []).find(x => Number(x.id) === Number(invoiceId));
   if (!inv) {
     toast('لم يتم العثور على الفاتورة', 'error');
     return;

@@ -55,6 +55,7 @@ async def list_recipients(user=Depends(get_current_user)):
                     TRIM(i.recipient_name) AS name,
                     COUNT(i.id) AS invoice_count,
                     COALESCE(SUM(i.total_amount), 0) AS total_invoiced,
+                    COALESCE(SUM(COALESCE(i.paid_amount, 0)), 0) AS invoice_paid,
                     STRING_AGG(
                         DISTINCT COALESCE(u.full_name, 'غير معروف'),
                         ', '
@@ -65,23 +66,25 @@ async def list_recipients(user=Depends(get_current_user)):
                   AND TRIM(i.recipient_name) <> ''
                   AND COALESCE(i.status, '') = 'approved'
                 GROUP BY TRIM(i.recipient_name)
+            ),
+            pay_sum AS (
+                SELECT
+                    TRIM(recipient_name) AS name,
+                    COALESCE(SUM(amount), 0) AS extra_paid
+                FROM recipient_payments
+                WHERE recipient_name IS NOT NULL
+                  AND TRIM(recipient_name) <> ''
+                GROUP BY TRIM(recipient_name)
             )
             SELECT
                 inv_sum.name,
                 inv_sum.invoice_count,
                 inv_sum.total_invoiced,
                 inv_sum.employee_names,
-                COALESCE((
-                    SELECT SUM(rp.amount)
-                    FROM recipient_payments rp
-                    LEFT JOIN invoices i2 ON i2.id = rp.invoice_id
-                    WHERE LOWER(TRIM(rp.recipient_name)) = LOWER(TRIM(inv_sum.name))
-                      AND (
-                        rp.invoice_id IS NULL
-                        OR COALESCE(i2.status, '') = 'approved'
-                      )
-                ), 0) AS total_paid
+                inv_sum.invoice_paid + COALESCE(pay_sum.extra_paid, 0) AS total_paid
             FROM inv_sum
+            LEFT JOIN pay_sum
+              ON LOWER(TRIM(pay_sum.name)) = LOWER(TRIM(inv_sum.name))
             ORDER BY inv_sum.total_invoiced DESC
         """)
 
@@ -98,7 +101,6 @@ async def list_recipients(user=Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 @router.get("/payments")
 async def list_recipient_payments(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
@@ -167,16 +169,31 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
     ORDER BY rp.payment_date ASC, rp.id ASC
     """,
     recipient_name,
-)
+    )
 
 
         transactions = []
 
         for r in inv_rows:
             d = row_to_dict(r)
+
+            total = float(d["total_amount"] or 0)
+            paid_now = float(d.get("paid_amount") or 0)
+
             d["type"] = "invoice"
-            d["amount"] = float(d["total_amount"] or 0)
+            d["amount"] = total
             transactions.append(d)
+
+            if paid_now > 0:
+                transactions.append({
+                    "id": f"invoice-paid-{d['id']}",
+                    "type": "payment",
+                    "source": "invoice_paid_amount",
+                    "amount": paid_now,
+                    "date": d.get("date"),
+                    "notes": f"مدفوع داخل الفاتورة #{d.get('invoice_number') or d.get('id')}",
+                    "invoice_number": d.get("invoice_number"),
+                })
 
 
 
