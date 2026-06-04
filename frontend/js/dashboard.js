@@ -6553,7 +6553,57 @@ async function deleteExpense(id) {
     toast(e.message, 'error');
   }
 }
+async function renderEmployees(container) {
+  if (!isAdmin()) {
+    container.innerHTML = `<div class="alert alert-danger">غير مصرح لك بالوصول</div>`;
+    return;
+  }
 
+  let users = [];
+  try {
+    users = await API.getUsers() || [];
+  } catch (e) {
+    users = [];
+  }
+
+  const employees = users.filter(u =>
+    ['admin', 'accountant', 'employee'].includes(u.role)
+  );
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">👷 الموظفون</div>
+        <div class="page-sub">${employees.length} موظف مسجل</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>اسم الموظف</th>
+              <th>اسم المستخدم</th>
+              <th>الصلاحية</th>
+              <th>تاريخ الإنشاء</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${employees.length ? employees.map(u => `
+              <tr>
+                <td><strong>${escHtml(u.full_name || '—')}</strong></td>
+                <td>${escHtml(u.username || '—')}</td>
+                <td>${roleBadge(u.role)}</td>
+                <td>${fmtDate(u.created_at)}</td>
+              </tr>
+            `).join('') : emptyRow('لا يوجد موظفون', 4)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
 async function deleteSalary(id) {
   if (!confirm('حذف هذا الراتب؟')) return;
   try {
