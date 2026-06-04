@@ -1255,8 +1255,7 @@ function renderInvoiceRow(inv) {
       <strong>#${escHtml(inv.invoice_number || inv.id)}</strong>
       ${wfStatus === 'pending' ? '<span style="font-size:10px;color:var(--am);margin-right:4px">⏳</span>' : ''}
     </td>
-    <td>${escHtml(inv.client_name || '—')}</td>
-    <td>
+<td>${escHtml(inv.created_by_name || '—')}</td>    <td>
       ${recip
       ? `<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="viewRecipientStatement(${jsString(recip)})">${escHtml(recip)}</button>`
       : `<span style="color:var(--tx3)">—</span>`}
@@ -1503,19 +1502,16 @@ function openInvoiceModal(invoice = null) {
     <input class="form-input" id="inv_recipient" value="${escHtml(recipient)}" placeholder="اسم الزبون الذي عليه الدفع" required>    </div>
 
     <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">العميل *</label>
-        <select class="form-select" id="inv_client">
-          <option value="">اختر عميلاً</option>
-          ${clientOpts}
-        </select>
-      </div>
+  <div class="form-group">
+    <label class="form-label">كتبها الموظف</label>
+    <input class="form-input" value="${escHtml((getUser() || {}).full_name || '—')}" disabled>
+  </div>
 
-      <div class="form-group">
-        <label class="form-label">رقم الفاتورة</label>
-        <input class="form-input" id="inv_num" value="${escHtml(invoice?.invoice_number || '')}" placeholder="تلقائي إن تُرك فارغاً">
-      </div>
-    </div>
+  <div class="form-group">
+    <label class="form-label">رقم الفاتورة</label>
+    <input class="form-input" id="inv_num" value="${escHtml(invoice?.invoice_number || '')}" placeholder="تلقائي إن تُرك فارغاً">
+  </div>
+</div>
 
     <div class="form-row">
       <div class="form-group">
@@ -1656,16 +1652,7 @@ function openInvoiceModal(invoice = null) {
       calcInvoiceItemsTotal();
       handleInvoicePaymentChange();
     });
-  if (!window._clientsCache?.length) {
-    API.getClients().then(cls => {
-      window._clientsCache = cls || [];
-      const sel = document.getElementById('inv_client');
-      if (sel) {
-        sel.innerHTML = '<option value="">اختر عميلاً</option>' +
-          cls.map(c => `<option value="${c.id}" ${String(invoice?.client_id || '') === String(c.id) ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('');
-      }
-    });
-  }
+
 }
 function toggleInvoiceItems() {
   const checked = document.getElementById('inv_has_items')?.checked;
