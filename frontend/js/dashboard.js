@@ -1757,7 +1757,12 @@ function printInvoice(inv) {
   const total = Number(inv.total_amount || inv.net_amount || 0);
   const paid = Number(inv.paid_amount || 0);
   const remaining = Math.max(total - paid, 0);
+  const recipientName = getInvoiceRecipientName(inv) || inv.recipient_name || '—';
 
+  const cleanPrintNotes = String(inv.notes || '')
+    .replace(/المطلوب من السادة:\s*[^|]+/g, '')
+    .replace(/\|/g, '')
+    .trim();
   const w = window.open('', '_blank');
 
   w.document.write(`<!DOCTYPE html>
@@ -1877,8 +1882,7 @@ function printInvoice(inv) {
     </div>
 
     <div class="meta">
-      <div class="field"><strong>المطلوب من السادة:</strong> ${escHtml((inv.notes || '').match(/المطلوب من السادة:\\s*([^|]+)/)?.[1]?.trim() || inv.client_name || '—')}</div>
-      <div class="field"><strong>طريقة الدفع:</strong> ${escHtml(inv.payment_method || '—')}</div>
+<div class="field"><strong>المطلوب من السادة:</strong> ${escHtml(recipientName)}</div>      <div class="field"><strong>طريقة الدفع:</strong> ${escHtml(inv.payment_method || '—')}</div>
     </div>
 
     <table>
@@ -1933,8 +1937,7 @@ function printInvoice(inv) {
     <div class="totals">
       <div class="field">
         <strong>ملاحظات:</strong>
-        ${escHtml((inv.notes || '').replace(/المطلوب من السادة:\\s*[^|]+/g, '').replace(/\\|/g, '').trim() || '—')}
-      </div>
+    ${escHtml(cleanPrintNotes || '—')}      </div>
 
       <table class="total-table">
         <tr>
