@@ -854,21 +854,22 @@ async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
                 # Create approved automatic payment for cash invoices
                 if paid > 0:
                     await conn.execute(
-                        """
-                        INSERT INTO payments
-                          (client_id, invoice_id, submitted_by, approved_by,
-                           amount, status, notes, payment_date, approved_at)
-                        VALUES
-                          ($1, $2, $3, $4, $5, 'approved', $6, $7, NOW())
-                        """,
-                        invoice["client_id"],
-                        invoice_id,
-                        safe_uuid(user.get("id")),
-                        safe_uuid(user.get("id")),
-                        paid,
-                        f"دفعة تلقائية عند اعتماد فاتورة #{invoice_number} | invoice_id:{invoice_id} | method:{payment_method}",
-                        invoice_date,
-                    )
+                    """
+                    INSERT INTO recipient_payments
+                    (recipient_name, client_id, invoice_id, amount, payment_method,
+                    payment_date, notes, created_by)
+                    VALUES
+                    ($1, $2, $3, $4, $5, $6, $7, $8)
+                    """,
+                    invoice["recipient_name"],
+                    invoice["client_id"],
+                    invoice_id,
+                    paid,
+                    payment_method,
+                    invoice_date,
+                    f"دفعة تلقائية عند اعتماد فاتورة #{invoice_number}",
+                    safe_uuid(user.get("id")),
+                )
 
                 updated = await conn.fetchrow(
                     """

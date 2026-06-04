@@ -37,7 +37,9 @@ def row_to_dict(row):
 class PaymentIn(BaseModel):
     recipient_name: str
     client_id: Optional[int] = None
+    invoice_id: Optional[int] = None
     amount: float
+    payment_method: Optional[str] = "cash"
     payment_date: Optional[str] = None
     notes: Optional[str] = None
 
@@ -91,7 +93,28 @@ async def list_recipients(user=Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+@router.get("/payments")
+async def list_recipient_payments(user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
 
+    pool = await get_pool()
+
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                rp.*,
+                u.full_name AS employee_name,
+                i.invoice_number
+            FROM recipient_payments rp
+            LEFT JOIN users u ON u.id = rp.created_by
+            LEFT JOIN invoices i ON i.id = rp.invoice_id
+            ORDER BY rp.payment_date DESC, rp.id DESC
+        """)
+
+        return [row_to_dict(row) for row in rows]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 @router.get("/{recipient_name}/statement")
 async def recipient_statement(recipient_name: str, user=Depends(get_current_user)):
     pool = await get_pool()
@@ -142,13 +165,7 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
             d["amount"] = float(d["total_amount"] or 0)
             transactions.append(d)
 
-        for r in invoice_pay_rows:
-            d = row_to_dict(r)
-            d["type"] = "payment"
-            d["source"] = "invoice_payment"
-            d["amount"] = float(d["amount"] or 0)
-            d["notes"] = d.get("notes") or "Ø¯ÙØ¹Ø© Ù…Ù† Ø¯Ø§Ø®Ù„ Ø§Ù„ÙØ§ØªÙˆØ±Ø©"
-            transactions.append(d)
+
 
         for r in manual_pay_rows:
             d = row_to_dict(r)
@@ -202,16 +219,18 @@ async def add_payment(data: PaymentIn, user=Depends(get_current_user)):
         row = await pool.fetchrow(
             """
             INSERT INTO recipient_payments
-              (recipient_name, client_id, amount, payment_date, notes, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6)
+  (recipient_name, client_id, invoice_id, amount, payment_method, payment_date, notes, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         """,
             data.recipient_name.strip(),
-            data.client_id,
-            round(data.amount, 3),
-            pay_date,
-            data.notes,
-            user.get("id"),
+data.client_id,
+data.invoice_id,
+round(data.amount, 3),
+data.payment_method or "cash",
+pay_date,
+data.notes,
+user.get("id"),
         )
         return row_to_dict(row)
 

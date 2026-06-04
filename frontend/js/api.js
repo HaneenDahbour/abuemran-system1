@@ -284,6 +284,8 @@
     getRecipients: () => apiFetch('/recipients'),
     getRecipientStatement: name =>
       apiFetch(`/recipients/${encodeURIComponent(name)}/statement`),
+    getRecipientPayments: () => apiFetch('/recipients/payments'),
+
     createRecipientPayment: data =>
       apiFetch('/recipients/payments', { method: 'POST', body: JSON.stringify(data) }),
     deleteRecipientPayment: id =>

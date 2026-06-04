@@ -2617,20 +2617,19 @@ async function doRejectInvoice(id) {
 
 function renderPaymentRow(p) {
   return `<tr data-payment-id="${p.id}">
-    <td><strong>${escHtml(p.client_name || '—')}</strong></td>
+    <td><strong>${escHtml(p.recipient_name || '—')}</strong></td>
     <td style="color:var(--gr);font-weight:700">+${fmt(p.amount)} د.أ</td>
     <td>${payMethodBadge(p.payment_method || 'cash')}</td>
     <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
-    <td style="color:var(--tx2);font-size:12px">${escHtml(
-    (p.notes || '').replace(/invoice_id:\d+\s*\|?\s*/g, '').replace(/method:\w+/g, '').trim() || '—'
-  )}</td>
-    <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePayment(${p.id})">🗑️</button>` : ''}</td>
+    <td>${escHtml(p.invoice_number || '—')}</td>
+    <td>${escHtml(p.employee_name || '—')}</td>
+    <td style="color:var(--tx2);font-size:12px">${escHtml(p.notes || '—')}</td>
+    <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment(${p.id})">🗑️</button>` : ''}</td>
   </tr>`;
 }
 async function renderPayments(container) {
   let payments = [];
-  try { payments = await API.getPayments() || []; } catch (e) { payments = []; }
-
+  try { payments = await API.getRecipientPayments() || []; } catch (e) { payments = []; }
   container.innerHTML = `
     <div class="page-header">
       <div>
@@ -2638,7 +2637,7 @@ async function renderPayments(container) {
         <div class="page-sub">${payments.length} عملية مسجّلة</div>
       </div>
       <div style="display:flex; gap:10px">
-        ${isAccountant() ? `<button class="btn btn-success" onclick="openPaymentModal()">+ تسجيل مقبوضة</button>` : ''}
+        ${isAccountant() ? `<button class="btn btn-success" onclick="openRecipientPayment('', null)">+ تسجيل مقبوضة</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="printPaymentsFromEncoded(${jsString(encodePayload(payments))})">🖨️</button>
       </div>
     </div>
@@ -2646,16 +2645,37 @@ async function renderPayments(container) {
     <div class="card" style="padding:0; overflow:hidden">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>العميل</th><th>المبلغ</th><th>طريقة الدفع</th><th>التاريخ</th><th>ملاحظات</th><th>الإجراءات</th></tr></thead>
+<thead>
+  <tr>
+    <th>الزبون / مطلوب من السادة</th>
+    <th>المبلغ</th>
+    <th>طريقة الدفع</th>
+    <th>التاريخ</th>
+    <th>الفاتورة</th>
+    <th>سجّلها الموظف</th>
+    <th>ملاحظات</th>
+    <th>الإجراءات</th>
+  </tr>
+</thead>
           ${payments.length
       ? payments.map(renderPaymentRow).join('')
-      : emptyRow('لا توجد مقبوضات', 6)}
+      : emptyRow('لا توجد مقبوضات', 8)}
         </table>
       </div>
     </div>
   `;
 }
+async function deleteRecipientPayment(id) {
+  if (!confirm('حذف هذه المقبوضة؟')) return;
 
+  try {
+    await API.deleteRecipientPayment(id);
+    toast('تم حذف المقبوضة ✅', 'success');
+    navigateTo('payments');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
 function openPaymentModal(clientId = null, invoiceId = null) {
   window._paymentInvoiceId = invoiceId || null;
 
