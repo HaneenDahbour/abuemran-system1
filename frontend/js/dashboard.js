@@ -1626,33 +1626,42 @@ function openInvoiceModal(invoice = null) {
     </div>
   `, '980px');
 
-  Promise.all([
+  Promise.allSettled([
     API.getProducts(),
     API.getWarehouseCategories()
-  ])
-    .then(([prods, categories]) => {
-      window._productsCache = Array.isArray(prods) ? prods : [];
-      window._invoiceCategoriesCache = Array.isArray(categories) ? categories : [];
+  ]).then(([productsRes, categoriesRes]) => {
+    const prods =
+      productsRes.status === 'fulfilled' && Array.isArray(productsRes.value)
+        ? productsRes.value
+        : (Array.isArray(window._productsCache) ? window._productsCache : []);
 
-      const oldItems = Array.isArray(invoice?.items) ? invoice.items : [];
+    const categories =
+      categoriesRes.status === 'fulfilled' && Array.isArray(categoriesRes.value)
+        ? categoriesRes.value
+        : (Array.isArray(window._whCategoriesCache) ? window._whCategoriesCache : []);
 
-      if (oldItems.length) {
-        oldItems.forEach(item => addInvoiceItemRow(item));
-      } else {
-        addInvoiceItemRow();
-      }
+    window._productsCache = prods;
+    window._invoiceCategoriesCache = categories;
 
-      calcInvoiceItemsTotal();
-      handleInvoicePaymentChange();
-    })
-    .catch(() => {
-      window._productsCache = [];
-      window._invoiceCategoriesCache = [];
+    if (categories.length) {
+      window._whCategoriesCache = categories;
+    }
+
+    const oldItems = Array.isArray(invoice?.items) ? invoice.items : [];
+
+    if (oldItems.length) {
+      oldItems.forEach(item => addInvoiceItemRow(item));
+    } else {
       addInvoiceItemRow();
-      calcInvoiceItemsTotal();
-      handleInvoicePaymentChange();
-    });
+    }
 
+    if (!categories.length) {
+      toast('لم يتم تحميل الفئات. افتحي المستودع أو اعملي تحديث للصفحة.', 'warning');
+    }
+
+    calcInvoiceItemsTotal();
+    handleInvoicePaymentChange();
+  });
 }
 function toggleInvoiceItems() {
   const checked = document.getElementById('inv_has_items')?.checked;
@@ -1966,7 +1975,15 @@ function getInvoiceProductCategoryId(productId) {
 }
 
 function invoiceCategoryOptionsHtml(selectedCategoryId = '') {
-  const categories = window._invoiceCategoriesCache || window._whCategoriesCache || [];
+  const invoiceCats = Array.isArray(window._invoiceCategoriesCache)
+    ? window._invoiceCategoriesCache
+    : [];
+
+  const warehouseCats = Array.isArray(window._whCategoriesCache)
+    ? window._whCategoriesCache
+    : [];
+
+  const categories = invoiceCats.length ? invoiceCats : warehouseCats;
 
   return categories.map(cat => `
     <option value="${cat.id}" ${String(cat.id) === String(selectedCategoryId) ? 'selected' : ''}>
