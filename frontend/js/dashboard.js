@@ -1626,7 +1626,22 @@ function openInvoiceModal(invoice = null) {
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `, '980px');
+  if (!window._clientsCache || !window._clientsCache.length) {
+    API.getClients().then(cls => {
+      window._clientsCache = cls || [];
 
+      const sel = document.getElementById('inv_client');
+      if (sel) {
+        sel.innerHTML =
+          '<option value="">اختر الموظف</option>' +
+          window._clientsCache.map(c => `
+          <option value="${c.id}" ${String(invoice?.client_id || '') === String(c.id) ? 'selected' : ''}>
+            ${escHtml(c.name)}
+          </option>
+        `).join('');
+      }
+    }).catch(() => { });
+  }
   Promise.allSettled([
     API.getProducts(),
     API.getWarehouseCategories()
