@@ -1255,8 +1255,7 @@ function renderInvoiceRow(inv) {
       <strong>#${escHtml(inv.invoice_number || inv.id)}</strong>
       ${wfStatus === 'pending' ? '<span style="font-size:10px;color:var(--am);margin-right:4px">⏳</span>' : ''}
     </td>
-<td>${escHtml(inv.created_by_name || '—')}</td>    <td>
-      ${recip
+<td>${escHtml(inv.client_name || inv.created_by_name || '—')}</td>      ${recip
       ? `<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="viewRecipientStatement(${jsString(recip)})">${escHtml(recip)}</button>`
       : `<span style="color:var(--tx3)">—</span>`}
     </td>
@@ -1501,11 +1500,13 @@ function openInvoiceModal(invoice = null) {
       <label class="form-label">المطلوب من السادة</label>
     <input class="form-input" id="inv_recipient" value="${escHtml(recipient)}" placeholder="اسم الزبون الذي عليه الدفع" required>    </div>
 
-    <div class="form-row">
-  <div class="form-group">
-    <label class="form-label">كتبها الموظف</label>
-    <input class="form-input" value="${escHtml((getUser() || {}).full_name || '—')}" disabled>
-  </div>
+    <div class="form-group">
+  <label class="form-label">كتبها الموظف *</label>
+  <select class="form-select" id="inv_client">
+    <option value="">اختر الموظف</option>
+    ${clientOpts}
+  </select>
+</div>
 
   <div class="form-group">
     <label class="form-label">رقم الفاتورة</label>
