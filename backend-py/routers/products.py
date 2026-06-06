@@ -368,7 +368,7 @@ def style_export_sheet(ws):
 
     ws.auto_filter.ref = ws.dimensions
 
-
+@router.get("")
 @router.get("/")
 async def get_products(user=Depends(get_current_user)):
     pool = await get_pool()
@@ -388,7 +388,7 @@ async def get_products(user=Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+@router.post("")
 @router.post("/")
 async def create_product(data: ProductRequest, user=Depends(get_current_user)):
     require_warehouse_editor(user)
