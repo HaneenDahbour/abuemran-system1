@@ -7108,28 +7108,46 @@ function openAddEmployeeModal() {
 
 async function saveNewEmployee() {
   const name = document.getElementById('emp_name')?.value?.trim();
-  if (!name) { toast('الاسم مطلوب فقط', 'error'); return; }
 
-  const username = document.getElementById('emp_user')?.value?.trim()
+  if (!name) {
+    toast('الاسم مطلوب فقط', 'error');
+    return;
+  }
+
+  const username =
+    document.getElementById('emp_user')?.value?.trim()
     || 'emp_' + Date.now().toString().slice(-6);
 
-  const password = document.getElementById('emp_pass')?.value?.trim()
+  const password =
+    document.getElementById('emp_pass')?.value?.trim()
     || 'Abu@1234';
 
   const role = document.getElementById('emp_role')?.value || 'employee';
 
   const btn = document.querySelector('#global-modal .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'جاري الحفظ...';
+  }
 
   try {
-    await API.createUser({ full_name: name, username, password, role });
+    await API.createUser({
+      full_name: name,
+      username,
+      password,
+      role,
+    });
+
     toast(`✅ تم إضافة ${name} — المستخدم: ${username} — كلمة المرور: ${password}`, 'success');
     closeModal();
     window._employeesCache = null;
     navigateTo('employees');
   } catch (e) {
     toast(e.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'إضافة الموظف'; }
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'إضافة الموظف';
+    }
   }
 }
 async function deleteEmployee(id, name) {
@@ -7309,19 +7327,7 @@ async function saveSalaryForEmployee(userId, employeeName) {
   }
 }
 
-async function saveNewEmployee() {
-  const name = document.getElementById('emp_name')?.value?.trim();
-  const username = document.getElementById('emp_user')?.value?.trim();
-  const password = document.getElementById('emp_pass')?.value;
-  const role = document.getElementById('emp_role')?.value;
-  if (!name || !username || !password) { toast('يرجى ملء جميع الحقول', 'error'); return; }
-  try {
-    await API.createUser({ full_name: name, username, password, role });
-    toast('تم إضافة الموظف ✅', 'success');
-    closeModal();
-    navigateTo('employees');
-  } catch (e) { toast(e.message, 'error'); }
-}
+
 
 async function deleteEmployee(id, name) {
   if (!confirm(`حذف الموظف "${name}"؟`)) return;
@@ -7563,5 +7569,87 @@ async function deleteSalary(id) {
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+  }
+}
+function openExpensePageModal() {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">📋 إضافة مصروف</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اسم المصروف *</label>
+      <input class="form-input" id="pg_exp_name" placeholder="مثال: كهرباء، أجار، بنزين">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="pg_exp_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="pg_exp_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">التصنيف</label>
+      <input class="form-input" id="pg_exp_category" placeholder="تشغيل، نقل، مكتب...">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pg_exp_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePageExpense()">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function savePageExpense() {
+  const name = document.getElementById('pg_exp_name')?.value?.trim();
+  const amount = parseFloat(document.getElementById('pg_exp_amount')?.value);
+
+  if (!name) {
+    toast('اسم المصروف مطلوب', 'error');
+    return;
+  }
+
+  if (!amount || amount <= 0) {
+    toast('المبلغ غير صحيح', 'error');
+    return;
+  }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'جاري الحفظ...';
+  }
+
+  try {
+    await API.createExpense({
+      name,
+      amount,
+      expense_type: 'daily',
+      category: document.getElementById('pg_exp_category')?.value || null,
+      expense_date: document.getElementById('pg_exp_date')?.value,
+      notes: document.getElementById('pg_exp_notes')?.value || null,
+      is_fixed: false,
+    });
+
+    toast('تم حفظ المصروف ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'حفظ';
+    }
   }
 }

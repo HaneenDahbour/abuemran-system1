@@ -755,8 +755,7 @@ async def update_invoice(
                     SET client_id=$1, invoice_number=$2, amount=$3, net_amount=$4,
                         tax_amount=$5, total_amount=$6, date=$7, payment_method=$8,
                         notes=$9, recipient_name=$10, initial_paid_amount=$11,
-                        invoice_writer_name=$12
-                    WHERE id=$13
+attributed_employee_id=$12                    WHERE id=$13
                     RETURNING *
                     """,
                     data.client_id,
@@ -767,8 +766,7 @@ async def update_invoice(
                     clean_text(data.notes),
                     recipient_name,
                     paid,
-                    clean_text(data.invoice_writer_name),
-                    invoice_id,
+                    data.attributed_employee_id or user.get("id"),                    invoice_id,
                 )
 
                 if current_status == "approved":
