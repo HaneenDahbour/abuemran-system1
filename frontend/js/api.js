@@ -1,4 +1,4 @@
-// js/api.js
+﻿// js/api.js
 
 (function () {
   function isBrowser() {
@@ -111,6 +111,7 @@
       apiFetch('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
     deleteUser: id =>
       apiFetch(`/auth/users/${requireId(id, 'معرّف المستخدم')}`, { method: 'DELETE' }),
+    getEmployeesList: () => apiFetch('/auth/employees-list'),
 
     // ── Search ────────────────────────────────────────────────────
     search: q => apiFetch(`/search?q=${encodeURIComponent(q)}`),
@@ -145,6 +146,24 @@
         method: 'POST',
         body: JSON.stringify({ reason }),
       }),
+    // ── Expenses / Salaries / Advances ─────────────────────────────
+    getExpenses: () => apiFetch('/expenses'),
+    createExpense: data =>
+      apiFetch('/expenses', { method: 'POST', body: JSON.stringify(data) }),
+    deleteExpense: id =>
+      apiFetch(`/expenses/${requireId(id, 'معرّف المصروف')}`, { method: 'DELETE' }),
+
+    getSalaries: () => apiFetch('/expenses/salaries'),
+    createSalary: data =>
+      apiFetch('/expenses/salaries', { method: 'POST', body: JSON.stringify(data) }),
+    deleteSalary: id =>
+      apiFetch(`/expenses/salaries/${requireId(id, 'معرّف الراتب')}`, { method: 'DELETE' }),
+
+    getAdvances: () => apiFetch('/expenses/advances'),
+    createAdvance: data =>
+      apiFetch('/expenses/advances', { method: 'POST', body: JSON.stringify(data) }),
+    deleteAdvance: id =>
+      apiFetch(`/expenses/advances/${requireId(id, 'معرّف السلفة')}`, { method: 'DELETE' }),
 
     // ── Payments ──────────────────────────────────────────────────
     getPayments: () => apiFetch('/payments'),
