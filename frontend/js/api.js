@@ -136,7 +136,7 @@
     deleteInvoice: id =>
       apiFetch(`/invoices/${requireId(id, 'Ù…Ø¹Ø±Ù‘Ù Ø§Ù„ÙØ§ØªÙˆØ±Ø©')}`, { method: 'DELETE' }),
     approveInvoice: id =>
-      apiFetch(`/invoices/${requireId(id, 'Ù…Ø¹Ø±Ù‘Ù Ø§Ù„ÙØ§ØªÙˆØ±Ø©')}/approve`, {
+      apiFetch(`/invoices/${requireId(id, 'معرّف الفاتورة')}/approve`, {
         method: 'POST',
         body: JSON.stringify({}),
       }),
@@ -148,9 +148,13 @@
     // â”€â”€ Expenses / Salaries â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     getExpenses: () => apiFetch('/expenses'),
     createExpense: data => apiFetch('/expenses', { method: 'POST', body: JSON.stringify(data) }),
+    deleteExpense: id =>
+      apiFetch(`/expenses/${requireId(id, 'معرّف المصروف')}`, { method: 'DELETE' }),
 
     getSalaries: () => apiFetch('/expenses/salaries'),
     createSalary: data => apiFetch('/expenses/salaries', { method: 'POST', body: JSON.stringify(data) }),
+    deleteSalary: id =>
+      apiFetch(`/expenses/salaries/${requireId(id, 'معرّف الراتب')}`, { method: 'DELETE' }),
 
     getAdvances: () => apiFetch('/expenses/advances'),
     createAdvance: data => apiFetch('/expenses/advances', { method: 'POST', body: JSON.stringify(data) }),
@@ -305,4 +309,5 @@
   window.apiFetch = apiFetch;
   window.API = API;
 })();
+
 
