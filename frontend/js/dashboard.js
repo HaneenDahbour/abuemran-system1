@@ -7058,27 +7058,45 @@ function openAddEmployeeModal() {
       <div class="modal-title">➕ إضافة موظف جديد</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
+
+    <div class="alert alert-info" style="font-size:12px;margin-bottom:12px">
+      الحقل الإلزامي الوحيد هو <strong>الاسم</strong>.
+      اسم المستخدم وكلمة المرور تُولَّدان تلقائياً إن تُركا فارغَين.
+    </div>
+
     <div class="form-group">
       <label class="form-label">الاسم الكامل *</label>
       <input class="form-input" id="emp_name" placeholder="مثال: أحمد محمد">
     </div>
+
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">اسم المستخدم *</label>
-        <input class="form-input" id="emp_user" placeholder="بالإنجليزية">
+        <label class="form-label">
+          اسم المستخدم
+          <span style="font-size:10px;color:var(--tx3);margin-right:4px">تلقائي إن تُرك فارغاً</span>
+        </label>
+        <input class="form-input" id="emp_user"
+               placeholder="emp_xxxxxx"
+               oninput="this.dataset.manual='1'">
       </div>
       <div class="form-group">
-        <label class="form-label">كلمة المرور *</label>
-        <input class="form-input" id="emp_pass" type="password" placeholder="••••••">
+        <label class="form-label">
+          كلمة المرور
+          <span style="font-size:10px;color:var(--tx3);margin-right:4px">افتراضي: Abu@1234</span>
+        </label>
+        <input class="form-input" id="emp_pass" type="text"
+               placeholder="Abu@1234">
       </div>
     </div>
+
     <div class="form-group">
-      <label class="form-label">الصلاحية *</label>
+      <label class="form-label">الصلاحية</label>
       <select class="form-select" id="emp_role">
         <option value="employee">موظف مبيعات</option>
         <option value="accountant">محاسب</option>
       </select>
     </div>
+
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-primary" style="flex:1" onclick="saveNewEmployee()">
         إضافة الموظف
@@ -7129,12 +7147,15 @@ async function renderEmployees(container) {
 
   let users = [], salaries = [], advances = [];
   try {
-    [users, salaries, advances] = await Promise.all([
+    const [usersRes, salariesRes, advancesRes] = await Promise.allSettled([
       API.getUsers(),
       API.getSalaries(),
       API.getAdvances(),
     ]);
-  } catch (e) { users = []; salaries = []; advances = []; }
+    users = usersRes.status === 'fulfilled' ? (usersRes.value || []) : [];
+    salaries = salariesRes.status === 'fulfilled' ? (salariesRes.value || []) : [];
+    advances = advancesRes.status === 'fulfilled' ? (advancesRes.value || []) : [];
+  } catch (e) { users = []; }
 
   const employees = (users || []).filter(u =>
     ['admin', 'accountant', 'employee'].includes(u.role)

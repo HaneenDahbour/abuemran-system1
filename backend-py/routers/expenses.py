@@ -63,18 +63,17 @@ class SalaryIn(BaseModel):
 @router.get("")
 async def list_expenses(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
-
     pool = await get_pool()
-
-    rows = await pool.fetch("""
-        SELECT e.*, u.full_name AS created_by_name
-        FROM cashbox_expenses e
-        LEFT JOIN users u ON u.id = e.created_by
-        ORDER BY e.expense_date DESC, e.id DESC
-    """)
-
-    return [row_to_dict(r) for r in rows]
-
+    try:
+        rows = await pool.fetch("""
+            SELECT e.*, u.full_name AS created_by_name
+            FROM cashbox_expenses e
+            LEFT JOIN users u ON u.id = e.created_by
+            ORDER BY e.expense_date DESC, e.id DESC
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception:
+        return []
 
 @router.post("")
 async def create_expense(data: ExpenseIn, user=Depends(get_current_user)):
@@ -135,18 +134,17 @@ async def delete_expense(expense_id: int, user=Depends(get_current_user)):
 @router.get("/salaries")
 async def list_salaries(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
-
     pool = await get_pool()
-
-    rows = await pool.fetch("""
-        SELECT s.*, u.full_name AS linked_employee_name
-        FROM employee_salaries s
-        LEFT JOIN users u ON u.id = s.employee_user_id
-        ORDER BY s.salary_month DESC, s.id DESC
-    """)
-
-    return [row_to_dict(r) for r in rows]
-
+    try:
+        rows = await pool.fetch("""
+            SELECT s.*, u.full_name AS linked_employee_name
+            FROM employee_salaries s
+            LEFT JOIN users u ON u.id = s.employee_user_id
+            ORDER BY s.salary_month DESC, s.id DESC
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception:
+        return []
 
 @router.post("/salaries")
 async def create_salary(data: SalaryIn, user=Depends(get_current_user)):
@@ -219,15 +217,16 @@ async def list_employees_for_dropdown(user=Depends(get_current_user)):
 async def list_advances(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
     pool = await get_pool()
-    rows = await pool.fetch("""
-        SELECT ea.*, u.full_name AS created_by_name
-        FROM employee_advances ea
-        LEFT JOIN users u ON u.id = ea.created_by
-        ORDER BY ea.advance_date DESC, ea.id DESC
-    """)
-    return [row_to_dict(r) for r in rows]
-
-
+    try:
+        rows = await pool.fetch("""
+            SELECT ea.*, u.full_name AS linked_employee_name
+            FROM employee_advances ea
+            LEFT JOIN users u ON u.id = ea.user_id
+            ORDER BY ea.advance_date DESC, ea.id DESC
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception:
+        return []
 @router.post("/advances")
 async def create_advance(data: AdvanceIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
