@@ -1,10 +1,10 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† v3</title>
+  <title>نظام أبو عمران v3</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link
@@ -13,7 +13,7 @@
   <link rel="stylesheet" href="css/style.css" />
 
   <style>
-    /* â•â• AI AGENT â€” Complete Redesign â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+    /* ══ AI AGENT — Complete Redesign ══════════════════════════════ */
     .ai-widget {
       position: fixed;
       bottom: 28px;
@@ -504,43 +504,43 @@
 
 <body>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• LOGIN PAGE â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ═══════════════ LOGIN PAGE ═══════════════ -->
   <div id="loginPage" class="login-page hidden">
     <div class="login-card">
-      <div class="login-logo">ðŸ“¦</div>
-      <h1 class="login-title">Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù†</h1>
-      <p class="login-sub">Ø§Ù„Ù…Ù†ØµØ© Ø§Ù„Ù…ØªÙƒØ§Ù…Ù„Ø© Ù„Ø¥Ø¯Ø§Ø±Ø© Ø§Ù„Ø£Ø¹Ù…Ø§Ù„ ÙˆØ§Ù„Ù…Ø­Ø§Ø³Ø¨Ø©</p>
+      <div class="login-logo">📦</div>
+      <h1 class="login-title">نظام أبو عمران</h1>
+      <p class="login-sub">المنصة المتكاملة لإدارة الأعمال والمحاسبة</p>
 
       <div class="form-group">
-        <label class="form-label">Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù…</label>
+        <label class="form-label">اسم المستخدم</label>
         <input class="form-input" id="lu" type="text" placeholder="admin" autocomplete="username" />
       </div>
 
       <div class="form-group">
-        <label class="form-label">ÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ±</label>
-        <input class="form-input" id="lp" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢" autocomplete="current-password" />
+        <label class="form-label">كلمة المرور</label>
+        <input class="form-input" id="lp" type="password" placeholder="••••••" autocomplete="current-password" />
       </div>
 
       <button class="btn btn-primary btn-full btn-lg" id="login-btn" style="margin-top:8px">
-        ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ø¯Ø®ÙˆÙ„
+        تسجيل الدخول
       </button>
 
       <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--brd)">
         <p style="font-size:11px; color:var(--tx3); text-align:center">
-          Â© 2023 Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù†. Ø¬Ù…ÙŠØ¹ Ø§Ù„Ø­Ù‚ÙˆÙ‚ Ù…Ø­ÙÙˆØ¸Ø©.
+          © 2023 أبو عمران. جميع الحقوق محفوظة.
         </p>
       </div>
     </div>
   </div>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• MAIN APP â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ═══════════════ MAIN APP ═══════════════ -->
   <div id="appLayout" class="app-layout hidden">
 
     <!-- TOPBAR -->
     <header class="topbar">
       <div class="brand">
-        <span>ðŸ“¦</span>
-        <span>Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† v3</span>
+        <span>📦</span>
+        <span>أبو عمران v3</span>
         <div class="brand-dot"></div>
       </div>
 
@@ -550,7 +550,7 @@
             <input
               id="global-search-input"
               type="text"
-              placeholder="ðŸ” Ø¨Ø­Ø« Ø´Ø§Ù…Ù„... (Ctrl+K)"
+              placeholder="🔍 بحث شامل... (Ctrl+K)"
               oninput="handleGlobalSearch(this.value)"
               onfocus="this.style.background='rgba(255,255,255,.2)'; this.style.width='320px'"
               onblur="closeSearchInputBlur(this)"
@@ -594,7 +594,7 @@
           </div>
         </div>
 
-        <button class="btn-logout" onclick="doLogout()">Ø®Ø±ÙˆØ¬</button>
+        <button class="btn-logout" onclick="doLogout()">خروج</button>
       </div>
     </header>
 
@@ -607,32 +607,32 @@
     <main class="main" id="mainContent">
       <div class="loading">
         <div class="spinner"></div>
-        <p>Ø¬Ø§Ø±ÙŠ Ø§Ù„ØªØ­Ù…ÙŠÙ„...</p>
+        <p>جاري التحميل...</p>
       </div>
     </main>
   </div>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• AI AGENT WIDGET â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ═══════════════ AI AGENT WIDGET ═══════════════ -->
   <div class="ai-widget" id="ai-widget" style="display:none">
 
     <div class="ai-panel" id="aiPanel">
       <div class="ai-head">
-        <div class="ai-head-icon">ðŸ¤–</div>
+        <div class="ai-head-icon">🤖</div>
         <div class="ai-head-text">
-          <div class="ai-head-title">Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯ Ø§Ù„Ù…Ø§Ù„ÙŠ Ø§Ù„Ø°ÙƒÙŠ</div>
-          <div class="ai-head-sub" id="ai-status-text">Ø¬Ø§Ù‡Ø² Ù„Ù„Ù…Ø³Ø§Ø¹Ø¯Ø©</div>
+          <div class="ai-head-title">المساعد المالي الذكي</div>
+          <div class="ai-head-sub" id="ai-status-text">جاهز للمساعدة</div>
         </div>
-        <button class="ai-head-close" onclick="toggleAI()">âœ•</button>
+        <button class="ai-head-close" onclick="toggleAI()">✕</button>
       </div>
 
       <div class="ai-analysis" id="ai-analysis-banner">
-        <div class="ai-analysis-icon">âœ¨</div>
+        <div class="ai-analysis-icon">✨</div>
         <div class="ai-analysis-text">
           <div class="ai-analysis-loading">
             <div class="ai-analysis-dot"></div>
             <div class="ai-analysis-dot"></div>
             <div class="ai-analysis-dot"></div>
-            <span style="font-size:11px; color:#9e9a94">Ø¬Ø§Ø±ÙŠ ØªØ­Ù„ÙŠÙ„ Ø§Ù„ÙˆØ¶Ø¹ Ø§Ù„Ù…Ø§Ù„ÙŠ...</span>
+            <span style="font-size:11px; color:#9e9a94">جاري تحليل الوضع المالي...</span>
           </div>
         </div>
       </div>
@@ -641,13 +641,13 @@
 
       <div class="ai-msgs" id="ai-messages">
         <div class="msg-bot">
-          Ø£Ù‡Ù„Ø§Ù‹! ðŸ‘‹ Ø£Ù†Ø§ Ù…Ø³Ø§Ø¹Ø¯Ùƒ Ø§Ù„Ù…Ø§Ù„ÙŠ Ø§Ù„Ø°ÙƒÙŠ. ÙŠÙ…ÙƒÙ†Ù†ÙŠ ØªØ­Ù„ÙŠÙ„ Ø§Ù„Ø¯ÙŠÙˆÙ† ÙˆØ§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª ÙˆÙ…ØªØ§Ø¨Ø¹Ø© Ø§Ù„Ø´ÙŠÙƒØ§Øª. ÙƒÙŠÙ ÙŠÙ…ÙƒÙ†Ù†ÙŠ Ù…Ø³Ø§Ø¹Ø¯ØªÙƒØŸ
+          أهلاً! 👋 أنا مساعدك المالي الذكي. يمكنني تحليل الديون والمبيعات ومتابعة الشيكات. كيف يمكنني مساعدتك؟
           <span class="msg-time" id="ai-welcome-time"></span>
         </div>
       </div>
 
       <div class="ai-input-row">
-        <input class="ai-input-field" id="ai-input" placeholder="Ø§Ø³Ø£Ù„Ù†ÙŠ Ø¹Ù† Ø§Ù„Ø­Ø³Ø§Ø¨Ø§Øª..." />
+        <input class="ai-input-field" id="ai-input" placeholder="اسألني عن الحسابات..." />
         <button class="ai-send-btn" onclick="sendAIMessage()" id="ai-send-btn">
           <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
@@ -656,7 +656,7 @@
       </div>
     </div>
 
-    <button class="ai-fab" onclick="toggleAI()" title="Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯ Ø§Ù„Ø°ÙƒÙŠ">
+    <button class="ai-fab" onclick="toggleAI()" title="المساعد الذكي">
       <div class="ai-fab-pulse"></div>
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path
@@ -673,11 +673,11 @@
     </button>
   </div>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• TOAST CONTAINER â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+  <!-- ═══════════════ TOAST CONTAINER ═══════════════ -->
   <div id="toast-wrap"></div>
 
-  <!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• SCRIPTS â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
-<script src="js/api.js?v=expense-delete-20260608-2"></script>
+  <!-- ═══════════════ SCRIPTS ═══════════════ -->
+<script src="js/api.js?v=slash-fix-20260602"></script>
   <script src="js/auth.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/search.js"></script>
@@ -753,22 +753,22 @@
 
     if (typeof window.apiFetch !== 'function') {
       window.apiFetch = async function () {
-        throw new Error('apiFetch ØºÙŠØ± Ù…Ø¹Ø±Ù‘ÙØ©. ØªØ£ÙƒØ¯ Ù…Ù† Ù…Ù„Ù js/api.js');
+        throw new Error('apiFetch غير معرّفة. تأكد من ملف js/api.js');
       };
     }
 
-    /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-       AI AGENT â€” Complete Logic
-    â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
+    /* ══════════════════════════════════════════════════════════
+       AI AGENT — Complete Logic
+    ══════════════════════════════════════════════════════════ */
     let aiOpen = false;
     let aiHistory = [];
     let aiAnalysisLoaded = false;
 
     const AI_CHIPS = {
-      admin: ['Ù…Ù„Ø®Øµ Ù…Ø§Ù„ÙŠ Ø§Ù„ÙŠÙˆÙ…', 'Ø£Ø¹Ù„Ù‰ Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡ Ø¯ÙŠÙ†Ø§Ù‹', 'Ø§Ù„Ø´ÙŠÙƒØ§Øª Ø§Ù„Ù…Ø³ØªØ­Ù‚Ø©', 'Ù…Ø¯ÙÙˆØ¹Ø§Øª Ù…Ø¹Ù„Ù‘Ù‚Ø©', 'ØªÙ‚Ø±ÙŠØ± Ø£Ø³Ø¨ÙˆØ¹ÙŠ'],
-      accountant: ['Ø§Ù„Ø´ÙŠÙƒØ§Øª Ù‡Ø°Ø§ Ø§Ù„Ø£Ø³Ø¨ÙˆØ¹', 'Ù…Ù„Ø®Øµ Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø§Øª', 'Ø¹Ù…Ù„Ø§Ø¡ Ø¨Ø®Ø·Ø± Ø¹Ø§Ù„Ù', 'Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø¯ÙŠÙˆÙ†'],
-      employee: ['Ù…Ù‚Ø¨ÙˆØ¶Ø§ØªÙŠ Ø§Ù„ÙŠÙˆÙ…', 'Ø§Ù„Ø´ÙŠÙƒØ§Øª Ø§Ù„Ù…Ø¹Ù„Ù‘Ù‚Ø©'],
-      client: ['Ø±ØµÙŠØ¯ÙŠ Ø§Ù„Ø­Ø§Ù„ÙŠ', 'Ø¢Ø®Ø± ÙÙˆØ§ØªÙŠØ±ÙŠ', 'Ø´ÙŠÙƒØ§ØªÙŠ Ø§Ù„Ù…Ø¹Ù„Ù‘Ù‚Ø©']
+      admin: ['ملخص مالي اليوم', 'أعلى العملاء ديناً', 'الشيكات المستحقة', 'مدفوعات معلّقة', 'تقرير أسبوعي'],
+      accountant: ['الشيكات هذا الأسبوع', 'ملخص المقبوضات', 'عملاء بخطر عالٍ', 'إجمالي الديون'],
+      employee: ['مقبوضاتي اليوم', 'الشيكات المعلّقة'],
+      client: ['رصيدي الحالي', 'آخر فواتيري', 'شيكاتي المعلّقة']
     };
 
     function initAIChips() {
@@ -824,7 +824,7 @@
 
         if (data?.analysis) {
           banner.innerHTML = `
-            <div class="ai-analysis-icon">âœ¨</div>
+            <div class="ai-analysis-icon">✨</div>
             <div class="ai-analysis-text" style="font-size:11.5px; line-height:1.65;">${nl2brSafe(data.analysis)}</div>
           `;
         } else {
@@ -855,7 +855,7 @@
       input.value = '';
       input.disabled = true;
       sendBtn.disabled = true;
-      if (statusEl) statusEl.textContent = 'ÙŠÙƒØªØ¨...';
+      if (statusEl) statusEl.textContent = 'يكتب...';
       chat.scrollTop = chat.scrollHeight;
 
       const typingEl = document.createElement('div');
@@ -882,7 +882,7 @@
 
         typingEl.remove();
 
-        const reply = res?.reply || 'Ù„Ù… Ø£ØªÙ…ÙƒÙ† Ù…Ù† Ø§Ù„Ø¥Ø¬Ø§Ø¨Ø©';
+        const reply = res?.reply || 'لم أتمكن من الإجابة';
         aiHistory.push({ role: 'assistant', content: reply });
 
         const replyTime = new Date().toLocaleTimeString('ar-JO', {
@@ -893,15 +893,15 @@
         chat.innerHTML += `<div class="msg-bot">${nl2brSafe(reply)}<span class="msg-time">${replyTime}</span></div>`;
       } catch (e) {
         typingEl.remove();
-        const errMsg = e?.message || 'Ø­Ø¯Ø« Ø®Ø·Ø£ ØºÙŠØ± Ù…ØªÙˆÙ‚Ø¹';
-        chat.innerHTML += `<div class="msg-bot" style="color:var(--rd)">âŒ ${escHtml(errMsg)}</div>`;
+        const errMsg = e?.message || 'حدث خطأ غير متوقع';
+        chat.innerHTML += `<div class="msg-bot" style="color:var(--rd)">❌ ${escHtml(errMsg)}</div>`;
       }
 
       chat.scrollTop = chat.scrollHeight;
       input.disabled = false;
       sendBtn.disabled = false;
       input.focus();
-      if (statusEl) statusEl.textContent = 'Ø¬Ø§Ù‡Ø² Ù„Ù„Ù…Ø³Ø§Ø¹Ø¯Ø©';
+      if (statusEl) statusEl.textContent = 'جاهز للمساعدة';
     }
 
     window._analyticsCache = {};
@@ -912,9 +912,9 @@
 
       container.innerHTML = `
         <div class="analytics-tabs">
-          <button class="atab ${period === 'daily' ? 'active' : ''}" onclick="loadAnalytics('${containerId}','daily')">ÙŠÙˆÙ…ÙŠ</button>
-          <button class="atab ${period === 'weekly' ? 'active' : ''}" onclick="loadAnalytics('${containerId}','weekly')">Ø£Ø³Ø¨ÙˆØ¹ÙŠ</button>
-          <button class="atab ${period === 'monthly' ? 'active' : ''}" onclick="loadAnalytics('${containerId}','monthly')">Ø´Ù‡Ø±ÙŠ</button>
+          <button class="atab ${period === 'daily' ? 'active' : ''}" onclick="loadAnalytics('${containerId}','daily')">يومي</button>
+          <button class="atab ${period === 'weekly' ? 'active' : ''}" onclick="loadAnalytics('${containerId}','weekly')">أسبوعي</button>
+          <button class="atab ${period === 'monthly' ? 'active' : ''}" onclick="loadAnalytics('${containerId}','monthly')">شهري</button>
         </div>
         <div id="analytics-chart-${containerId}">
           <div class="loading"><div class="spinner"></div></div>
@@ -926,7 +926,7 @@
 
     async function loadAnalytics(containerId, period) {
       const tabs = document.querySelectorAll(`#${containerId} .atab`);
-      const labelsMap = { daily: 'ÙŠÙˆÙ…ÙŠ', weekly: 'Ø£Ø³Ø¨ÙˆØ¹ÙŠ', monthly: 'Ø´Ù‡Ø±ÙŠ' };
+      const labelsMap = { daily: 'يومي', weekly: 'أسبوعي', monthly: 'شهري' };
       tabs.forEach(t => {
         t.classList.toggle('active', t.textContent.trim() === labelsMap[period]);
       });
@@ -941,12 +941,12 @@
         const sales = Array.isArray(data?.sales) ? data.sales : [];
 
         if (!sales.length) {
-          chartEl.innerHTML = `<div style="text-align:center; padding:30px; color:var(--tx3); font-size:13px">Ù„Ø§ ØªÙˆØ¬Ø¯ Ø¨ÙŠØ§Ù†Ø§Øª Ù„Ù‡Ø°Ù‡ Ø§Ù„ÙØªØ±Ø©</div>`;
+          chartEl.innerHTML = `<div style="text-align:center; padding:30px; color:var(--tx3); font-size:13px">لا توجد بيانات لهذه الفترة</div>`;
           return;
         }
 
         const maxVal = Math.max(...sales.map(s => parseFloat(s.total_sales || 0)), 1);
-        const labels = { daily: 'ÙŠÙˆÙ…', weekly: 'Ø£Ø³Ø¨ÙˆØ¹', monthly: 'Ø´Ù‡Ø±' };
+        const labels = { daily: 'يوم', weekly: 'أسبوع', monthly: 'شهر' };
 
         const bars = sales.slice(-12).map(s => {
           const totalSales = parseFloat(s.total_sales || 0);
@@ -960,14 +960,14 @@
               day: period === 'monthly' ? undefined : 'numeric'
             });
           } else {
-            dateLabel = escHtml(String(s.period || 'â€”'));
+            dateLabel = escHtml(String(s.period || '—'));
           }
 
           return `
             <div class="chart-bar-col">
               <div class="chart-bar"
                    style="height:${height}%; background: linear-gradient(180deg,#1a4fd6,#1238a8);"
-                   data-val="${fmt(totalSales)} Ø¯.Ø£"></div>
+                   data-val="${fmt(totalSales)} د.أ"></div>
               <div class="chart-bar-label">${dateLabel}</div>
             </div>
           `;
@@ -980,19 +980,19 @@
         chartEl.innerHTML = `
           <div style="display:flex; gap:16px; margin-bottom:12px; flex-wrap:wrap">
             <div style="background:#eef3ff; border-radius:9px; padding:8px 14px; font-size:12px">
-              <div style="color:#9e9a94; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px">Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª</div>
-              <div style="font-size:17px; font-weight:800; color:#1a4fd6">${fmt(totalSales)} <span style="font-size:11px">Ø¯.Ø£</span></div>
+              <div style="color:#9e9a94; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px">المبيعات</div>
+              <div style="font-size:17px; font-weight:800; color:#1a4fd6">${fmt(totalSales)} <span style="font-size:11px">د.أ</span></div>
             </div>
             <div style="background:#edfaf4; border-radius:9px; padding:8px 14px; font-size:12px">
-              <div style="color:#9e9a94; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px">Ø§Ù„Ù…Ø­ØµÙ‘Ù„</div>
-              <div style="font-size:17px; font-weight:800; color:#0a7650">${fmt(paymentsTotal)} <span style="font-size:11px">Ø¯.Ø£</span></div>
+              <div style="color:#9e9a94; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px">المحصّل</div>
+              <div style="font-size:17px; font-weight:800; color:#0a7650">${fmt(paymentsTotal)} <span style="font-size:11px">د.أ</span></div>
             </div>
           </div>
           <div class="chart-bar-wrap">${bars}</div>
-          <div style="font-size:10px; color:#9e9a94; text-align:center; margin-top:6px">Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª ${labels[period]}</div>
+          <div style="font-size:10px; color:#9e9a94; text-align:center; margin-top:6px">المبيعات ${labels[period]}</div>
         `;
       } catch (e) {
-        chartEl.innerHTML = `<div class="alert alert-danger" style="font-size:12px">ØªØ¹Ø°Ù‘Ø± ØªØ­Ù…ÙŠÙ„ Ø§Ù„Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª</div>`;
+        chartEl.innerHTML = `<div class="alert alert-danger" style="font-size:12px">تعذّر تحميل الإحصائيات</div>`;
       }
     }
 
@@ -1042,4 +1042,3 @@
 </body>
 
 </html>
-
