@@ -696,7 +696,10 @@ async def update_invoice(
 
     recipient_name = clean_text(data.recipient_name)
     if not recipient_name:
-        raise HTTPException(status_code=400, detail="اسم الزبون / مطلوب من السادة مطلوب")
+        raise HTTPException(
+            status_code=400,
+            detail="اسم الزبون / مطلوب من السادة مطلوب"
+        )
 
     items = normalize_items(data.items or [])
 
@@ -706,6 +709,7 @@ async def update_invoice(
         net = money3(data.net_amount or 0)
 
     tax = money3(data.tax_amount or 0)
+
     total = (
         money3(data.total_amount)
         if data.total_amount is not None
@@ -713,91 +717,180 @@ async def update_invoice(
     )
 
     if net <= 0:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº Ø§Ù„ØµØ§ÙÙŠ ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±")
+        raise HTTPException(
+            status_code=400,
+            detail="المبلغ الصافي يجب أن يكون أكبر من صفر"
+        )
+
     if total <= 0:
-        raise HTTPException(status_code=400, detail="Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± ØµØ­ÙŠØ­")
+        raise HTTPException(
+            status_code=400,
+            detail="إجمالي الفاتورة غير صحيح"
+        )
 
     payment_method = normalize_payment_method(data.payment_method)
-    paid, remaining, payment_status = calculate_payment(total, payment_method, data.paid_amount)
+    paid, remaining, payment_status = calculate_payment(
+        total,
+        payment_method,
+        data.paid_amount,
+    )
 
     invoice_number = clean_text(data.invoice_number) or f"INV-{invoice_id}"
     invoice_date = parse_invoice_date(data.invoice_date)
+
+    attributed_employee_id = data.attributed_employee_id or user.get("id")
 
     pool = await get_pool()
 
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                invoice = await conn.fetchrow(
-                    "SELECT id, invoice_number, status FROM invoices WHERE id=$1 FOR UPDATE",
+                existing = await conn.fetchrow(
+                    """
+                    SELECT *
+                    FROM invoices
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
                     invoice_id,
                 )
-                if not invoice:
-                    raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
 
-                current_status = invoice.get("status") or "approved"
+                if not existing:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="الفاتورة غير موجودة"
+                    )
+
+                current_status = existing["status"] or "approved"
+
                 if current_status == "rejected":
-                    raise HTTPException(status_code=400, detail="Ù„Ø§ ÙŠÙ…ÙƒÙ† ØªØ¹Ø¯ÙŠÙ„ ÙØ§ØªÙˆØ±Ø© Ù…Ø±ÙÙˆØ¶Ø©")
+                    raise HTTPException(
+                        status_code=400,
+                        detail="لا يمكن تعديل فاتورة مرفوضة"
+                    )
 
-                await ensure_client_exists(conn, data.client_id)
+                # client_id optional now.
+                # If client_id exists, check it. If null, recipient_name is enough.
+                if data.client_id:
+                    await ensure_client_exists(conn, data.client_id)
 
-                # Handle items based on current status
+                # If invoice is already approved, undo old effects first.
+                # Old effects = old stock deduction + old automatic payment.
                 if current_status == "approved":
-                    # Restore old stock, delete old payment, then re-insert with new stock
                     await restore_stock_from_invoice_items(conn, invoice_id, user)
                     await delete_auto_payment_for_invoice(conn, invoice_id)
 
-                await conn.execute("DELETE FROM invoice_items WHERE invoice_id=$1", invoice_id)
+                # Remove old invoice items in both pending and approved cases.
+                await conn.execute(
+                    "DELETE FROM invoice_items WHERE invoice_id = $1",
+                    invoice_id,
+                )
 
                 updated = await conn.fetchrow(
                     """
                     UPDATE invoices
-                    SET client_id=$1, invoice_number=$2, amount=$3, net_amount=$4,
-                        tax_amount=$5, total_amount=$6, date=$7, payment_method=$8,
-                        notes=$9, recipient_name=$10, initial_paid_amount=$11,
-attributed_employee_id=$12                    WHERE id=$13
+                    SET client_id = $1,
+                        invoice_number = $2,
+                        amount = $3,
+                        net_amount = $4,
+                        tax_amount = $5,
+                        total_amount = $6,
+                        date = $7,
+                        payment_method = $8,
+                        notes = $9,
+                        recipient_name = $10,
+                        initial_paid_amount = $11,
+                        attributed_employee_id = $12,
+                        invoice_writer_name = (
+                            SELECT full_name
+                            FROM users
+                            WHERE id = $12
+                            LIMIT 1
+                        )
+                    WHERE id = $13
                     RETURNING *
                     """,
                     data.client_id,
                     invoice_number,
-                    net, net, tax, total,
+                    net,
+                    net,
+                    tax,
+                    total,
                     invoice_date,
                     payment_method,
                     clean_text(data.notes),
                     recipient_name,
                     paid,
-                    data.attributed_employee_id or user.get("id"),                    invoice_id,
+                    attributed_employee_id,
+                    invoice_id,
                 )
 
                 if current_status == "approved":
+                    # Re-apply new invoice effects after editing.
+                    # This deducts stock according to the new items.
                     await insert_invoice_items_and_deduct_stock(
-                        conn, invoice_id, invoice_number, items, user
+                        conn,
+                        invoice_id,
+                        invoice_number,
+                        items,
+                        user,
                     )
+
+                    # Create new automatic payment only if paid > 0.
                     await insert_auto_payment(
-                        conn, data, invoice_id, invoice_number, paid,
-                        invoice_date, payment_method, user,
+                        conn,
+                        data,
+                        invoice_id,
+                        invoice_number,
+                        paid,
+                        invoice_date,
+                        payment_method,
+                        user,
                     )
                 else:
-                    # Still pending: just update items, no stock touch
+                    # Pending invoice: only save items.
+                    # No stock deduction and no payment until approve.
                     await insert_invoice_items_only(conn, invoice_id, items)
 
                 await insert_audit(
-                    conn, user, "ØªØ¹Ø¯ÙŠÙ„ ÙØ§ØªÙˆØ±Ø©", invoice_id,
-                    f"ØªØ¹Ø¯ÙŠÙ„ ÙØ§ØªÙˆØ±Ø© #{invoice_number} â€” {total:.3f}",
+                    conn,
+                    user,
+                    "تعديل فاتورة",
+                    invoice_id,
+                    f"تعديل فاتورة #{invoice_number} — {total:.3f} — الحالة: {current_status}",
                 )
 
                 out = enrich_invoice(row_to_dict(updated))
-                out["paid_amount"] = paid if current_status == "approved" else 0
-                out["remaining_amount"] = remaining if current_status == "approved" else total
-                out["payment_status"] = payment_status if current_status == "approved" else "debt"
+
+                if current_status == "approved":
+                    out["paid_amount"] = paid
+                    out["remaining_amount"] = remaining
+                    out["payment_status"] = payment_status
+                else:
+                    out["paid_amount"] = 0
+                    out["remaining_amount"] = total
+                    out["payment_status"] = "debt"
+
                 out["items"] = await fetch_invoice_items(conn, invoice_id)
+
+                emp_name = await conn.fetchval(
+                    "SELECT full_name FROM users WHERE id = $1",
+                    attributed_employee_id,
+                )
+
+                out["attributed_employee_id"] = attributed_employee_id
+                out["attributed_employee_name"] = emp_name or user.get("full_name")
+                out["created_by_name"] = user.get("full_name")
+
                 return out
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-# POST /api/invoices/{invoice_id}/approve
+        raise HTTPException(
+            status_code=500,
+            detail=f"تعذر تعديل الفاتورة: {str(e)}"
+        )
 @router.post("/{invoice_id}/approve")
 async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
