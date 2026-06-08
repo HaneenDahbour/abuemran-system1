@@ -145,7 +145,7 @@ class InvoiceRequest(BaseModel):
     paid_amount: Optional[float] = 0
     notes: Optional[str] = None
     recipient_name: str
-    invoice_writer_name: Optional[str] = None   # ← NEW
+    attributed_employee_id: Optional[int] = None
     items: Optional[List[InvoiceItem]] = Field(default_factory=list)
 async def fetch_invoice_items(conn, invoice_id: int):
     rows = await conn.fetch(
@@ -501,12 +501,22 @@ async def get_invoices(user=Depends(get_current_user)):
             WHERE rp.invoice_id = inv.id
         ), 0)"""
 
+        base_select = f"""
+            SELECT
+                inv.*,
+                c.name AS client_name,
+                ae.full_name AS attributed_employee_name,
+                cb.full_name AS created_by_name,
+                {paid_sq} AS paid_amount
+            FROM invoices inv
+            LEFT JOIN clients c ON inv.client_id = c.id
+            LEFT JOIN users ae ON ae.id = inv.attributed_employee_id
+            LEFT JOIN users cb ON cb.id = inv.created_by
+        """
+
         if role == "client":
             rows = await pool.fetch(f"""
-                SELECT inv.*, c.name AS client_name,
-                       {paid_sq} AS paid_amount
-                FROM invoices inv
-                LEFT JOIN clients c ON inv.client_id = c.id
+                {base_select}
                 WHERE inv.client_id = $1
                   AND COALESCE(inv.status,'approved') = 'approved'
                 ORDER BY inv.date DESC, inv.id DESC
@@ -514,29 +524,23 @@ async def get_invoices(user=Depends(get_current_user)):
 
         elif role == "employee":
             rows = await pool.fetch(f"""
-                SELECT inv.*, c.name AS client_name,
-                       u.full_name AS created_by_name,
-                       {paid_sq} AS paid_amount
-                FROM invoices inv
-                LEFT JOIN clients c ON inv.client_id = c.id
-                LEFT JOIN users u ON inv.created_by = u.id
-                WHERE inv.created_by = $1
+                {base_select}
+                WHERE inv.attributed_employee_id = $1
+                   OR inv.created_by = $1
                 ORDER BY inv.date DESC, inv.id DESC
             """, user.get("id"))
 
         else:
             rows = await pool.fetch(f"""
-                SELECT inv.*, c.name AS client_name,
-                       u.full_name AS created_by_name,
-                       {paid_sq} AS paid_amount
-                FROM invoices inv
-                LEFT JOIN clients c ON inv.client_id = c.id
-                LEFT JOIN users u ON inv.created_by = u.id
+                {base_select}
                 ORDER BY
                   CASE COALESCE(inv.status,'approved')
-                    WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2
+                    WHEN 'pending' THEN 0
+                    WHEN 'approved' THEN 1
+                    ELSE 2
                   END,
-                  inv.date DESC, inv.id DESC
+                  inv.date DESC,
+                  inv.id DESC
             """)
 
         result = []
@@ -545,11 +549,11 @@ async def get_invoices(user=Depends(get_current_user)):
                 inv = enrich_invoice(row_to_dict(row))
                 inv["items"] = await fetch_invoice_items(conn, row["id"])
                 result.append(inv)
+
         return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"خطأ في جلب الفواتير: {str(e)}")
-
 @router.post("")
 async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant", "employee")
@@ -591,6 +595,12 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
     # Employees create pending invoices; admin/accountant approve immediately
     role = user.get("role", "employee")
     invoice_status = "pending"
+
+    if role == "employee":
+        attributed_employee_id = user.get("id")
+    else:
+        attributed_employee_id = data.attributed_employee_id or user.get("id")
+
     pool = await get_pool()
 
     try:
@@ -599,29 +609,35 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
                 if data.client_id:
                     await ensure_client_exists(conn, data.client_id)
 
-                    inv = await conn.fetchrow(
-                        """
-                        INSERT INTO invoices
-                        (client_id, invoice_number, amount, net_amount, tax_amount, total_amount,
-                        date, payment_method, notes, recipient_name, created_by,
-                        status, approved_by, approved_at, initial_paid_amount, invoice_writer_name)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-                        RETURNING *
-                        """,
-                        data.client_id,
-                        invoice_number,
-                        net, net, tax, total,
-                        invoice_date,
-                        payment_method,
-                        clean_text(data.notes),
-                        recipient_name,
-                        user.get("id"),
-                        invoice_status,
-                        user.get("id") if invoice_status == "approved" else None,
-                        datetime.now() if invoice_status == "approved" else None,
-                        paid,
-                        clean_text(data.invoice_writer_name) or user.get("full_name"),
-                    )
+                inv = await conn.fetchrow(
+                    """
+                    INSERT INTO invoices
+                    (client_id, invoice_number, amount, net_amount, tax_amount, total_amount,
+                    date, payment_method, notes, recipient_name, created_by,
+                    attributed_employee_id, status, approved_by, approved_at,
+                    initial_paid_amount, invoice_writer_name)
+                    VALUES
+                    ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                    RETURNING *
+                    """,
+                    data.client_id,
+                    invoice_number,
+                    net,
+                    net,
+                    tax,
+                    total,
+                    invoice_date,
+                    payment_method,
+                    clean_text(data.notes),
+                    recipient_name,
+                    user.get("id"),
+                    attributed_employee_id,
+                    invoice_status,
+                    user.get("id") if invoice_status == "approved" else None,
+                    datetime.now() if invoice_status == "approved" else None,
+                    paid,
+                    None,
+                )
 
                 if invoice_status == "approved":
                     # Immediate: deduct stock + auto-payment (existing behaviour)
@@ -656,6 +672,14 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
                 out["remaining_amount"] = remaining if invoice_status == "approved" else total
                 out["payment_status"] = payment_status if invoice_status == "approved" else "debt"
                 out["items"] = await fetch_invoice_items(conn, inv["id"])
+                emp_name = await conn.fetchval(
+                    "SELECT full_name FROM users WHERE id=$1",
+                    attributed_employee_id,
+                )
+
+                out["attributed_employee_id"] = attributed_employee_id
+                out["attributed_employee_name"] = emp_name or user.get("full_name")
+                out["created_by_name"] = user.get("full_name")
                 return out
 
     except HTTPException:

@@ -147,16 +147,13 @@
       }),
     // ── Expenses / Salaries ─────────────────────────────────────
     getExpenses: () => apiFetch('/expenses'),
-    createExpense: data =>
-      apiFetch('/expenses', { method: 'POST', body: JSON.stringify(data) }),
-    deleteExpense: id =>
-      apiFetch(`/expenses/${requireId(id, 'معرّف المصروف')}`, { method: 'DELETE' }),
+    createExpense: data => apiFetch('/expenses', { method: 'POST', body: JSON.stringify(data) }),
 
     getSalaries: () => apiFetch('/expenses/salaries'),
-    createSalary: data =>
-      apiFetch('/expenses/salaries', { method: 'POST', body: JSON.stringify(data) }),
-    deleteSalary: id =>
-      apiFetch(`/expenses/salaries/${requireId(id, 'معرّف الراتب')}`, { method: 'DELETE' }),
+    createSalary: data => apiFetch('/expenses/salaries', { method: 'POST', body: JSON.stringify(data) }),
+
+    getAdvances: () => apiFetch('/expenses/advances'),
+    createAdvance: data => apiFetch('/expenses/advances', { method: 'POST', body: JSON.stringify(data) }),
 
     // ── Payments ──────────────────────────────────────────────────
     getPayments: () => apiFetch('/payments'),

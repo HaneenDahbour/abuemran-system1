@@ -30,13 +30,12 @@ class LoginRequest(BaseModel):
 
 
 class CreateUserRequest(BaseModel):
-    username: str
-    password: str
+    username: Optional[str] = None
+    password: Optional[str] = None
     full_name: str
     role: str
     client_id: Optional[int] = None
     recipient_name: Optional[str] = None
-
 
 @router.post("/login")
 async def login(data: LoginRequest):
@@ -124,28 +123,35 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
     valid_roles = ["admin", "accountant", "employee", "client", "recipient"]
 
     if data.role not in valid_roles:
-        raise HTTPException(status_code=400, detail="Ø§Ù„ØµÙ„Ø§Ø­ÙŠØ© Ø§Ù„Ù…Ø­Ø¯Ø¯Ø© ØºÙŠØ± ØµØ§Ù„Ø­Ø©")
+        raise HTTPException(status_code=400, detail="الصلاحية المحددة غير صالحة")
+
+    full_name = str(data.full_name or "").strip()
+    if not full_name:
+        raise HTTPException(status_code=400, detail="الاسم مطلوب")
 
     if data.role == "client" and not data.client_id:
-        raise HTTPException(
-            status_code=400, detail="Ø­Ø³Ø§Ø¨ Ø§Ù„Ø¹Ù…ÙŠÙ„ ÙŠØ­ØªØ§Ø¬ Ø±Ø¨Ø·Ù‡ Ø¨Ø¹Ù…ÙŠÙ„ Ø±Ø¦ÙŠØ³ÙŠ"
-        )
+        raise HTTPException(status_code=400, detail="حساب العميل يحتاج ربطه بعميل رئيسي")
 
     if data.role == "recipient" and not data.recipient_name:
-        raise HTTPException(
-            status_code=400, detail="Ø­Ø³Ø§Ø¨ Ø§Ù„Ø²Ø¨ÙˆÙ† ÙŠØ­ØªØ§Ø¬ Ø§Ø³Ù… Ø§Ù„Ø²Ø¨ÙˆÙ† ÙƒÙ…Ø§ ÙŠØ¸Ù‡Ø± ÙÙŠ Ø§Ù„ÙÙˆØ§ØªÙŠØ±"
-        )
+        raise HTTPException(status_code=400, detail="حساب الزبون يحتاج اسم الزبون كما يظهر في الفواتير")
+
+    username = (data.username or "").strip()
+    if not username:
+        username = "emp_" + str(int(datetime.utcnow().timestamp()))
+
+    password = data.password or "Abu@1234"
 
     pool = await get_pool()
 
     existing = await pool.fetchrow(
-        "SELECT id FROM users WHERE username = $1", data.username
+        "SELECT id FROM users WHERE username = $1",
+        username,
     )
 
     if existing:
-        raise HTTPException(status_code=409, detail="Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø­Ø¬ÙˆØ² Ø¨Ø§Ù„ÙØ¹Ù„")
+        raise HTTPException(status_code=409, detail="اسم المستخدم محجوز بالفعل")
 
-    hashed_password = pwd_context.hash(data.password)
+    hashed_password = pwd_context.hash(password)
 
     new_user = await pool.fetchrow(
         """
@@ -153,9 +159,9 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
         VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, username, full_name, role, client_id, recipient_name
         """,
-        data.username,
+        username,
         hashed_password,
-        data.full_name,
+        full_name,
         data.role,
         data.client_id,
         data.recipient_name.strip() if data.recipient_name else None,
@@ -165,17 +171,18 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
         await pool.execute(
             """
             INSERT INTO audit_log (user_id, user_name, action, detail)
-            VALUES ($1, $2, 'Ø¥Ù†Ø´Ø§Ø¡ Ù…Ø³ØªØ®Ø¯Ù…', $3)
+            VALUES ($1, $2, 'إنشاء مستخدم', $3)
             """,
             user["id"],
             user["full_name"],
-            f"Ø¥Ù†Ø´Ø§Ø¡ Ù…Ø³ØªØ®Ø¯Ù… Ø¬Ø¯ÙŠØ¯: {data.username} ({data.role})",
+            f"إنشاء مستخدم جديد: {username} ({data.role})",
         )
     except Exception:
         pass
 
-    return dict(new_user)
-
+    result = dict(new_user)
+    result["generated_password"] = password
+    return result
 
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: int, user=Depends(get_current_user)):
