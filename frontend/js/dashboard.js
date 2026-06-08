@@ -1231,19 +1231,17 @@ function renderInvoiceRow(inv) {
     ? parseFloat(inv.remaining_amount || 0)
     : Math.max(total - paid, 0);
 
-  const wfStatus = inv.status || 'approved'; // workflow: pending / approved / rejected
+  const wfStatus = inv.status || 'approved';
   const payStatus = inv.payment_status ||
     (remaining <= 0 && total > 0 ? 'paid' : paid > 0 ? 'partial' : 'debt');
 
-  // What to show in the status cell
   let statusCell;
   if (wfStatus === 'pending') statusCell = invoiceStatusBadge('pending');
   else if (wfStatus === 'rejected') statusCell = invoiceStatusBadge('rejected');
-  else statusCell = invoiceStatusBadge(payStatus); // approved → show payment status
+  else statusCell = invoiceStatusBadge(payStatus);
 
   const recip = getInvoiceRecipientName(inv);
-
-  // Row background hint
+  const writerName = inv.attributed_employee_name || inv.created_by_name || '—';
   const rowStyle = wfStatus === 'pending'
     ? 'background:#fffbeb'
     : wfStatus === 'rejected'
@@ -1255,8 +1253,11 @@ function renderInvoiceRow(inv) {
       <strong>#${escHtml(inv.invoice_number || inv.id)}</strong>
       ${wfStatus === 'pending' ? '<span style="font-size:10px;color:var(--am);margin-right:4px">⏳</span>' : ''}
     </td>
-<td>${escHtml(inv.client_name || inv.created_by_name || '—')}</td>     ${recip
-      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="viewRecipientStatement(${jsString(recip)})">${escHtml(recip)}</button>`
+    <td style="font-size:12px;color:var(--tx2)">${escHtml(writerName)}</td>
+    <td>
+      ${recip
+      ? `<button class="btn btn-ghost btn-sm" style="font-size:11px"
+             onclick="viewRecipientStatement(${jsString(recip)})">${escHtml(recip)}</button>`
       : `<span style="color:var(--tx3)">—</span>`}
     </td>
     <td style="font-weight:700">${fmt(total)} د.أ</td>
@@ -1295,23 +1296,27 @@ async function renderInvoices(container) {
       <div style="display:flex;gap:10px">
         <div class="search-bar">
           <span>🔍</span>
-          <input type="text" placeholder="بحث..." oninput="filterInvoicesByText(this.value)">
+          <input type="text" placeholder="رقم الفاتورة / الزبون / الموظف..."
+                 oninput="filterInvoicesByText(this.value)">
         </div>
         ${isAccountant() ? `<button class="btn btn-primary" onclick="openInvoiceModal()">+ فاتورة جديدة</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="printInvoicesListFromEncoded(${jsString(encodePayload((invoices || []).filter(i => (i.status || 'approved') === 'approved')))})">🖨️</button>
+        <button class="btn btn-ghost btn-sm"
+          onclick="printInvoicesListFromEncoded(${jsString(encodePayload((invoices || []).filter(i => (i.status || 'approved') === 'approved')))})">🖨️</button>
       </div>
     </div>
 
     ${isAdmin() && pending ? `
-      <div class="alert alert-warning" style="cursor:pointer;margin-bottom:12px" onclick="setInvoiceTab('pending')">
+      <div class="alert alert-warning" style="cursor:pointer;margin-bottom:12px"
+           onclick="setInvoiceTab('pending')">
         ⚠️ يوجد <strong>${pending} فاتورة</strong> بانتظار موافقتك — انقر للعرض
       </div>` : ''}
 
-    <div style="display:flex;gap:4px;margin-bottom:16px;background:var(--bg);border:1px solid var(--brd);border-radius:var(--r);padding:4px;width:fit-content">
+    <div style="display:flex;gap:4px;margin-bottom:16px;background:var(--bg);border:1px solid var(--brd);
+                border-radius:var(--r);padding:4px;width:fit-content">
       <button class="tab-btn active" id="inv-tab-all"      onclick="setInvoiceTab('all')">الكل</button>
-      ${pending ? `<button class="tab-btn" id="inv-tab-pending"   onclick="setInvoiceTab('pending')"  style="color:var(--am)">⏳ انتظار (${pending})</button>` : ''}
+      ${pending ? `<button class="tab-btn" id="inv-tab-pending"  onclick="setInvoiceTab('pending')"  style="color:var(--am)">⏳ انتظار (${pending})</button>` : ''}
       <button class="tab-btn" id="inv-tab-approved" onclick="setInvoiceTab('approved')">✅ معتمدة</button>
-      ${rejected ? `<button class="tab-btn" id="inv-tab-rejected"  onclick="setInvoiceTab('rejected')" style="color:var(--rd)">✗ مرفوضة (${rejected})</button>` : ''}
+      ${rejected ? `<button class="tab-btn" id="inv-tab-rejected" onclick="setInvoiceTab('rejected')" style="color:var(--rd)">✗ مرفوضة (${rejected})</button>` : ''}
     </div>
 
     <div class="card" style="padding:0;overflow:hidden">
@@ -1319,12 +1324,17 @@ async function renderInvoices(container) {
         <table>
           <thead>
             <tr>
-              <th>رقم الفاتورة</th><th>كتبها الموظف</th><th>الزبون / مطلوب من السادة</th>              <th>الإجمالي</th><th>المدفوع</th><th>الباقي</th>
+              <th>رقم الفاتورة</th>
+              <th>كتبها الموظف</th>
+              <th>المطلوب من السادة</th>
+              <th>الإجمالي</th><th>المدفوع</th><th>الباقي</th>
               <th>الحالة</th><th>التاريخ</th><th>الإجراءات</th>
             </tr>
           </thead>
           <tbody id="inv-tbody">
-            ${(invoices || []).length ? (invoices || []).map(renderInvoiceRow).join('') : emptyRow('لا توجد فواتير', 9)}
+            ${(invoices || []).length
+      ? (invoices || []).map(renderInvoiceRow).join('')
+      : emptyRow('لا توجد فواتير', 9)}
           </tbody>
         </table>
       </div>
@@ -1349,8 +1359,18 @@ function setInvoiceTab(status) {
 }
 
 function filterInvoicesByText(val) {
-  document.querySelectorAll('#inv-tbody tr').forEach(r => {
-    r.style.display = r.textContent.toLowerCase().includes((val || '').toLowerCase()) ? '' : 'none';
+  const v = (val || '').toLowerCase().trim();
+  document.querySelectorAll('#inv-tbody tr').forEach(row => {
+    if (!v) { row.style.display = ''; return; }
+    const cells = row.querySelectorAll('td');
+    // col 0=invoice#, col 1=employee, col 2=recipient, col 7=date
+    const text = [
+      cells[0]?.textContent || '',
+      cells[1]?.textContent || '',
+      cells[2]?.textContent || '',
+      cells[7]?.textContent || '',
+    ].join(' ').toLowerCase();
+    row.style.display = text.includes(v) ? '' : 'none';
   });
 }
 
@@ -1397,37 +1417,32 @@ function _invoiceActionButtons(inv) {
 function showInvoiceDetails(invoiceId) {
   const inv = (window._invoicesCache || []).find(
     x => String(x.id) === String(invoiceId)
-  ); if (!inv) {
-    toast('لم يتم العثور على الفاتورة', 'error');
-    return;
-  }
+  );
+  if (!inv) { toast('لم يتم العثور على الفاتورة', 'error'); return; }
 
   const items = inv.items || [];
+  const writerName = inv.attributed_employee_name || inv.created_by_name || '—';
 
   openModal(`
     <div class="modal-header">
       <div class="modal-title">📄 تفاصيل الفاتورة #${escHtml(inv.invoice_number || inv.id)}</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-
-    <div style="display:grid;gap:8px;margin-bottom:14px">
-      <div><strong>مطلوب من السادة:</strong> ${escHtml(inv.recipient_name || '—')}</div>
-<div><strong>كتبها الموظف:</strong> ${escHtml(inv.client_name || inv.created_by_name || '—')}</div>
-<div><strong>أدخلها على النظام:</strong> ${escHtml(inv.created_by_name || '—')}</div>      <div><strong>الحالة:</strong> ${escHtml(inv.status || 'pending')}</div>
+    <div style="display:grid;gap:8px;margin-bottom:14px;background:#f5f3f0;
+                border-radius:10px;padding:12px;font-size:13px">
+      <div><strong>المطلوب من السادة:</strong> ${escHtml(inv.recipient_name || '—')}</div>
+      <div><strong>كتبها الموظف:</strong> ${escHtml(writerName)}</div>
+      <div><strong>الحالة:</strong> ${escHtml(inv.status || 'pending')}</div>
       <div><strong>الإجمالي:</strong> ${fmt(inv.total_amount)} د.أ</div>
       <div><strong>طريقة الدفع:</strong> ${escHtml(inv.payment_method || 'credit')}</div>
       <div><strong>ملاحظات:</strong> ${escHtml(inv.notes || '—')}</div>
     </div>
-
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>الصنف</th>
-            <th>الوصف</th>
-            <th>الكمية</th>
-            <th>سعر الوحدة</th>
-            <th>الإجمالي</th>
+            <th>الصنف</th><th>البيان</th><th>الكمية</th>
+            <th>سعر الوحدة</th><th>الإجمالي</th>
           </tr>
         </thead>
         <tbody>
@@ -1469,8 +1484,20 @@ function downloadInvoicePDF(invoiceId) {
 
 function openInvoiceModal(invoice = null) {
   const isEdit = !!invoice;
-  const clientOpts = (window._clientsCache || []).map(c =>
-    `<option value="${c.id}" ${String(invoice?.client_id || '') === String(c.id) ? 'selected' : ''}>${escHtml(c.name)}</option>`
+  const user = getUser() || {};
+
+  // Datalist for recipient (from clients cache)
+  const clientDatalist = (window._clientsCache || [])
+    .map(c => `<option value="${escHtml(c.name)}" data-id="${c.id}">`)
+    .join('');
+
+  // Employee options
+  const employees = window._employeesCache || [];
+  const currentEmpId = invoice?.attributed_employee_id || user.id;
+  const employeeOpts = employees.map(e =>
+    `<option value="${e.id}" ${String(e.id) === String(currentEmpId) ? 'selected' : ''}>
+       ${escHtml(e.full_name)} — ${roleLabel(e.role)}
+     </option>`
   ).join('');
 
   const invDate = invoice?.date
@@ -1478,13 +1505,12 @@ function openInvoiceModal(invoice = null) {
     : new Date().toISOString().split('T')[0];
 
   const paid = Number(invoice?.paid_amount || 0);
-  const notes = invoice?.notes || '';
   const recipient = invoice?.recipient_name ||
-    notes.match(/المطلوب من السادة:\s*([^|]+)/)?.[1]?.trim() || '';
-  const cleanNotes = notes
+    String(invoice?.notes || '').match(/المطلوب من السادة:\s*([^|]+)/)?.[1]?.trim() || '';
+  const cleanNotes = (invoice?.notes || '')
     .replace(/المطلوب من السادة:\s*[^|]+/g, '')
-    .replace(/\|/g, '')
-    .trim();
+    .replace(/\|/g, '').trim();
+  const existingClientId = invoice?.client_id || '';
 
   window._invoiceItemIndex = 0;
   window._editingInvoiceId = isEdit ? invoice.id : null;
@@ -1496,95 +1522,97 @@ function openInvoiceModal(invoice = null) {
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">كتبها الموظف *</label>
+        <select class="form-select" id="inv_employee_id">
+          <option value="${user.id}" ${!employeeOpts ? 'selected' : ''}>
+            ${escHtml(user.full_name || '—')} (أنت)
+          </option>
+          ${employeeOpts}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">رقم الفاتورة</label>
+        <input class="form-input" id="inv_num"
+               value="${escHtml(invoice?.invoice_number || '')}"
+               placeholder="تلقائي إن تُرك فارغاً">
+      </div>
+    </div>
+
     <div class="form-group">
-      <label class="form-label">المطلوب من السادة</label>
-    <input class="form-input" id="inv_recipient" value="${escHtml(recipient)}" placeholder="اسم الزبون الذي عليه الدفع" required>    </div>
-
-   <div class="form-group">
-  <label class="form-label">كتبها الموظف *</label>
-  <select class="form-select" id="inv_client">
-    <option value="">اختر الموظف</option>
-    ${clientOpts}
-  </select>
-</div>
-
-  <div class="form-group">
-    <label class="form-label">رقم الفاتورة</label>
-    <input class="form-input" id="inv_num" value="${escHtml(invoice?.invoice_number || '')}" placeholder="تلقائي إن تُرك فارغاً">
-  </div>
-</div>
+      <label class="form-label">المطلوب من السادة *</label>
+      <input class="form-input" id="inv_recipient"
+             list="inv-clients-datalist"
+             value="${escHtml(recipient)}"
+             placeholder="اكتب اسم الزبون أو اختر من العملاء"
+             oninput="handleRecipientInput(this.value)"
+             autocomplete="off"
+             required>
+      <datalist id="inv-clients-datalist">${clientDatalist}</datalist>
+      <input type="hidden" id="inv_client_id" value="${escHtml(String(existingClientId))}">
+      <div id="inv_client_info"
+           style="font-size:11px;color:var(--gr);margin-top:4px;display:${existingClientId ? 'block' : 'none'}">
+        ✓ مرتبط بحساب عميل
+      </div>
+    </div>
 
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">تاريخ الفاتورة</label>
         <input class="form-input" id="inv_date" type="date" value="${invDate}">
       </div>
-
       <div class="form-group">
         <label class="form-label">نوع الدفع</label>
         <select class="form-select" id="inv_pay" onchange="handleInvoicePaymentChange()">
-          <option value="credit" ${invoice?.payment_method === 'credit' ? 'selected' : ''}>ذمم / آجل</option>
-          <option value="cash" ${invoice?.payment_method === 'cash' ? 'selected' : ''}>نقد كامل</option>
-          <option value="partial" ${invoice?.payment_method === 'partial' ? 'selected' : ''}>جزئي</option>
-          <option value="check" ${invoice?.payment_method === 'check' ? 'selected' : ''}>شيك</option>
+          <option value="credit"   ${invoice?.payment_method === 'credit' ? 'selected' : ''}>ذمم / آجل</option>
+          <option value="cash"     ${invoice?.payment_method === 'cash' ? 'selected' : ''}>نقد كامل</option>
+          <option value="partial"  ${invoice?.payment_method === 'partial' ? 'selected' : ''}>جزئي</option>
+          <option value="check"    ${invoice?.payment_method === 'check' ? 'selected' : ''}>شيك</option>
           <option value="transfer" ${invoice?.payment_method === 'transfer' ? 'selected' : ''}>حوالة</option>
         </select>
       </div>
     </div>
 
-    <div style="margin:12px 0; display:flex; align-items:center; gap:10px">
-      <label style="font-size:13px; font-weight:600; color:var(--tx2)">ربط بأصناف المستودع؟</label>
-      <input type="checkbox" id="inv_has_items" checked onchange="toggleInvoiceItems()"
-             style="width:16px; height:16px; cursor:pointer">
+    <div style="margin:12px 0;display:flex;align-items:center;gap:10px">
+      <label style="font-size:13px;font-weight:600;color:var(--tx2)">ربط بأصناف المستودع؟</label>
+      <input type="checkbox" id="inv_has_items" checked
+             onchange="toggleInvoiceItems()"
+             style="width:16px;height:16px;cursor:pointer">
     </div>
 
     <div id="inv-items-section">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="font-weight:700; font-size:13px">📦 الأصناف — مثل الفاتورة الورقية</div>
+        <div style="font-weight:700;font-size:13px">📦 الأصناف</div>
         <button class="btn btn-ghost btn-sm" onclick="addInvoiceItemRow()">+ إضافة صنف</button>
       </div>
-
-      <div style="
-  display:grid;
-  grid-template-columns:.85fr 1.4fr 1.3fr .65fr .8fr .8fr .8fr .9fr auto;
-  gap:8px;
-  padding:8px 10px;
-  background:#f5f3f0;
-  border-radius:10px;
-  font-size:11px;
-  font-weight:800;
-  color:#777;
-  margin-bottom:8px;
-">
-  <div>الفئة</div>
-  <div>الصنف</div>
-  <div>البيان</div>
-  <div>الكمية</div>
-  <div>عدد الحبات</div>
-  <div>سعر 12 / الدزينة</div>
-  <div>سعر الحبة</div>
-  <div>المجموع</div>
-  <div></div>
-</div>
-      <div id="inv-items-wrap" style="display:flex; flex-direction:column; gap:8px"></div>
+      <div style="display:grid;grid-template-columns:.85fr 1.4fr 1.3fr .65fr .8fr .8fr .8fr .9fr auto;
+                  gap:8px;padding:8px 10px;background:#f5f3f0;border-radius:10px;
+                  font-size:11px;font-weight:800;color:#777;margin-bottom:8px">
+        <div>الفئة</div><div>الصنف</div><div>البيان</div><div>الكمية</div>
+        <div>عدد الحبات</div><div>سعر 12/دزينة</div><div>سعر الحبة</div><div>المجموع</div><div></div>
+      </div>
+      <div id="inv-items-wrap" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
 
     <div id="inv-manual-section" style="display:none">
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">المبلغ الصافي *</label>
-          <input class="form-input" id="inv_net" type="number" value="${Number(invoice?.net_amount || 0).toFixed(3)}" min="0" step="0.001" oninput="calcInvoiceTax()">
+          <input class="form-input" id="inv_net" type="number"
+                 value="${Number(invoice?.net_amount || 0).toFixed(3)}"
+                 min="0" step="0.001" oninput="calcInvoiceTax()">
         </div>
         <div class="form-group">
           <label class="form-label">نسبة الضريبة %</label>
-          <input class="form-input" id="inv_tax" type="number" value="0" min="0" step="0.001" oninput="calcInvoiceTax()">
+          <input class="form-input" id="inv_tax" type="number"
+                 value="0" min="0" step="0.001" oninput="calcInvoiceTax()">
         </div>
       </div>
     </div>
 
     <div style="background:#f5f3f0;border-radius:12px;padding:14px;margin-top:12px">
       <div style="font-size:12px;font-weight:700;color:#5a5650;margin-bottom:10px">💰 تفصيل الدفع</div>
-
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
         <div style="padding:10px 14px;background:white;border-radius:8px;border:1px solid #e8e5e0">
           <div style="font-size:10px;color:#9e9a94;margin-bottom:4px">إجمالي الفاتورة</div>
@@ -1595,13 +1623,13 @@ function openInvoiceModal(invoice = null) {
           <div id="inv_pay_label" style="font-size:13px;font-weight:700;color:#1a1815">—</div>
         </div>
       </div>
-
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
         <div style="padding:10px 14px;background:#edfaf4;border-radius:8px;border:1px solid rgba(10,118,80,.15)">
           <div style="font-size:10px;color:#057a55;font-weight:700;margin-bottom:4px">نقد مدفوع الآن</div>
-          <input class="form-input" id="inv_paid" type="number" min="0" step="0.001" value="${paid.toFixed(3)}"
-            oninput="calcInvoicePayment()"
-            style="margin-top:4px;font-size:16px;font-weight:800;color:#057a55;border-color:rgba(10,118,80,.2);background:white">
+          <input class="form-input" id="inv_paid" type="number" min="0" step="0.001"
+                 value="${paid.toFixed(3)}" oninput="calcInvoicePayment()"
+                 style="margin-top:4px;font-size:16px;font-weight:800;color:#057a55;
+                        border-color:rgba(10,118,80,.2);background:white">
         </div>
         <div style="padding:10px 14px;background:#fff0f0;border-radius:8px;border:1px solid rgba(194,21,21,.15)">
           <div style="font-size:10px;color:#c21515;font-weight:700;margin-bottom:4px">ذمم / باقي</div>
@@ -1619,65 +1647,77 @@ function openInvoiceModal(invoice = null) {
       <input class="form-input" id="inv_notes" value="${escHtml(cleanNotes)}" placeholder="اختياري">
     </div>
 
-    <div style="display:flex; gap:10px; margin-top:8px">
+    <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-primary" style="flex:1" id="save-invoice-btn" onclick="saveInvoice()">
         ${isEdit ? 'حفظ التعديلات' : 'حفظ الفاتورة'}
       </button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `, '980px');
+
+  // Ensure clients datalist is populated
   if (!window._clientsCache || !window._clientsCache.length) {
     API.getClients().then(cls => {
       window._clientsCache = cls || [];
-
-      const sel = document.getElementById('inv_client');
-      if (sel) {
-        sel.innerHTML =
-          '<option value="">اختر الموظف</option>' +
-          window._clientsCache.map(c => `
-          <option value="${c.id}" ${String(invoice?.client_id || '') === String(c.id) ? 'selected' : ''}>
-            ${escHtml(c.name)}
-          </option>
-        `).join('');
-      }
+      const dl = document.getElementById('inv-clients-datalist');
+      if (dl) dl.innerHTML = cls.map(c =>
+        `<option value="${escHtml(c.name)}" data-id="${c.id}">`).join('');
+      const recipEl = document.getElementById('inv_recipient');
+      if (recipEl?.value) handleRecipientInput(recipEl.value);
     }).catch(() => { });
+  } else if (recipient) {
+    setTimeout(() => handleRecipientInput(recipient), 50);
   }
+
+  // Load products + categories + employees
   Promise.allSettled([
     API.getProducts(),
-    API.getWarehouseCategories()
-  ]).then(([productsRes, categoriesRes]) => {
-    const prods =
-      productsRes.status === 'fulfilled' && Array.isArray(productsRes.value)
-        ? productsRes.value
-        : (Array.isArray(window._productsCache) ? window._productsCache : []);
-
-    const categories =
-      categoriesRes.status === 'fulfilled' && Array.isArray(categoriesRes.value)
-        ? categoriesRes.value
-        : (Array.isArray(window._whCategoriesCache) ? window._whCategoriesCache : []);
+    API.getWarehouseCategories(),
+    window._employeesCache?.length
+      ? Promise.resolve(window._employeesCache)
+      : API.getEmployeesList(),
+  ]).then(([prodRes, catRes, empRes]) => {
+    const prods = prodRes.status === 'fulfilled' && Array.isArray(prodRes.value)
+      ? prodRes.value : (window._productsCache || []);
+    const cats = catRes.status === 'fulfilled' && Array.isArray(catRes.value)
+      ? catRes.value : (window._whCategoriesCache || []);
+    const emps = empRes.status === 'fulfilled' && Array.isArray(empRes.value)
+      ? empRes.value : (window._employeesCache || []);
 
     window._productsCache = prods;
-    window._invoiceCategoriesCache = categories;
+    window._invoiceCategoriesCache = cats;
+    window._whCategoriesCache = cats;
+    window._employeesCache = emps;
 
-    if (categories.length) {
-      window._whCategoriesCache = categories;
+    // Re-populate employee dropdown now that we have data
+    const empSel = document.getElementById('inv_employee_id');
+    if (empSel && emps.length) {
+      empSel.innerHTML = emps.map(e =>
+        `<option value="${e.id}" ${String(e.id) === String(currentEmpId) ? 'selected' : ''}>
+           ${escHtml(e.full_name)} — ${roleLabel(e.role)}
+         </option>`
+      ).join('');
     }
 
     const oldItems = Array.isArray(invoice?.items) ? invoice.items : [];
-
-    if (oldItems.length) {
-      oldItems.forEach(item => addInvoiceItemRow(item));
-    } else {
-      addInvoiceItemRow();
-    }
-
-    if (!categories.length) {
-      toast('لم يتم تحميل الفئات. افتحي المستودع أو اعملي تحديث للصفحة.', 'warning');
-    }
+    if (oldItems.length) oldItems.forEach(item => addInvoiceItemRow(item));
+    else addInvoiceItemRow();
 
     calcInvoiceItemsTotal();
     handleInvoicePaymentChange();
   });
+}
+function handleRecipientInput(value) {
+  const clients = window._clientsCache || [];
+  const trimmed = (value || '').trim().toLowerCase();
+  const match = clients.find(c => c.name.trim().toLowerCase() === trimmed);
+  const clientIdEl = document.getElementById('inv_client_id');
+  const infoEl = document.getElementById('inv_client_info');
+  if (clientIdEl) clientIdEl.value = match ? String(match.id) : '';
+  if (infoEl) {
+    infoEl.style.display = match ? 'block' : 'none';
+    if (match) infoEl.textContent = `✓ مرتبط بحساب ${match.name}`;
+  }
 }
 function toggleInvoiceItems() {
   const checked = document.getElementById('inv_has_items')?.checked;
@@ -2405,13 +2445,9 @@ async function saveInvoice() {
   const btn = document.getElementById('save-invoice-btn');
   const invoiceId = window._editingInvoiceId || null;
 
-  const clientRaw = document.getElementById('inv_client')?.value;
-  const client_id = clientRaw ? Number(clientRaw) : null;
-
-  if (!client_id) {
-    toast('اختاري اسم الموظف الذي كتب الفاتورة', 'error');
-    return;
-  }
+  const rawClientId = document.getElementById('inv_client_id')?.value;
+  const client_id = rawClientId ? parseInt(rawClientId) : null;
+  const attributed_employee_id = parseInt(document.getElementById('inv_employee_id')?.value) || null;
   const hasItems = document.getElementById('inv_has_items')?.checked;
   const invNum = document.getElementById('inv_num')?.value.trim() || `INV-${Date.now()}`;
   const taxRate = parseFloat(document.getElementById('inv_tax')?.value) || 0;
@@ -2504,6 +2540,7 @@ async function saveInvoice() {
 
   const payload = {
     client_id,
+    attributed_employee_id,
     invoice_number: invNum,
     net_amount: net,
     tax_amount: tax,
@@ -2511,18 +2548,10 @@ async function saveInvoice() {
     paid_amount: paidAmount,
     invoice_date: document.getElementById('inv_date')?.value,
     payment_method: paymentMethod,
-
-    // مهم: صار اسم الزبون محفوظ بعمود مستقل، وليس فقط notes
     recipient_name: recipientName || undefined,
-
-    notes: [
-      recipientName ? `المطلوب من السادة: ${recipientName}` : '',
-      normalNotes
-    ].filter(Boolean).join(' | ') || undefined,
-
+    notes: normalNotes || undefined,
     items: items.length ? items : undefined,
   };
-
   window._invoiceSaving = true;
   if (btn) { btn.disabled = true; btn.dataset.oldText = btn.textContent; btn.textContent = 'جاري الحفظ...'; btn.style.opacity = '0.65'; }
 
@@ -2940,8 +2969,14 @@ async function renderChecks(container) {
         <div class="page-sub">${pending.length} شيك معلّق ${overdue.length ? `— <span style="color:var(--rd)">${overdue.length} متأخر</span>` : ''}</div>
       </div>
       <div style="display:flex; gap:10px">
+        <div class="search-bar">
+          <span>🔍</span>
+          <input type="text" placeholder="رقم الشيك / اسم العميل..."
+                 oninput="filterChecksTable(this.value)">
+        </div>
         ${isAccountant() ? `<button class="btn btn-primary" onclick="openCheckModal()">+ إضافة شيك</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="printChecksFromEncoded(${jsString(encodePayload(checks))})">🖨️</button>
+        <button class="btn btn-ghost btn-sm"
+                onclick="printChecksFromEncoded(${jsString(encodePayload(checks))})">🖨️</button>
       </div>
     </div>
 
@@ -2959,22 +2994,45 @@ async function renderChecks(container) {
     </div>
   `;
 }
-
+function filterChecksTable(val) {
+  const v = (val || '').toLowerCase().trim();
+  document.querySelectorAll('tr[data-check-id]').forEach(row => {
+    if (!v) { row.style.display = ''; return; }
+    const cells = row.querySelectorAll('td');
+    const text = [
+      cells[0]?.textContent || '',   // client name
+      cells[1]?.textContent || '',   // check number
+      cells[4]?.textContent || '',   // status
+    ].join(' ').toLowerCase();
+    row.style.display = text.includes(v) ? '' : 'none';
+  });
+}
 function openCheckModal() {
-  const clientOpts = (window._clientsCache || []).map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+  const clientDatalist = (window._clientsCache || [])
+    .map(c => `<option value="${escHtml(c.name)}" data-id="${c.id}">`)
+    .join('');
 
   openModal(`
     <div class="modal-header">
       <div class="modal-title">🏦 إضافة شيك جديد</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
+
     <div class="form-group">
-      <label class="form-label">كتبها الموظف *</label>
-<select class="form-select" id="inv_client">
-  <option value="">اختر الموظف</option>
-  ${clientOpts}
-</select>
+      <label class="form-label">العميل *</label>
+      <input class="form-input" id="chk_client_name"
+             list="check-clients-datalist"
+             placeholder="اكتب اسم العميل أو اختر من القائمة"
+             oninput="handleCheckClientInput(this.value)"
+             autocomplete="off">
+      <datalist id="check-clients-datalist">${clientDatalist}</datalist>
+      <input type="hidden" id="chk_client">
+      <div id="chk_client_info"
+           style="font-size:11px;color:var(--gr);margin-top:4px;display:none">
+        ✓ تم التعرف على العميل
+      </div>
     </div>
+
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">رقم الشيك *</label>
@@ -2982,9 +3040,11 @@ function openCheckModal() {
       </div>
       <div class="form-group">
         <label class="form-label">المبلغ (د.أ) *</label>
-        <input class="form-input" id="chk_amount" type="number" placeholder="0.00">
+        <input class="form-input" id="chk_amount" type="number"
+               step="0.001" placeholder="0.000">
       </div>
     </div>
+
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">تاريخ الاستحقاق *</label>
@@ -2995,20 +3055,35 @@ function openCheckModal() {
         <input class="form-input" id="chk_bank" placeholder="مثال: البنك العربي">
       </div>
     </div>
+
     <div style="display:flex; gap:10px; margin-top:8px">
       <button class="btn btn-primary" style="flex:1" onclick="saveCheck()">حفظ الشيك</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 
+  // Load clients if not cached
   if (!window._clientsCache || !window._clientsCache.length) {
     API.getClients().then(cls => {
       window._clientsCache = cls || [];
-      const sel = document.getElementById('chk_client');
-      if (sel) {
-        sel.innerHTML = '<option value="">اختر الموظف</option>' + cls.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
-      }
+      const dl = document.getElementById('check-clients-datalist');
+      if (dl) dl.innerHTML = cls.map(c =>
+        `<option value="${escHtml(c.name)}" data-id="${c.id}">`
+      ).join('');
     }).catch(() => { });
+  }
+}
+
+function handleCheckClientInput(value) {
+  const clients = window._clientsCache || [];
+  const trimmed = (value || '').trim().toLowerCase();
+  const match = clients.find(c => c.name.trim().toLowerCase() === trimmed);
+  const idEl = document.getElementById('chk_client');
+  const infoEl = document.getElementById('chk_client_info');
+  if (idEl) idEl.value = match ? String(match.id) : '';
+  if (infoEl) {
+    infoEl.style.display = match ? 'block' : 'none';
+    if (match) infoEl.textContent = `✓ ${match.name}`;
   }
 }
 
@@ -3018,7 +3093,12 @@ async function saveCheck() {
   const due_date = document.getElementById('chk_due')?.value;
   const check_number = document.getElementById('chk_num')?.value?.trim();
 
-  if (!client_id || !amount || !due_date || !check_number) {
+  if (!client_id) {
+    toast('يرجى اختيار العميل من القائمة', 'error');
+    document.getElementById('chk_client_name')?.focus();
+    return;
+  }
+  if (!amount || !due_date || !check_number) {
     toast('يرجى ملء الحقول المطلوبة', 'error');
     return;
   }
@@ -3470,6 +3550,21 @@ async function renderWarehouse(container) {
                 <div style="font-size:11px; color:var(--tx3)">إجمالي المبيعات</div>
                 <div style="font-size:16px; font-weight:800; color:var(--gr)">${fmt(cat.total_sold || 0)} د.أ</div>
               </div>
+
+              <div>
+                <div style="font-size:11px; color:var(--tx3)">إجمالي الربح</div>
+                <div style="font-size:16px; font-weight:800;
+                            color:${parseFloat(cat.total_profit || 0) >= 0 ? 'var(--gr)' : 'var(--rd)'}">
+                  ${fmt(cat.total_profit || 0)} د.أ
+                </div>
+              </div>
+
+              <div>
+                <div style="font-size:11px; color:var(--tx3)">هامش الربح</div>
+                <div style="font-size:16px; font-weight:800; color:var(--bl)">
+                  ${cat.profit_margin_pct || 0}%
+                </div>
+              </div>
             </div>
 
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
@@ -3802,9 +3897,21 @@ async function openCategoryFolder(catId) {
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px">
+    <div style="display:flex; justify-content:space-between; align-items:center;
+                gap:10px; margin-bottom:12px; flex-wrap:wrap">
       <div style="font-size:13px; color:var(--tx3)">${products.length} صنف في هذه الفئة</div>
-      ${canManageWarehouse() ? `<button class="btn btn-primary btn-sm" onclick="closeModal(); openAddProductModal(${catId})">+ إضافة صنف</button>` : ''}
+      <div style="display:flex;gap:8px;align-items:center">
+        <div class="search-bar" style="max-width:220px">
+          <span>🔍</span>
+          <input type="text" id="cat-folder-search"
+                 placeholder="بحث عن صنف..."
+                 oninput="filterCategoryProducts(this.value)">
+        </div>
+        ${canManageWarehouse()
+      ? `<button class="btn btn-primary btn-sm"
+               onclick="closeModal(); openAddProductModal(${catId})">+ إضافة صنف</button>`
+      : ''}
+      </div>
     </div>
 
     <div class="table-wrap">
@@ -3815,37 +3922,40 @@ async function openCategoryFolder(catId) {
             <th>الكود</th>
             <th>الوحدة</th>
             <th>الكمية الحالية</th>
-            <th>الحد الأدنى</th>
-            <th style="text-align:center">الحالة</th>
+<th>الحد الأدنى</th>
+
+              <th>سعر التكلفة</th>
+
+              <th style="text-align:center">الحالة</th>            <th style="text-align:center">الحالة</th>
             <th>الإجراءات</th>
           </tr>
         </thead>
 
         <tbody>
           ${products.length ? products.map(p => {
-    const stock = parseFloat(p.current_stock || 0);
-    const minStock = parseFloat(p.min_stock || 0);
+        const stock = parseFloat(p.current_stock || 0);
+        const minStock = parseFloat(p.min_stock || 0);
 
-    const isOut = stock === 0;
-    const isLow = !isOut && minStock > 0 && stock <= minStock;
+        const isOut = stock === 0;
+        const isLow = !isOut && minStock > 0 && stock <= minStock;
 
-    const pct = minStock > 0
-      ? Math.min((stock / (minStock * 2)) * 100, 100)
-      : 50;
+        const pct = minStock > 0
+          ? Math.min((stock / (minStock * 2)) * 100, 100)
+          : 50;
 
-    const barColor = isOut
-      ? 'var(--rd)'
-      : isLow
-        ? 'var(--am)'
-        : 'var(--gr)';
+        const barColor = isOut
+          ? 'var(--rd)'
+          : isLow
+            ? 'var(--am)'
+            : 'var(--gr)';
 
-    const statusBadge = isOut
-      ? '<span class="badge badge-red">🚫 نفد</span>'
-      : isLow
-        ? '<span class="badge badge-amber">⚠️ منخفض</span>'
-        : '<span class="badge badge-green">✅ سليم</span>';
+        const statusBadge = isOut
+          ? '<span class="badge badge-red">🚫 نفد</span>'
+          : isLow
+            ? '<span class="badge badge-amber">⚠️ منخفض</span>'
+            : '<span class="badge badge-green">✅ سليم</span>';
 
-    return `
+        return `
 <tr data-product-id="${p.id}" style="${isOut ? 'background:#fff5f5' : isLow ? 'background:#fffbeb' : ''}">                <td>${productNameWithDetails(p)}</td>
 
                 <td style="font-family:monospace;font-size:11px;color:var(--tx3)">
@@ -3872,6 +3982,12 @@ async function openCategoryFolder(catId) {
                   ${minStock || '—'}
                 </td>
 
+                <td style="font-size:12px;font-weight:700;color:var(--bl)">
+                  ${parseFloat(p.cost_price || 0) > 0
+            ? fmt(p.cost_price) + ' د.أ'
+            : '<span style="color:var(--tx3)">—</span>'}
+                </td>
+
                 <td>${statusBadge}</td>
 
                 <td>
@@ -3884,7 +4000,7 @@ async function openCategoryFolder(catId) {
                 </td>
               </tr>
             `;
-  }).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد أصناف</td></tr>`}
+      }).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد أصناف</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -3901,10 +4017,10 @@ async function openCategoryFolder(catId) {
         <div style="background:var(--aml);border-radius:8px;padding:10px;text-align:center">
           <div style="font-size:20px;font-weight:800;color:var(--am)">
             ${products.filter(p => {
-    const s = parseFloat(p.current_stock || 0);
-    const m = parseFloat(p.min_stock || 0);
-    return s > 0 && m > 0 && s <= m;
-  }).length}
+        const s = parseFloat(p.current_stock || 0);
+        const m = parseFloat(p.min_stock || 0);
+        return s > 0 && m > 0 && s <= m;
+      }).length}
           </div>
           <div style="font-size:11px;color:var(--am)">منخفض</div>
         </div>
@@ -3919,7 +4035,15 @@ async function openCategoryFolder(catId) {
     ` : ''}
   `, '980px');
 }
-
+function filterCategoryProducts(val) {
+  const v = (val || '').toLowerCase().trim();
+  document.querySelectorAll('.modal-backdrop tr[data-product-id]').forEach(row => {
+    if (!v) { row.style.display = ''; return; }
+    // search product name + SKU + details
+    const text = (row.textContent || '').toLowerCase();
+    row.style.display = text.includes(v) ? '' : 'none';
+  });
+}
 function openCategoryModal() {
   openModal(`
     <div class="modal-header">
@@ -4297,14 +4421,23 @@ async function openAddProductModal(catId) {
         <input class="form-input" id="pr_total_price" type="number" min="0" step="0.001" value="0" readonly style="background:#f5f3f0; color:var(--tx2)">
       </div>
     </div>
-
-    <div class="form-group">
-      <label class="form-label">الحد الأدنى للتنبيه</label>
-      <input class="form-input" id="pr_min" type="number" min="0" step="0.001" value="0">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">سعر التكلفة / الشراء</label>
+        <input class="form-input" id="pr_cost_price" type="number"
+               min="0" step="0.001" value="0"
+               placeholder="سعر الشراء من المورد">
+      </div>
+      <div class="form-group">
+        <label class="form-label">الحد الأدنى للتنبيه</label>
+        <input class="form-input" id="pr_min" type="number" min="0" step="0.001" value="0">
+      </div>
     </div>
 
     <div style="display:flex; gap:10px; margin-top:8px">
       <button class="btn btn-primary" style="flex:1" id="save-product-btn">حفظ الصنف</button>
+
+
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -4358,9 +4491,8 @@ async function saveNewProductInCategory() {
   const categoryValue = document.getElementById('pr_cat_id')?.value;
   const unit = document.getElementById('pr_unit')?.value || 'قطعة';
   const openingQty = parseFloat(document.getElementById('pr_remaining')?.value || '0');
-  const unitPrice = parseFloat(document.getElementById('pr_unit_price')?.value || '0');
+  const cost_price = parseFloat(document.getElementById('pr_cost_price')?.value || '0');
   const minStock = parseFloat(document.getElementById('pr_min')?.value || '0');
-
   if (!name) {
     toast('اسم الصنف مطلوب', 'error');
     return;
@@ -4393,11 +4525,11 @@ async function saveNewProductInCategory() {
 
   try {
     const newProduct = await API.createProduct({
-      name,
-      sku,
+      name, sku,
       category_id: categoryId,
       unit,
       min_stock: minStock,
+      cost_price,
       opening_quantity: openingQty,
       properties: buildProductPropertiesFromForm(name),
     });
@@ -4533,6 +4665,14 @@ async function openEditProduct(productId, catId = null) {
         </div>
       </div>
 
+      <div class="form-group">
+        <label class="form-label">سعر التكلفة / الشراء</label>
+        <input class="form-input" id="pr_cost_price" type="number"
+               min="0" step="0.001"
+               value="${parseFloat(p.cost_price || 0).toFixed(3)}"
+               placeholder="سعر الشراء من المورد">
+      </div>
+
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">الكمية الحالية في المخزن</label>
@@ -4544,7 +4684,6 @@ async function openEditProduct(productId, catId = null) {
           <input class="form-input" id="pr_min" type="number" min="0" step="0.001" value="${parseFloat(p.min_stock || 0)}">
         </div>
       </div>
-
       <div style="padding:8px 12px; background:var(--bg); border-radius:var(--r); font-size:12px; color:var(--tx3); margin-bottom:8px">
         الكمية المسجلة حالياً:
         <strong style="color:var(--tx)">${currentStock}</strong>
@@ -4606,11 +4745,13 @@ async function saveEditProductNew(id) {
   setProductButtonLoading(btn, true, 'جاري حفظ التعديل...');
 
   try {
+    const cost_price = parseFloat(document.getElementById('pr_cost_price')?.value || '0');
     await API.updateProduct(productId, {
       name, sku,
       category_id: (categoryValue && Number(categoryValue) > 0) ? Number(categoryValue) : null,
       unit,
       min_stock: minStock,
+      cost_price,
       final_stock: finalStock,
       properties: window._editingProductProperties || {},
     });
@@ -6382,31 +6523,29 @@ async function saveNewSupplier() {
   } catch (e) { toast(e.message, 'error'); }
 }
 async function renderExpenses(container) {
-  let expenses = [];
-  let salaries = [];
-
+  let expenses = [], salaries = [], advances = [];
   try {
-    [expenses, salaries] = await Promise.all([
+    [expenses, salaries, advances] = await Promise.all([
       API.getExpenses(),
-      API.getSalaries()
+      API.getSalaries(),
+      API.getAdvances(),
     ]);
-  } catch (e) {
-    expenses = [];
-    salaries = [];
-  }
+  } catch (e) { expenses = []; salaries = []; advances = []; }
 
   const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
+  const totalAdvances = advances.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   container.innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">📋 المصاريف والرواتب</div>
-        <div class="page-sub">مصاريف يومية / شهرية / ثابتة + رواتب الموظفين</div>
+        <div class="page-sub">متابعة كاملة للمصاريف والرواتب والسلف</div>
       </div>
-      <div style="display:flex;gap:10px">
-        <button class="btn btn-primary" onclick="openExpensePageModal()">+ مصروف</button>
-        <button class="btn btn-ghost" onclick="openSalaryModal()">+ راتب موظف</button>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary"  onclick="openExpensePageModal()">+ مصروف</button>
+        <button class="btn btn-ghost"    onclick="openSalaryModal()">+ راتب</button>
+        <button class="btn btn-ghost"    onclick="openGeneralAdvanceModal()">+ سلفة</button>
       </div>
     </div>
 
@@ -6423,23 +6562,43 @@ async function renderExpenses(container) {
         <div class="metric-value">${fmt(totalSalaries)}</div>
         <div class="metric-sub">دينار أردني</div>
       </div>
+      <div class="metric-card red">
+        <div class="metric-icon">➖</div>
+        <div class="metric-label">إجمالي السلف</div>
+        <div class="metric-value">${fmt(totalAdvances)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card blue">
+        <div class="metric-icon">💸</div>
+        <div class="metric-label">إجمالي الصرف</div>
+        <div class="metric-value">${fmt(totalExpenses + totalSalaries + totalAdvances)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden;margin-bottom:18px">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--brd);font-weight:800">
-        المصاريف
-      </div>
+    <div class="tabs" style="margin-bottom:16px">
+      <button class="tab-btn active" id="exp-tab-expenses"
+              onclick="switchExpensesTab('expenses',this)">
+        المصاريف (${expenses.length})
+      </button>
+      <button class="tab-btn" id="exp-tab-salaries"
+              onclick="switchExpensesTab('salaries',this)">
+        الرواتب (${salaries.length})
+      </button>
+      <button class="tab-btn" id="exp-tab-advances"
+              onclick="switchExpensesTab('advances',this)">
+        السلف (${advances.length})
+      </button>
+    </div>
+
+    <!-- المصاريف -->
+    <div id="exp-section-expenses" class="card" style="padding:0;overflow:hidden">
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>التاريخ</th>
-              <th>اسم المصروف</th>
-              <th>النوع</th>
-              <th>التصنيف</th>
-              <th>المبلغ</th>
-              <th>ملاحظات</th>
-              <th>إجراءات</th>
+              <th>التاريخ</th><th>اسم المصروف</th><th>النوع</th>
+              <th>التصنيف</th><th>المبلغ</th><th>ملاحظات</th><th>إجراءات</th>
             </tr>
           </thead>
           <tbody>
@@ -6451,9 +6610,9 @@ async function renderExpenses(container) {
                 <td>${escHtml(e.category || '—')}</td>
                 <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
                 <td>${escHtml(e.notes || '—')}</td>
-                <td>
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">🗑️</button>` : '—'}
-                </td>
+                <td>${isAdmin()
+      ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">🗑️</button>`
+      : '—'}</td>
               </tr>
             `).join('') : emptyRow('لا توجد مصاريف', 7)}
           </tbody>
@@ -6461,21 +6620,14 @@ async function renderExpenses(container) {
       </div>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden">
-      <div style="padding:14px 18px;border-bottom:1px solid var(--brd);font-weight:800">
-        رواتب الموظفين
-      </div>
+    <!-- الرواتب -->
+    <div id="exp-section-salaries" class="card" style="padding:0;overflow:hidden;display:none">
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>الشهر</th>
-              <th>اسم الموظف</th>
-              <th>الراتب</th>
-              <th>تاريخ الدفع</th>
-              <th>الحالة</th>
-              <th>ملاحظات</th>
-              <th>إجراءات</th>
+              <th>الشهر</th><th>اسم الموظف</th><th>الراتب</th>
+              <th>تاريخ الدفع</th><th>الحالة</th><th>ملاحظات</th><th>إجراءات</th>
             </tr>
           </thead>
           <tbody>
@@ -6483,20 +6635,68 @@ async function renderExpenses(container) {
               <tr>
                 <td>${fmtDate(s.salary_month)}</td>
                 <td><strong>${escHtml(s.employee_name || '—')}</strong></td>
-                <td style="font-weight:800;color:var(--rd)">${fmt(s.salary_amount)} د.أ</td>
+                <td style="font-weight:800;color:var(--gr)">${fmt(s.salary_amount)} د.أ</td>
                 <td>${fmtDate(s.paid_date)}</td>
-                <td>${escHtml(s.status || 'paid')}</td>
+                <td><span class="badge ${s.status === 'paid' ? 'badge-green' : 'badge-amber'}">
+                  ${s.status === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+                </span></td>
                 <td>${escHtml(s.notes || '—')}</td>
-                <td>
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary(${s.id})">🗑️</button>` : '—'}
-                </td>
+                <td>${isAdmin()
+          ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary(${s.id})">🗑️</button>`
+          : '—'}</td>
               </tr>
-            `).join('') : emptyRow('لا توجد رواتب مسجلة', 7)}
+            `).join('') : emptyRow('لا توجد رواتب', 7)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- السلف -->
+    <div id="exp-section-advances" class="card" style="padding:0;overflow:hidden;display:none">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th><th>اسم الموظف</th><th>المبلغ</th>
+              <th>النوع</th><th>ملاحظات</th><th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${advances.length ? advances.map(a => `
+              <tr>
+                <td>${fmtDate(a.advance_date)}</td>
+                <td><strong>${escHtml(a.employee_name || '—')}</strong></td>
+                <td style="font-weight:800;color:var(--rd)">${fmt(a.amount)} د.أ</td>
+                <td>${escHtml(a.advance_type || 'advance')}</td>
+                <td>${escHtml(a.notes || '—')}</td>
+                <td>${isAdmin()
+              ? `<button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromExpenses(${a.id})">🗑️</button>`
+              : '—'}</td>
+              </tr>
+            `).join('') : emptyRow('لا توجد سلف', 6)}
           </tbody>
         </table>
       </div>
     </div>
   `;
+}
+
+function switchExpensesTab(tab, btn) {
+  ['expenses', 'salaries', 'advances'].forEach(t => {
+    const section = document.getElementById(`exp-section-${t}`);
+    const tabBtn = document.getElementById(`exp-tab-${t}`);
+    if (section) section.style.display = t === tab ? '' : 'none';
+    if (tabBtn) tabBtn.classList.toggle('active', t === tab);
+  });
+}
+
+async function deleteAdvanceFromExpenses(id) {
+  if (!confirm('حذف هذه السلفة؟')) return;
+  try {
+    await API.deleteAdvance(id);
+    toast('تم الحذف ✅', 'success');
+    navigateTo('expenses');
+  } catch (e) { toast(e.message, 'error'); }
 }
 function openExpensePageModal() {
   openModal(`
@@ -6576,10 +6776,25 @@ async function savePageExpense() {
 }
 
 function openSalaryModal() {
+  const employees = window._employeesCache || [];
+
   openModal(`
     <div class="modal-header">
       <div class="modal-title">👷 إضافة راتب موظف</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اختر الموظف</label>
+      <select class="form-select" id="sal_employee_sel"
+              onchange="handleSalaryEmployeeSelect()">
+        <option value="">— اختر من القائمة أو اكتب الاسم يدوياً —</option>
+        ${employees.map(e =>
+    `<option value="${e.id}" data-name="${escHtml(e.full_name)}">
+             ${escHtml(e.full_name)} — ${roleLabel(e.role)}
+           </option>`
+  ).join('')}
+      </select>
     </div>
 
     <div class="form-group">
@@ -6590,18 +6805,21 @@ function openSalaryModal() {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">قيمة الراتب *</label>
-        <input class="form-input" id="sal_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
+        <input class="form-input" id="sal_amount" type="number"
+               step="0.001" min="0.001" placeholder="0.000">
       </div>
       <div class="form-group">
         <label class="form-label">شهر الراتب</label>
-        <input class="form-input" id="sal_month" type="date" value="${new Date().toISOString().slice(0, 8)}01">
+        <input class="form-input" id="sal_month" type="date"
+               value="${new Date().toISOString().slice(0, 8)}01">
       </div>
     </div>
 
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">تاريخ الدفع</label>
-        <input class="form-input" id="sal_paid_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+        <input class="form-input" id="sal_paid_date" type="date"
+               value="${new Date().toISOString().split('T')[0]}">
       </div>
       <div class="form-group">
         <label class="form-label">الحالة</label>
@@ -6622,8 +6840,163 @@ function openSalaryModal() {
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
+
+  // Load employees if not cached yet
+  if (!employees.length) {
+    API.getEmployeesList().then(emps => {
+      window._employeesCache = emps || [];
+      const sel = document.getElementById('sal_employee_sel');
+      if (sel) {
+        sel.innerHTML =
+          '<option value="">— اختر من القائمة أو اكتب الاسم يدوياً —</option>' +
+          (emps || []).map(e =>
+            `<option value="${e.id}" data-name="${escHtml(e.full_name)}">
+               ${escHtml(e.full_name)} — ${roleLabel(e.role)}
+             </option>`
+          ).join('');
+      }
+    }).catch(() => { });
+  }
 }
 
+function handleSalaryEmployeeSelect() {
+  const sel = document.getElementById('sal_employee_sel');
+  const name = document.getElementById('sal_employee_name');
+  if (!sel || !name) return;
+  const opt = sel.options[sel.selectedIndex];
+  if (opt?.dataset?.name) name.value = opt.dataset.name;
+}
+
+async function saveSalary() {
+  const employeeName = document.getElementById('sal_employee_name')?.value?.trim();
+  const employeeUserId = parseInt(document.getElementById('sal_employee_sel')?.value) || null;
+  const amount = parseFloat(document.getElementById('sal_amount')?.value);
+
+  if (!employeeName) { toast('اسم الموظف مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('قيمة الراتب غير صحيحة', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  try {
+    await API.createSalary({
+      employee_user_id: employeeUserId,
+      employee_name: employeeName,
+      salary_amount: amount,
+      salary_month: document.getElementById('sal_month')?.value,
+      paid_date: document.getElementById('sal_paid_date')?.value,
+      status: document.getElementById('sal_status')?.value || 'paid',
+      notes: document.getElementById('sal_notes')?.value || null,
+    });
+    toast('تم حفظ الراتب ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ الراتب'; }
+  }
+}
+function openGeneralAdvanceModal() {
+  const employees = window._employeesCache || [];
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">➖ إضافة سلفة / خصم</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اختر الموظف *</label>
+      <select class="form-select" id="gadv_employee_sel"
+              onchange="handleGeneralAdvanceSelect()">
+        <option value="">— اختر موظفاً —</option>
+        ${employees.map(e =>
+    `<option value="${e.id}" data-name="${escHtml(e.full_name)}">
+             ${escHtml(e.full_name)} — ${roleLabel(e.role)}
+           </option>`
+  ).join('')}
+      </select>
+      <input type="hidden" id="gadv_employee_name">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="gadv_amount" type="number"
+               min="0.001" step="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="gadv_date" type="date"
+               value="${new Date().toISOString().split('T')[0]}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="gadv_notes"
+             placeholder="مثال: سلفة يومية، مصروف خارجي...">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-danger" style="flex:1"
+              onclick="saveGeneralAdvance()">تسجيل السلفة</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+
+  if (!employees.length) {
+    API.getEmployeesList().then(emps => {
+      window._employeesCache = emps || [];
+      const sel = document.getElementById('gadv_employee_sel');
+      if (sel) {
+        sel.innerHTML =
+          '<option value="">— اختر موظفاً —</option>' +
+          (emps || []).map(e =>
+            `<option value="${e.id}" data-name="${escHtml(e.full_name)}">
+               ${escHtml(e.full_name)} — ${roleLabel(e.role)}
+             </option>`
+          ).join('');
+      }
+    }).catch(() => { });
+  }
+}
+
+function handleGeneralAdvanceSelect() {
+  const sel = document.getElementById('gadv_employee_sel');
+  const name = document.getElementById('gadv_employee_name');
+  if (!sel || !name) return;
+  const opt = sel.options[sel.selectedIndex];
+  name.value = opt?.dataset?.name || '';
+}
+
+async function saveGeneralAdvance() {
+  const userId = parseInt(document.getElementById('gadv_employee_sel')?.value);
+  const employeeName = document.getElementById('gadv_employee_name')?.value?.trim();
+  const amount = parseFloat(document.getElementById('gadv_amount')?.value);
+
+  if (!userId || !employeeName) { toast('اختر الموظف', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-danger');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  try {
+    await API.createAdvance({
+      user_id: userId,
+      employee_name: employeeName,
+      amount,
+      advance_date: document.getElementById('gadv_date')?.value,
+      notes: document.getElementById('gadv_notes')?.value || null,
+    });
+    toast('تم تسجيل السلفة ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'تسجيل السلفة'; }
+  }
+}
 async function saveSalary() {
   const employeeName = document.getElementById('sal_employee_name')?.value?.trim();
   const amount = parseFloat(document.getElementById('sal_amount')?.value);
@@ -6665,50 +7038,411 @@ async function renderEmployees(container) {
     return;
   }
 
-  let users = [];
+  let users = [], salaries = [], advances = [];
   try {
-    users = await API.getUsers() || [];
-  } catch (e) {
-    users = [];
-  }
+    [users, salaries, advances] = await Promise.all([
+      API.getUsers(),
+      API.getSalaries(),
+      API.getAdvances(),
+    ]);
+  } catch (e) { users = []; salaries = []; advances = []; }
 
-  const employees = users.filter(u =>
+  const employees = (users || []).filter(u =>
     ['admin', 'accountant', 'employee'].includes(u.role)
   );
+
+  const summaries = employees.map(emp => {
+    const empSal = (salaries || []).filter(s => String(s.employee_user_id) === String(emp.id));
+    const empAdv = (advances || []).filter(a => String(a.user_id) === String(emp.id));
+    const totalSalary = empSal.reduce((s, x) => s + parseFloat(x.salary_amount || 0), 0);
+    const totalAdvances = empAdv.reduce((s, x) => s + parseFloat(x.amount || 0), 0);
+    return { ...emp, totalSalary, totalAdvances, netBalance: totalSalary - totalAdvances };
+  });
 
   container.innerHTML = `
     <div class="page-header">
       <div>
         <div class="page-title">👷 الموظفون</div>
-        <div class="page-sub">${employees.length} موظف مسجل</div>
+        <div class="page-sub">${employees.length} موظف</div>
+      </div>
+      <button class="btn btn-primary" onclick="openAddEmployeeModal()">+ إضافة موظف</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">
+      ${summaries.length ? summaries.map(emp => `
+        <div class="card" style="padding:18px">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+            <div class="user-avatar"
+                 style="width:40px;height:40px;font-size:15px;background:${emp.role === 'admin' ? 'var(--rd)' : 'var(--bl)'}">
+              ${escHtml(emp.full_name?.charAt(0) || '?')}
+            </div>
+            <div style="flex:1">
+              <div style="font-weight:800;font-size:14px">${escHtml(emp.full_name)}</div>
+              <div style="font-size:11px;color:var(--tx3)">${roleLabel(emp.role)}</div>
+            </div>
+            ${emp.id !== getUser()?.id
+      ? `<button class="btn btn-danger btn-sm"
+                   onclick="deleteEmployee(${emp.id}, ${jsString(emp.full_name)})">🗑️</button>`
+      : '<span style="font-size:11px;color:var(--tx3)">أنت</span>'}
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+            <div style="background:var(--grl);border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:10px;color:var(--gr);font-weight:700">الرواتب</div>
+              <div style="font-size:15px;font-weight:800;color:var(--gr)">${fmt(emp.totalSalary)}</div>
+            </div>
+            <div style="background:var(--rdl);border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:10px;color:var(--rd);font-weight:700">السلف</div>
+              <div style="font-size:15px;font-weight:800;color:var(--rd)">${fmt(emp.totalAdvances)}</div>
+            </div>
+            <div style="background:${emp.netBalance >= 0 ? 'var(--grl)' : 'var(--rdl)'};
+                        border-radius:8px;padding:8px;text-align:center">
+              <div style="font-size:10px;color:${emp.netBalance >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:700">الصافي</div>
+              <div style="font-size:15px;font-weight:800;
+                          color:${emp.netBalance >= 0 ? 'var(--gr)' : 'var(--rd)'}">
+                ${fmt(Math.abs(emp.netBalance))}
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm"
+              onclick="viewEmployeeStatement(${emp.id}, ${jsString(emp.full_name)})">📄 كشف</button>
+            <button class="btn btn-primary btn-sm"
+              onclick="openSalaryForEmployee(${emp.id}, ${jsString(emp.full_name)})">💰 راتب</button>
+            <button class="btn btn-ghost btn-sm"
+              onclick="openAdvanceModal(${emp.id}, ${jsString(emp.full_name)})">➖ سلفة</button>
+          </div>
+        </div>
+      `).join('') : `
+        <div class="empty-state">
+          <div class="empty-icon">👷</div>
+          <p>لا يوجد موظفون — أضف موظفاً للبدء</p>
+        </div>`}
+    </div>
+  `;
+}
+function openSalaryForEmployee(userId, employeeName) {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">💰 إضافة راتب — ${escHtml(employeeName)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">قيمة الراتب *</label>
+        <input class="form-input" id="sal2_amount" type="number"
+               step="0.001" min="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">شهر الراتب</label>
+        <input class="form-input" id="sal2_month" type="date"
+               value="${new Date().toISOString().slice(0, 8)}01">
       </div>
     </div>
 
-    <div class="card" style="padding:0;overflow:hidden">
-      <div class="table-wrap">
-        <table>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">تاريخ الدفع</label>
+        <input class="form-input" id="sal2_paid_date" type="date"
+               value="${new Date().toISOString().split('T')[0]}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">الحالة</label>
+        <select class="form-select" id="sal2_status">
+          <option value="paid">مدفوع</option>
+          <option value="pending">غير مدفوع</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="sal2_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1"
+        onclick="saveSalaryForEmployee(${userId}, ${jsString(employeeName)})">
+        حفظ الراتب
+      </button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveSalaryForEmployee(userId, employeeName) {
+  const amount = parseFloat(document.getElementById('sal2_amount')?.value);
+  if (!amount || amount <= 0) { toast('قيمة الراتب غير صحيحة', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  try {
+    await API.createSalary({
+      employee_user_id: userId,
+      employee_name: employeeName,
+      salary_amount: amount,
+      salary_month: document.getElementById('sal2_month')?.value,
+      paid_date: document.getElementById('sal2_paid_date')?.value,
+      status: document.getElementById('sal2_status')?.value || 'paid',
+      notes: document.getElementById('sal2_notes')?.value || null,
+    });
+    toast('تم حفظ الراتب ✅', 'success');
+    closeModal();
+    viewEmployeeStatement(userId, employeeName);
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ الراتب'; }
+  }
+}
+
+async function saveNewEmployee() {
+  const name = document.getElementById('emp_name')?.value?.trim();
+  const username = document.getElementById('emp_user')?.value?.trim();
+  const password = document.getElementById('emp_pass')?.value;
+  const role = document.getElementById('emp_role')?.value;
+  if (!name || !username || !password) { toast('يرجى ملء جميع الحقول', 'error'); return; }
+  try {
+    await API.createUser({ full_name: name, username, password, role });
+    toast('تم إضافة الموظف ✅', 'success');
+    closeModal();
+    navigateTo('employees');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteEmployee(id, name) {
+  if (!confirm(`حذف الموظف "${name}"؟`)) return;
+  try {
+    await API.deleteUser(id);
+    toast('تم حذف الموظف ✅', 'success');
+    navigateTo('employees');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function viewClientStatement(id, name) {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">📄 كشف حساب — ${escHtml(name)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="stmt-content">
+      <div class="loading"><div class="spinner"></div><p>جاري التحميل...</p></div>
+    </div>
+  `, '780px');
+
+  try {
+    const data = await API.getClientStatement(id);
+    const el = document.getElementById('stmt-content');
+    if (!el) return;
+
+    const txs = data.transactions || [];
+    const s = data.summary || {};
+    const balance = parseFloat(data.balance || 0);
+    const limit = parseFloat(data.credit_limit || 0);
+    const overLimit = limit > 0 && balance > limit;
+    const encoded = encodePayload(data);
+
+    // Cash vs credit breakdown
+    const cashInvs = txs.filter(t => t.type === 'invoice' && t.payment_method === 'cash');
+    const creditInvs = txs.filter(t => t.type === 'invoice' && t.payment_method !== 'cash');
+    const cashTotal = cashInvs.reduce((acc, t) => acc + t.amount, 0);
+    const creditTotal = creditInvs.reduce((acc, t) => acc + t.amount, 0);
+    const totalPaid = txs.filter(t => t.type === 'payment').reduce((acc, t) => acc + t.amount, 0);
+
+    el.innerHTML = `
+
+      <!-- الرصيد الإجمالي -->
+      <div style="background:#1a1815;color:white;padding:18px 20px;border-radius:12px;margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+          <div>
+            <div style="font-size:11px;opacity:.5;margin-bottom:4px">الرصيد الصافي</div>
+            <div style="font-size:32px;font-weight:800;letter-spacing:-1px;
+                        color:${balance > 0 ? '#ff6b6b' : '#51cf66'}">
+              ${fmt(Math.abs(balance))} د.أ
+            </div>
+            <div style="font-size:11px;opacity:.5;margin-top:4px">
+              ${balance > 0 ? '← متبقٍ على الزبون' : '← لا يوجد متبقٍ'}
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+            <div style="background:rgba(255,255,255,.08);border-radius:8px;padding:8px 12px">
+              <div style="opacity:.5;font-size:10px;margin-bottom:2px">إجمالي الفواتير</div>
+              <div style="font-weight:700">${fmt(s.total_invoiced)} د.أ</div>
+            </div>
+            <div style="background:rgba(255,255,255,.08);border-radius:8px;padding:8px 12px">
+              <div style="opacity:.5;font-size:10px;margin-bottom:2px">إجمالي المدفوع</div>
+              <div style="font-weight:700;color:#51cf66">${fmt(s.total_paid)} د.أ</div>
+            </div>
+          </div>
+        </div>
+        ${overLimit ? `
+          <div style="margin-top:12px;padding:8px 12px;background:rgba(255,0,0,.2);
+                      border-radius:8px;font-size:12px;font-weight:700">
+            ⚠️ تجاوز حد الائتمان ${fmt(limit)} د.أ
+          </div>` : ''}
+      </div>
+
+      <!-- نقدي vs ذمم -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+        <div style="background:#edfaf4;border-radius:12px;padding:14px;
+                    border:1px solid rgba(10,118,80,.15)">
+          <div style="font-size:12px;font-weight:800;color:var(--gr);margin-bottom:8px">
+            💵 مبيعات نقدية
+          </div>
+          <div style="font-size:22px;font-weight:800;color:var(--gr)">${fmt(cashTotal)} د.أ</div>
+          <div style="font-size:11px;color:var(--tx3);margin-top:4px">
+            ${cashInvs.length} فاتورة نقدية — محصَّلة فوراً
+          </div>
+        </div>
+        <div style="background:#fff0f0;border-radius:12px;padding:14px;
+                    border:1px solid rgba(194,21,21,.15)">
+          <div style="font-size:12px;font-weight:800;color:var(--rd);margin-bottom:8px">
+            📋 مبيعات ذمم
+          </div>
+          <div style="font-size:22px;font-weight:800;color:var(--rd)">${fmt(creditTotal)} د.أ</div>
+          <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:6px">
+            <span style="color:var(--gr)">محصَّل: ${fmt(totalPaid)} د.أ</span>
+            <span style="color:var(--rd);font-weight:700">
+              متبقٍ: ${fmt(Math.max(creditTotal - totalPaid, 0))} د.أ
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- أزرار التصفية -->
+      <div class="stmt-tabs"
+           style="display:flex;gap:4px;margin-bottom:10px;background:var(--bg);
+                  border:1px solid var(--brd);border-radius:var(--r);
+                  padding:4px;width:fit-content">
+        <button class="tab-btn active" onclick="filterStatementTx('all',this)">الكل</button>
+        <button class="tab-btn"        onclick="filterStatementTx('cash',this)">💵 نقدي</button>
+        <button class="tab-btn"        onclick="filterStatementTx('credit',this)">📋 ذمم</button>
+        <button class="tab-btn"        onclick="filterStatementTx('payment',this)">✅ مقبوضات</button>
+      </div>
+
+      <!-- جدول الحركات -->
+      <div style="border:1px solid #e8e5e0;border-radius:10px;overflow:hidden">
+        <table id="stmt-tx-table" style="width:100%;border-collapse:collapse;font-size:12px">
           <thead>
-            <tr>
-              <th>اسم الموظف</th>
-              <th>اسم المستخدم</th>
-              <th>الصلاحية</th>
-              <th>تاريخ الإنشاء</th>
+            <tr style="background:#f5f3f0">
+              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94">التاريخ</th>
+              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94">البيان</th>
+              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94">نوع الدفع</th>
+              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94">مدين (فاتورة)</th>
+              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94">دائن (قبض)</th>
+              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94">الرصيد</th>
             </tr>
           </thead>
           <tbody>
-            ${employees.length ? employees.map(u => `
+            ${txs.length ? txs.map(t => {
+      const isInv = t.type === 'invoice';
+      const pm = t.payment_method || '';
+      const pmLabel = {
+        cash: 'نقد', credit: 'ذمم', partial: 'جزئي',
+        check: 'شيك', transfer: 'حوالة'
+      }[pm] || pm;
+      const bg = isInv && pm === 'cash'
+        ? 'background:#f9fff9'
+        : isInv
+          ? 'background:#fff9f9'
+          : 'background:#edfaf4';
+
+      return `<tr data-tx-type="${t.type}" data-tx-method="${pm}"
+                          style="border-top:1px solid #f0ede8;${bg}">
+                <td style="padding:10px 12px;color:#9e9a94;white-space:nowrap">
+                  ${fmtDate(t.date)}
+                </td>
+                <td style="padding:10px 12px;font-weight:600">
+                  ${isInv
+          ? `فاتورة #${escHtml(t.description || t.id)}`
+          : `<span style="color:#057a55">مقبوضة</span>${t.notes
+            ? ' — ' + escHtml(
+              String(t.notes)
+                .replace(/method:\w+/g, '')
+                .replace(/invoice_id:\d+/g, '')
+                .replace(/\|/g, '')
+                .trim()
+            )
+            : ''}`}
+                </td>
+                <td style="padding:10px 12px">
+                  ${isInv
+          ? `<span class="badge badge-gray" style="font-size:10px">${pmLabel}</span>`
+          : ''}
+                </td>
+                <td style="padding:10px 12px;color:#c21515;font-weight:700">
+                  ${isInv ? fmt(t.amount) + ' د.أ' : '—'}
+                </td>
+                <td style="padding:10px 12px;color:#057a55;font-weight:700">
+                  ${!isInv
+          ? fmt(t.amount) + ' د.أ'
+          : parseFloat(t.paid_amount || 0) > 0
+            ? fmt(t.paid_amount) + ' د.أ <span style="font-size:10px;opacity:.6">(نقد)</span>'
+            : '—'}
+                </td>
+                <td style="padding:10px 12px;font-weight:800;
+                           color:${parseFloat(t.running_balance) > 0 ? '#c21515' : '#057a55'}">
+                  ${fmt(Math.abs(t.running_balance))} د.أ
+                  <div style="font-size:9px;font-weight:400;color:#9e9a94">
+                    ${parseFloat(t.running_balance) > 0 ? 'عليه' : 'له'}
+                  </div>
+                </td>
+              </tr>`;
+    }).join('') : `
               <tr>
-                <td><strong>${escHtml(u.full_name || '—')}</strong></td>
-                <td>${escHtml(u.username || '—')}</td>
-                <td>${roleBadge(u.role)}</td>
-                <td>${fmtDate(u.created_at)}</td>
-              </tr>
-            `).join('') : emptyRow('لا يوجد موظفون', 4)}
+                <td colspan="6"
+                    style="text-align:center;padding:30px;color:#9e9a94">
+                  لا توجد حركات
+                </td>
+              </tr>`}
           </tbody>
+          <tfoot>
+            <tr style="background:#1a1815;color:white">
+              <td colspan="3" style="padding:10px 12px;font-weight:700;font-size:12px">
+                الإجماليات
+              </td>
+              <td style="padding:10px 12px;font-weight:800">${fmt(s.total_invoiced)} د.أ</td>
+              <td style="padding:10px 12px;font-weight:800;color:#51cf66">${fmt(s.total_paid)} د.أ</td>
+              <td style="padding:10px 12px;font-weight:800;
+                         color:${balance > 0 ? '#ff6b6b' : '#51cf66'}">
+                ${fmt(Math.abs(balance))} د.أ
+              </td>
+            </tr>
+          </tfoot>
         </table>
       </div>
-    </div>
-  `;
+
+      <!-- أزرار أسفل -->
+      <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-ghost btn-sm"
+          onclick="printStatementFromEncoded(${jsString(name)}, ${jsString(encoded)})">
+          🖨️ طباعة
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal()">إغلاق</button>
+      </div>
+    `;
+
+  } catch (e) {
+    const el = document.getElementById('stmt-content');
+    if (el) el.innerHTML = `<div class="alert alert-danger">${escHtml(e.message)}</div>`;
+  }
+}
+function filterStatementTx(type, btn) {
+  btn.closest('.stmt-tabs')
+    .querySelectorAll('.tab-btn')
+    .forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  document.querySelectorAll('#stmt-tx-table tbody tr').forEach(row => {
+    const rt = row.dataset.txType;
+    const rm = row.dataset.txMethod;
+    if (type === 'all') row.style.display = '';
+    else if (type === 'cash') row.style.display = (rt === 'invoice' && rm === 'cash') ? '' : 'none';
+    else if (type === 'credit') row.style.display = (rt === 'invoice' && rm !== 'cash') ? '' : 'none';
+    else if (type === 'payment') row.style.display = rt === 'payment' ? '' : 'none';
+  });
 }
 async function deleteSalary(id) {
   if (!confirm('حذف هذا الراتب؟')) return;

@@ -11,6 +11,13 @@ from middleware.roles import require_role
 
 router = APIRouter()
 
+class AdvanceIn(BaseModel):
+    employee_user_id: Optional[int] = None
+    employee_name: str
+    amount: float
+    advance_date: Optional[str] = None
+    advance_type: Optional[str] = "advance"
+    notes: Optional[str] = None
 
 def to_val(v):
     if isinstance(v, Decimal):
@@ -195,3 +202,108 @@ async def delete_salary(salary_id: int, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="الراتب غير موجود")
 
     return {"success": True}
+
+@router.get("/employees-list")
+async def list_employees_for_dropdown(user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    pool = await get_pool()
+    rows = await pool.fetch("""
+        SELECT id, full_name, role FROM users
+        WHERE role IN ('admin','accountant','employee')
+        ORDER BY full_name ASC
+    """)
+    return [dict(r) for r in rows]
+
+
+@router.get("/advances")
+async def list_advances(user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    pool = await get_pool()
+    rows = await pool.fetch("""
+        SELECT ea.*, u.full_name AS created_by_name
+        FROM employee_advances ea
+        LEFT JOIN users u ON u.id = ea.created_by
+        ORDER BY ea.advance_date DESC, ea.id DESC
+    """)
+    return [row_to_dict(r) for r in rows]
+
+
+@router.post("/advances")
+async def create_advance(data: AdvanceIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    employee_name = str(data.employee_name or "").strip()
+    if not employee_name:
+        raise HTTPException(status_code=400, detail="اسم الموظف مطلوب")
+    amount = round(float(data.amount or 0), 3)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+    advance_date = parse_date(data.advance_date)
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        INSERT INTO employee_advances
+          (employee_user_id, employee_name, amount, advance_date, advance_type, notes, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING *
+        """,
+        data.employee_user_id, employee_name, amount,
+        advance_date, data.advance_type or "advance", data.notes, user.get("id"),
+    )
+    return row_to_dict(row)
+
+
+@router.delete("/advances/{advance_id}")
+async def delete_advance(advance_id: int, user=Depends(get_current_user)):
+    require_role(user, "admin")
+    pool = await get_pool()
+    deleted = await pool.fetchrow(
+        "DELETE FROM employee_advances WHERE id=$1 RETURNING id", advance_id
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="السلفة غير موجودة")
+    return {"success": True}
+
+
+@router.get("/employee-statement/{employee_name}")
+async def employee_statement(employee_name: str, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    pool = await get_pool()
+
+    salaries = await pool.fetch("""
+        SELECT id, salary_amount AS amount, salary_month AS date,
+               paid_date, status, notes, 'salary' AS record_type
+        FROM employee_salaries
+        WHERE LOWER(TRIM(employee_name)) = LOWER(TRIM($1))
+        ORDER BY salary_month ASC, id ASC
+    """, employee_name)
+
+    advances = await pool.fetch("""
+        SELECT id, amount, advance_date AS date,
+               advance_type, notes, 'advance' AS record_type
+        FROM employee_advances
+        WHERE LOWER(TRIM(employee_name)) = LOWER(TRIM($1))
+        ORDER BY advance_date ASC, id ASC
+    """, employee_name)
+
+    total_salary  = sum(float(r["amount"] or 0) for r in salaries)
+    total_advances = sum(float(r["amount"] or 0) for r in advances)
+    balance = total_salary - total_advances
+
+    txs = [row_to_dict(r) for r in salaries] + [row_to_dict(r) for r in advances]
+    txs.sort(key=lambda x: (str(x.get("date") or ""), x.get("id") or 0))
+
+    running = 0.0
+    for t in txs:
+        if t["record_type"] == "salary":
+            running += float(t["amount"] or 0)
+        else:
+            running -= float(t["amount"] or 0)
+        t["running_balance"] = round(running, 3)
+
+    return {
+        "employee_name": employee_name,
+        "balance": round(balance, 3),
+        "total_salary": round(total_salary, 3),
+        "total_advances": round(total_advances, 3),
+        "transactions": txs,
+    }

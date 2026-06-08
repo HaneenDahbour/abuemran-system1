@@ -135,7 +135,7 @@ class InvoiceItem(BaseModel):
 
 
 class InvoiceRequest(BaseModel):
-    client_id: Optional[int] = None  # old compatibility only, not required anymore
+    client_id: Optional[int] = None
     invoice_number: Optional[str] = None
     net_amount: Optional[float] = None
     tax_amount: Optional[float] = 0
@@ -144,10 +144,8 @@ class InvoiceRequest(BaseModel):
     payment_method: Optional[str] = "credit"
     paid_amount: Optional[float] = 0
     notes: Optional[str] = None
-
-    # This is now required because this is the person who pays
     recipient_name: str
-
+    invoice_writer_name: Optional[str] = None   # ← NEW
     items: Optional[List[InvoiceItem]] = Field(default_factory=list)
 async def fetch_invoice_items(conn, invoice_id: int):
     rows = await conn.fetch(
@@ -496,69 +494,50 @@ async def deduct_stock_for_approved_invoice(conn, invoice_id: int, invoice_numbe
 @router.get("")
 async def get_invoices(user=Depends(get_current_user)):
     pool = await get_pool()
-
     try:
         role = user.get("role")
+        paid_sq = """COALESCE((
+            SELECT SUM(rp.amount) FROM recipient_payments rp
+            WHERE rp.invoice_id = inv.id
+        ), 0)"""
 
         if role == "client":
-            rows = await pool.fetch(
-                """
+            rows = await pool.fetch(f"""
                 SELECT inv.*, c.name AS client_name,
-                       COALESCE((
-                         SELECT SUM(p.amount) FROM payments p
-                         WHERE p.client_id = inv.client_id AND p.status='approved'
-                           AND (p.invoice_id = inv.id
-                                OR COALESCE(p.notes,'') ILIKE ('%invoice_id:' || inv.id::text || '%'))
-                       ), 0) AS paid_amount
+                       {paid_sq} AS paid_amount
                 FROM invoices inv
-                JOIN clients c ON inv.client_id = c.id
-                WHERE inv.client_id = $1 AND COALESCE(inv.status,'approved') = 'approved'
+                LEFT JOIN clients c ON inv.client_id = c.id
+                WHERE inv.client_id = $1
+                  AND COALESCE(inv.status,'approved') = 'approved'
                 ORDER BY inv.date DESC, inv.id DESC
-                """,
-                user.get("client_id"),
-            )
+            """, user.get("client_id"))
 
         elif role == "employee":
-            # Employees only see invoices they created
-            rows = await pool.fetch(
-                """
-                SELECT inv.*, c.name AS client_name, u.full_name AS created_by_name,
-                       COALESCE((
-                         SELECT SUM(p.amount) FROM payments p
-                         WHERE p.client_id = inv.client_id AND p.status='approved'
-                           AND (p.invoice_id = inv.id
-                                OR COALESCE(p.notes,'') ILIKE ('%invoice_id:' || inv.id::text || '%'))
-                       ), 0) AS paid_amount
+            rows = await pool.fetch(f"""
+                SELECT inv.*, c.name AS client_name,
+                       u.full_name AS created_by_name,
+                       {paid_sq} AS paid_amount
                 FROM invoices inv
-                JOIN clients c ON inv.client_id = c.id
+                LEFT JOIN clients c ON inv.client_id = c.id
                 LEFT JOIN users u ON inv.created_by = u.id
                 WHERE inv.created_by = $1
                 ORDER BY inv.date DESC, inv.id DESC
-                """,
-                user.get("id"),
-            )
+            """, user.get("id"))
 
         else:
-            # admin / accountant see everything
-            rows = await pool.fetch("""
-                SELECT inv.*, c.name AS client_name, u.full_name AS created_by_name,
-                       COALESCE((
-                         SELECT SUM(p.amount) FROM payments p
-                         WHERE p.client_id = inv.client_id AND p.status='approved'
-                           AND (p.invoice_id = inv.id
-                                OR COALESCE(p.notes,'') ILIKE ('%invoice_id:' || inv.id::text || '%'))
-                       ), 0) AS paid_amount
+            rows = await pool.fetch(f"""
+                SELECT inv.*, c.name AS client_name,
+                       u.full_name AS created_by_name,
+                       {paid_sq} AS paid_amount
                 FROM invoices inv
-                JOIN clients c ON inv.client_id = c.id
+                LEFT JOIN clients c ON inv.client_id = c.id
                 LEFT JOIN users u ON inv.created_by = u.id
                 ORDER BY
                   CASE COALESCE(inv.status,'approved')
-                    WHEN 'pending' THEN 0
-                    WHEN 'approved' THEN 1
-                    ELSE 2
+                    WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2
                   END,
                   inv.date DESC, inv.id DESC
-                """)
+            """)
 
         result = []
         async with pool.acquire() as conn:
@@ -569,7 +548,7 @@ async def get_invoices(user=Depends(get_current_user)):
         return result
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø¬Ù„Ø¨ Ø§Ù„ÙÙˆØ§ØªÙŠØ±: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في جلب الفواتير: {str(e)}")
 
 @router.post("")
 async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
@@ -620,30 +599,29 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
                 if data.client_id:
                     await ensure_client_exists(conn, data.client_id)
 
-                inv = await conn.fetchrow(
-                    """
-                    INSERT INTO invoices
-                    (client_id, invoice_number, amount, net_amount, tax_amount, total_amount,
-            date, payment_method, notes, recipient_name, created_by,
-            status, approved_by, approved_at, initial_paid_amount)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-                    RETURNING *
-                    """,
-                    data.client_id,
-                    invoice_number,
-                    net,
-                    net,
-                    tax,
-                    total,
-                    invoice_date,
-                    payment_method,
-                    clean_text(data.notes),
-                    recipient_name,
-                    user.get("id"),
-                    invoice_status,
-                    user.get("id") if invoice_status == "approved" else None,
-                    datetime.now() if invoice_status == "approved" else None,
-                    paid,)
+                    inv = await conn.fetchrow(
+                        """
+                        INSERT INTO invoices
+                        (client_id, invoice_number, amount, net_amount, tax_amount, total_amount,
+                        date, payment_method, notes, recipient_name, created_by,
+                        status, approved_by, approved_at, initial_paid_amount, invoice_writer_name)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                        RETURNING *
+                        """,
+                        data.client_id,
+                        invoice_number,
+                        net, net, tax, total,
+                        invoice_date,
+                        payment_method,
+                        clean_text(data.notes),
+                        recipient_name,
+                        user.get("id"),
+                        invoice_status,
+                        user.get("id") if invoice_status == "approved" else None,
+                        datetime.now() if invoice_status == "approved" else None,
+                        paid,
+                        clean_text(data.invoice_writer_name) or user.get("full_name"),
+                    )
 
                 if invoice_status == "approved":
                     # Immediate: deduct stock + auto-payment (existing behaviour)
@@ -752,21 +730,20 @@ async def update_invoice(
                     UPDATE invoices
                     SET client_id=$1, invoice_number=$2, amount=$3, net_amount=$4,
                         tax_amount=$5, total_amount=$6, date=$7, payment_method=$8,
-                        notes=$9, recipient_name=$10, initial_paid_amount=$11
-WHERE id=$12
+                        notes=$9, recipient_name=$10, initial_paid_amount=$11,
+                        invoice_writer_name=$12
+                    WHERE id=$13
                     RETURNING *
                     """,
                     data.client_id,
                     invoice_number,
-                    net,
-                    net,
-                    tax,
-                    total,
+                    net, net, tax, total,
                     invoice_date,
                     payment_method,
                     clean_text(data.notes),
                     recipient_name,
                     paid,
+                    clean_text(data.invoice_writer_name),
                     invoice_id,
                 )
 
@@ -853,23 +830,23 @@ async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
 
                 # Create approved automatic payment for cash invoices
                 if paid > 0:
-                    await conn.execute(
-                    """
-                    INSERT INTO recipient_payments
-                    (recipient_name, client_id, invoice_id, amount, payment_method,
-                    payment_date, notes, created_by)
-                    VALUES
-                    ($1, $2, $3, $4, $5, $6, $7, $8)
-                    """,
-                    invoice["recipient_name"],
-                    invoice["client_id"],
-                    invoice_id,
-                    paid,
-                    payment_method,
-                    invoice_date,
-                    f"دفعة تلقائية عند اعتماد فاتورة #{invoice_number}",
-                    safe_uuid(user.get("id")),
-                )
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO recipient_payments
+                                        (recipient_name, client_id, invoice_id, amount, payment_method,
+                                        payment_date, notes, created_by)
+                                        VALUES
+                                        ($1, $2, $3, $4, $5, $6, $7, $8)
+                                        """,
+                                        invoice["recipient_name"],
+                                        invoice["client_id"],
+                                        invoice_id,
+                                        paid,
+                                        payment_method,
+                                        invoice_date,
+                                        f"دفعة تلقائية عند اعتماد فاتورة #{invoice_number}",
+                                        safe_uuid(user.get("id")),
+                                    )
 
                 updated = await conn.fetchrow(
                     """

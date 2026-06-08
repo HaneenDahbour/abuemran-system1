@@ -290,6 +290,18 @@
       apiFetch('/recipients/payments', { method: 'POST', body: JSON.stringify(data) }),
     deleteRecipientPayment: id =>
       apiFetch(`/recipients/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
+    // Employees & advances
+    getEmployeesList: () => apiFetch('/expenses/employees-list'),
+    getAdvances: () => apiFetch('/expenses/advances'),
+    createAdvance: data =>
+      apiFetch('/expenses/advances', { method: 'POST', body: JSON.stringify(data) }),
+    deleteAdvance: id =>
+      apiFetch(`/expenses/advances/${requireId(id, 'معرّف السلفة')}`, { method: 'DELETE' }),
+    getEmployeeStatement: name =>
+      apiFetch(`/expenses/employee-statement/${encodeURIComponent(name)}`),
+
+    // Profit
+    getProfitAnalysis: () => apiFetch('/products/profit-analysis'),
   };
 
   window.API_BASE = API_BASE;
