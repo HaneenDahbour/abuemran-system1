@@ -7108,29 +7108,30 @@ function openAddEmployeeModal() {
 
 async function saveNewEmployee() {
   const name = document.getElementById('emp_name')?.value?.trim();
-  const username = document.getElementById('emp_user')?.value?.trim();
-  const password = document.getElementById('emp_pass')?.value;
-  const role = document.getElementById('emp_role')?.value;
+  if (!name) { toast('الاسم مطلوب فقط', 'error'); return; }
 
-  if (!name || !username || !password) {
-    toast('يرجى ملء جميع الحقول', 'error');
-    return;
-  }
+  const username = document.getElementById('emp_user')?.value?.trim()
+    || 'emp_' + Date.now().toString().slice(-6);
+
+  const password = document.getElementById('emp_pass')?.value?.trim()
+    || 'Abu@1234';
+
+  const role = document.getElementById('emp_role')?.value || 'employee';
 
   const btn = document.querySelector('#global-modal .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
 
   try {
     await API.createUser({ full_name: name, username, password, role });
-    toast('تم إضافة الموظف ✅', 'success');
+    toast(`✅ تم إضافة ${name} — المستخدم: ${username} — كلمة المرور: ${password}`, 'success');
     closeModal();
+    window._employeesCache = null;
     navigateTo('employees');
   } catch (e) {
     toast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'إضافة الموظف'; }
   }
 }
-
 async function deleteEmployee(id, name) {
   if (!confirm(`حذف الموظف "${name}"؟`)) return;
   try {
