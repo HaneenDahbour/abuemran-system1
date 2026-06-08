@@ -140,21 +140,36 @@ function renderSearchDropdown(data, q, dd) {
   }
 
   // ── Invoices ──────────────────────────────────────────────
+  // ── Invoices ──────────────────────────────────────────────
   if (invoices.length) {
     html += sectionHeader("🧾 الفواتير");
     invoices.forEach((inv) => {
+      const writer = inv.attributed_employee_name || inv.created_by_name || '';
+      const recip = inv.recipient_name || '';
       html += `
         <div class="sr-row" onclick="navigateTo('invoices'); closeSearchDropdown();"
              style="padding:10px 16px; cursor:pointer; display:flex; align-items:center; gap:10px"
              onmouseenter="this.style.background='#f7f6f3'" onmouseleave="this.style.background='white'">
-          <div style="width:34px;height:34px;background:#fef3c7;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🧾</div>
+          <div style="width:34px;height:34px;background:#fef3c7;border-radius:8px;
+                      display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">
+            🧾
+          </div>
           <div style="flex:1;min-width:0">
-            <div style="font-weight:600;font-size:13px">${hl(inv.invoice_number)}</div>
-            <div style="font-size:11px;color:#9e9a94">${hl(inv.client_name)}</div>
+            <div style="font-weight:700;font-size:13px">${hl(inv.invoice_number)}</div>
+            <div style="font-size:11px;color:#9e9a94;margin-top:2px">
+              ${recip
+          ? `المطلوب من السادة: <strong>${hl(recip)}</strong>`
+          : hl(inv.client_name)}
+            </div>
+            ${writer
+          ? `<div style="font-size:10px;color:#b0aaa4">كتبها: ${hl(writer)}</div>`
+          : ''}
           </div>
           <div style="text-align:left;flex-shrink:0">
             <div style="font-size:12px;font-weight:700">${fmt(inv.total_amount)} د.أ</div>
-            <div style="font-size:10px;color:#9e9a94">${inv.date ? new Date(inv.date).toLocaleDateString("ar-JO") : ""}</div>
+            <div style="font-size:10px;color:#9e9a94">
+              ${inv.date ? new Date(inv.date).toLocaleDateString("ar-JO") : ""}
+            </div>
           </div>
         </div>`;
     });

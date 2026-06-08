@@ -69,12 +69,24 @@ async def _run_parallel_search(pool, pattern: str):
         return await pool.fetch(
             """
             SELECT inv.id, inv.invoice_number, inv.total_amount, inv.date,
-                   c.name AS client_name
+                   COALESCE(c.name,            '') AS client_name,
+                   COALESCE(inv.recipient_name,'') AS recipient_name,
+                   COALESCE(ae.full_name,      '') AS attributed_employee_name,
+                   COALESCE(u.full_name,       '') AS created_by_name
             FROM invoices inv
-            JOIN clients c ON c.id = inv.client_id
-            WHERE inv.invoice_number ILIKE $1 OR c.name ILIKE $1
+            LEFT JOIN clients c ON c.id  = inv.client_id
+            LEFT JOIN users ae  ON ae.id = inv.attributed_employee_id
+            LEFT JOIN users u   ON u.id  = inv.created_by
+            WHERE COALESCE(NULLIF(inv.status,''), 'approved') != 'rejected'
+              AND (
+                   inv.invoice_number               ILIKE $1
+                OR COALESCE(c.name,           '') ILIKE $1
+                OR COALESCE(inv.recipient_name,'') ILIKE $1
+                OR COALESCE(ae.full_name,     '') ILIKE $1
+                OR COALESCE(u.full_name,      '') ILIKE $1
+              )
             ORDER BY inv.date DESC
-            LIMIT 6
+            LIMIT 8
             """,
             pattern,
         )
