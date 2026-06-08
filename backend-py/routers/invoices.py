@@ -810,10 +810,10 @@ async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
                 invoice = await conn.fetchrow(
                     """
                     SELECT inv.*, c.name AS client_name
-                    FROM invoices inv
-                    JOIN clients c ON c.id = inv.client_id
-                    WHERE inv.id=$1
-                    FOR UPDATE
+FROM invoices inv
+LEFT JOIN clients c ON c.id = inv.client_id
+WHERE inv.id=$1
+FOR UPDATE
                     """,
                     invoice_id,
                 )
@@ -841,45 +841,56 @@ async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
                 )
 
                 # Calculate payment after approval
-                # cash = fully paid, credit = 0, others need manual payment unless stored later
+                # Reflect payment only after approval.
+                # cash = full invoice paid
+                # partial/check/transfer = use initial_paid_amount saved when invoice was created
+                # credit = no payment
                 if payment_method == "cash":
                     paid = total
+                elif payment_method in ("partial", "check", "transfer"):
+                    paid = money3(invoice["initial_paid_amount"] or 0)
                 else:
                     paid = 0
 
-                paid = money3(paid)
+                paid = min(money3(paid), total)
                 remaining = money3(total - paid)
 
                 # Create approved automatic payment for cash invoices
                 if paid > 0:
-                                    await conn.execute(
-                                        """
-                                        INSERT INTO recipient_payments
-                                        (recipient_name, client_id, invoice_id, amount, payment_method,
-                                        payment_date, notes, created_by)
-                                        VALUES
-                                        ($1, $2, $3, $4, $5, $6, $7, $8)
-                                        """,
-                                        invoice["recipient_name"],
-                                        invoice["client_id"],
-                                        invoice_id,
-                                        paid,
-                                        payment_method,
-                                        invoice_date,
-                                        f"دفعة تلقائية عند اعتماد فاتورة #{invoice_number}",
-                                        safe_uuid(user.get("id")),
-                                    )
+                    recipient_name = clean_text(invoice["recipient_name"]) or clean_text(invoice["client_name"])
+                    if not recipient_name:
+                        raise HTTPException(status_code=400, detail="اسم المطلوب من السادة مطلوب قبل الاعتماد")
+
+                    await conn.execute(
+                        """
+                        INSERT INTO recipient_payments
+                        (recipient_name, client_id, invoice_id, amount, payment_method,
+                        payment_date, notes, created_by)
+                        VALUES
+                        ($1, $2, $3, $4, $5, $6, $7, $8)
+                        """,
+                        recipient_name,
+                        invoice["client_id"],
+                        invoice_id,
+                        paid,
+                        payment_method,
+                        invoice_date,
+                        f"دفعة تلقائية من اعتماد فاتورة #{invoice_number} | invoice_id:{invoice_id} | method:{payment_method}",
+                        user.get("id"),
+                    )
 
                 updated = await conn.fetchrow(
                     """
                     UPDATE invoices
                     SET status='approved',
                         approved_by=$1,
-                        approved_at=NOW()
-                    WHERE id=$2
+                        approved_at=NOW(),
+                        initial_paid_amount=$2
+                    WHERE id=$3
                     RETURNING *
                     """,
-                    safe_uuid(user.get("id")),
+                    user.get("id"),
+                    paid,
                     invoice_id,
                 )
 

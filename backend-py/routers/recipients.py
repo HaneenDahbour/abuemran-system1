@@ -60,8 +60,7 @@ async def list_recipients(user=Depends(get_current_user)):
                         ', '
                     ) AS employee_names
                 FROM invoices i
-                LEFT JOIN users u ON u.id = i.created_by
-                WHERE i.recipient_name IS NOT NULL
+LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)                WHERE i.recipient_name IS NOT NULL
                   AND TRIM(i.recipient_name) <> ''
                   AND COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
                 GROUP BY TRIM(i.recipient_name)
@@ -145,9 +144,10 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
                 i.notes,
                 i.recipient_name,
                 i.created_by,
-                u.full_name AS employee_name
-            FROM invoices i
-            LEFT JOIN users u ON u.id = i.created_by
+i.attributed_employee_id,
+u.full_name AS employee_name
+FROM invoices i
+LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
             WHERE LOWER(TRIM(i.recipient_name)) = LOWER(TRIM($1))
             AND COALESCE(i.status, 'approved') = 'approved'
             ORDER BY i.date ASC, i.id ASC
