@@ -2550,6 +2550,8 @@ async function saveInvoice() {
 
   const payload = {
     client_id,
+    recipient_name: document.getElementById('inv_recipient')?.value?.trim(),
+
     attributed_employee_id,
     invoice_number: invNum,
     net_amount: net,

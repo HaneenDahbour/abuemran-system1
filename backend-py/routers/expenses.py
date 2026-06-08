@@ -95,27 +95,40 @@ async def create_expense(data: ExpenseIn, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
 
     expense_date = parse_date(data.expense_date)
+
+    created_by = None
+    try:
+        if user.get("id") is not None:
+            created_by = int(user.get("id"))
+    except Exception:
+        created_by = None
+
     pool = await get_pool()
 
-    row = await pool.fetchrow(
-        """
-        INSERT INTO cashbox_expenses
-          (name, description, amount, expense_type, category, is_fixed,
-           expense_date, notes, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        RETURNING *
-        """,
-        name, name, amount,
-        data.expense_type or "daily",
-        data.category,
-        bool(data.is_fixed),
-        expense_date,
-        data.notes,
-        user.get("id"),
-    )
-    return row_to_dict(row)
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO cashbox_expenses
+              (name, description, amount, expense_type, category, is_fixed,
+               expense_date, notes, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+            RETURNING *
+            """,
+            name,
+            name,
+            amount,
+            data.expense_type or "daily",
+            data.category,
+            bool(data.is_fixed),
+            expense_date,
+            data.notes,
+            created_by,
+        )
 
+        return row_to_dict(row)
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ المصروف: {str(e)}")
 @router.delete("/{expense_id}")
 async def delete_expense(expense_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
