@@ -7187,7 +7187,17 @@ async function renderEmployees(container) {
     const empAdv = (advances || []).filter(a => String(a.user_id) === String(emp.id));
     const totalSalary = empSal.reduce((s, x) => s + parseFloat(x.salary_amount || 0), 0);
     const totalAdvances = empAdv.reduce((s, x) => s + parseFloat(x.amount || 0), 0);
-    return { ...emp, totalSalary, totalAdvances, netBalance: totalSalary - totalAdvances };
+    return {
+      ...emp,
+      totalSalary,
+      totalAdvances,
+      netBalance: totalSalary - totalAdvances,
+
+      invoiceCount: Number(emp.invoice_count || 0),
+      invoiceTotal: Number(emp.invoice_total || 0),
+      approvedInvoiceTotal: Number(emp.approved_invoice_total || 0),
+      pendingInvoiceTotal: Number(emp.pending_invoice_total || 0),
+    };
   });
 
   container.innerHTML = `
@@ -7216,6 +7226,27 @@ async function renderEmployees(container) {
                    onclick="deleteEmployee(${emp.id}, ${jsString(emp.full_name)})">🗑️</button>`
       : '<span style="font-size:11px;color:var(--tx3)">أنت</span>'}
           </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+  <div style="background:#eef2ff;border-radius:8px;padding:8px;text-align:center">
+    <div style="font-size:10px;color:#1d4ed8;font-weight:700">عدد الفواتير</div>
+    <div style="font-size:15px;font-weight:800;color:#1d4ed8">${emp.invoiceCount}</div>
+  </div>
+
+  <div style="background:#eef2ff;border-radius:8px;padding:8px;text-align:center">
+    <div style="font-size:10px;color:#1d4ed8;font-weight:700">إجمالي الفواتير</div>
+    <div style="font-size:15px;font-weight:800;color:#1d4ed8">${fmt(emp.invoiceTotal)}</div>
+  </div>
+
+  <div style="background:var(--grl);border-radius:8px;padding:8px;text-align:center">
+    <div style="font-size:10px;color:var(--gr);font-weight:700">المعتمد</div>
+    <div style="font-size:15px;font-weight:800;color:var(--gr)">${fmt(emp.approvedInvoiceTotal)}</div>
+  </div>
+
+  <div style="background:#fff7ed;border-radius:8px;padding:8px;text-align:center">
+    <div style="font-size:10px;color:#c2410c;font-weight:700">قيد الانتظار</div>
+    <div style="font-size:15px;font-weight:800;color:#c2410c">${fmt(emp.pendingInvoiceTotal)}</div>
+  </div>
+</div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
             <div style="background:var(--grl);border-radius:8px;padding:8px;text-align:center">

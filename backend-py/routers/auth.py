@@ -108,13 +108,34 @@ async def get_users(user=Depends(get_current_user)):
     pool = await get_pool()
 
     rows = await pool.fetch("""
-        SELECT id, username, full_name, role, client_id, recipient_name, created_at
-        FROM users
-        ORDER BY created_at DESC
-        """)
+        SELECT
+            u.id,
+            u.username,
+            u.full_name,
+            u.role,
+            u.client_id,
+            u.recipient_name,
+            u.created_at,
+
+            COUNT(i.id) AS invoice_count,
+            COALESCE(SUM(i.total_amount), 0) AS invoice_total,
+            COALESCE(SUM(CASE WHEN i.status = 'approved' THEN i.total_amount ELSE 0 END), 0) AS approved_invoice_total,
+            COALESCE(SUM(CASE WHEN i.status = 'pending' THEN i.total_amount ELSE 0 END), 0) AS pending_invoice_total
+
+        FROM users u
+        LEFT JOIN invoices i ON i.attributed_employee_id = u.id
+        GROUP BY
+            u.id,
+            u.username,
+            u.full_name,
+            u.role,
+            u.client_id,
+            u.recipient_name,
+            u.created_at
+        ORDER BY u.created_at DESC
+    """)
 
     return [dict(row) for row in rows]
-
 
 @router.post("/users")
 async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
