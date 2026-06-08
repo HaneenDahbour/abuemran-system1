@@ -92,7 +92,16 @@ async def login(data: LoginRequest):
         },
     }
 
-
+@router.get("/employees-list")
+async def get_employees_list(user=Depends(get_current_user)):
+    pool = await get_pool()
+    rows = await pool.fetch("""
+        SELECT id, full_name, role, username
+        FROM users
+        WHERE role IN ('admin', 'accountant', 'employee')
+        ORDER BY full_name ASC
+    """)
+    return [dict(r) for r in rows]
 @router.get("/users")
 async def get_users(user=Depends(get_current_user)):
     require_role(user, "admin")

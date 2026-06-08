@@ -291,8 +291,7 @@
     deleteRecipientPayment: id =>
       apiFetch(`/recipients/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
     // Employees & advances
-    getEmployeesList: () => apiFetch('/expenses/employees-list'),
-    getAdvances: () => apiFetch('/expenses/advances'),
+    getEmployeesList: () => apiFetch('/auth/employees-list'), getAdvances: () => apiFetch('/expenses/advances'),
     createAdvance: data =>
       apiFetch('/expenses/advances', { method: 'POST', body: JSON.stringify(data) }),
     deleteAdvance: id =>
