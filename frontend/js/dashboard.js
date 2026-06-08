@@ -554,6 +554,8 @@ function renderSidebar() {
 
   if (isAccountant()) {
     html += '<div class="nav-section-title">إدارة الأعمال</div>';
+    html += navItem('clients', '👥', 'العملاء');
+
     html += navItem('cashbox', '💼', 'صندوق خالد');
     html += navItem('employees', '👷', 'الموظفون');
     html += navItem('expenses', '📋', 'المصاريف والرواتب');
@@ -1524,13 +1526,21 @@ function openInvoiceModal(invoice = null) {
 
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">كتبها الموظف *</label>
-        <select class="form-select" id="inv_employee_id">
-          <option value="${user.id}" ${!employeeOpts ? 'selected' : ''}>
-            ${escHtml(user.full_name || '—')} (أنت)
-          </option>
-          ${employeeOpts}
-        </select>
+        <label class="form-label">كتبها الموظف</label>
+        ${user.role === 'employee' ? `
+          <div class="form-input"
+               style="background:#f5f3f0;color:var(--tx2);cursor:default">
+            ${escHtml(user.full_name || '—')}
+          </div>
+          <input type="hidden" id="inv_employee_id" value="${user.id}">
+        ` : `
+          <select class="form-select" id="inv_employee_id">
+            <option value="${user.id}" selected>
+              ${escHtml(user.full_name || '—')} (أنت)
+            </option>
+            ${employeeOpts}
+          </select>
+        `}
       </div>
       <div class="form-group">
         <label class="form-label">رقم الفاتورة</label>
@@ -2579,6 +2589,16 @@ async function saveInvoice() {
 
       result.client_name = result.client_name ||
         (window._clientsCache || []).find(c => c.id === result.client_id)?.name || '—';
+      // Enrich attributed_employee_name from local cache for in-place row update
+      if (result.attributed_employee_id && !result.attributed_employee_name) {
+        const emp = (window._employeesCache || []).find(
+          e => String(e.id) === String(result.attributed_employee_id)
+        );
+        if (emp) result.attributed_employee_name = emp.full_name;
+      }
+      if (!result.created_by_name) {
+        result.created_by_name = getUser()?.full_name || '—';
+      }
 
       if (invoiceId) {
         const existing = document.querySelector(`#inv-tbody tr[data-invoice-id="${invoiceId}"]`);
@@ -7031,6 +7051,75 @@ async function deleteExpense(id) {
   } catch (e) {
     toast(e.message, 'error');
   }
+}
+function openAddEmployeeModal() {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">➕ إضافة موظف جديد</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الاسم الكامل *</label>
+      <input class="form-input" id="emp_name" placeholder="مثال: أحمد محمد">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">اسم المستخدم *</label>
+        <input class="form-input" id="emp_user" placeholder="بالإنجليزية">
+      </div>
+      <div class="form-group">
+        <label class="form-label">كلمة المرور *</label>
+        <input class="form-input" id="emp_pass" type="password" placeholder="••••••">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الصلاحية *</label>
+      <select class="form-select" id="emp_role">
+        <option value="employee">موظف مبيعات</option>
+        <option value="accountant">محاسب</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveNewEmployee()">
+        إضافة الموظف
+      </button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveNewEmployee() {
+  const name = document.getElementById('emp_name')?.value?.trim();
+  const username = document.getElementById('emp_user')?.value?.trim();
+  const password = document.getElementById('emp_pass')?.value;
+  const role = document.getElementById('emp_role')?.value;
+
+  if (!name || !username || !password) {
+    toast('يرجى ملء جميع الحقول', 'error');
+    return;
+  }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  try {
+    await API.createUser({ full_name: name, username, password, role });
+    toast('تم إضافة الموظف ✅', 'success');
+    closeModal();
+    navigateTo('employees');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'إضافة الموظف'; }
+  }
+}
+
+async function deleteEmployee(id, name) {
+  if (!confirm(`حذف الموظف "${name}"؟`)) return;
+  try {
+    await API.deleteUser(id);
+    toast('تم حذف الموظف ✅', 'success');
+    navigateTo('employees');
+  } catch (e) { toast(e.message, 'error'); }
 }
 async function renderEmployees(container) {
   if (!isAdmin()) {

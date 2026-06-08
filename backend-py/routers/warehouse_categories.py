@@ -59,8 +59,9 @@ async def insert_category_audit(conn, user, action: str, detail: str):
 async def get_categories(user=Depends(get_current_user)):
     pool = await get_pool()
     try:
+        # Try profit-enabled query (needs cost_price column from SQL migration)
         rows = await pool.fetch("""
-            WITH product_sales AS (
+            WITH invoice_sales AS (
                 SELECT
                     ii.product_id,
                     COALESCE(SUM(COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0)), 0) AS revenue,
@@ -78,17 +79,39 @@ async def get_categories(user=Depends(get_current_user)):
                 FROM warehouse_invoice_items
                 GROUP BY product_id
             ),
-            category_financials AS (
+            product_profit AS (
                 SELECT
                     p.category_id,
-                    COALESCE(SUM(COALESCE(ps.revenue, 0) + COALESCE(ws.revenue, 0)), 0)  AS total_sold,
-                    COALESCE(SUM(
-                        (COALESCE(ps.qty_sold, 0) + COALESCE(ws.qty_sold, 0))
-                        * COALESCE(p.cost_price, 0)
-                    ), 0) AS total_cost
+                    COALESCE(inv.revenue, 0) + COALESCE(wh.revenue, 0) AS total_revenue,
+                    (COALESCE(inv.qty_sold, 0) + COALESCE(wh.qty_sold, 0))
+                        * COALESCE(p.cost_price, 0) AS total_cost
                 FROM products p
-                LEFT JOIN product_sales  ps ON ps.product_id = p.id
-                LEFT JOIN warehouse_sales ws ON ws.product_id = p.id
+                LEFT JOIN invoice_sales  inv ON inv.product_id = p.id
+                LEFT JOIN warehouse_sales wh ON wh.product_id  = p.id
+            ),
+            category_financials AS (
+                SELECT
+                    category_id,
+                    COALESCE(SUM(total_revenue), 0) AS total_sold,
+                    COALESCE(SUM(total_cost),    0) AS total_cost
+                FROM product_profit
+                GROUP BY category_id
+            ),
+            sold_legacy AS (
+                SELECT
+                    p.category_id,
+                    COALESCE(SUM(s.total), 0) AS total_sold
+                FROM products p
+                LEFT JOIN (
+                    SELECT ii.product_id,
+                           COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0) AS total
+                    FROM invoice_items ii
+                    JOIN invoices i ON i.id = ii.invoice_id
+                    WHERE COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
+                    UNION ALL
+                    SELECT product_id, quantity * unit_price AS total
+                    FROM warehouse_invoice_items
+                ) s ON s.product_id = p.id
                 GROUP BY p.category_id
             )
             SELECT
@@ -98,26 +121,28 @@ async def get_categories(user=Depends(get_current_user)):
                 COUNT(p.id)::int  AS product_count,
                 COALESCE(SUM(p.current_stock), 0) AS total_stock,
                 COALESCE(SUM(p.min_stock),     0) AS total_min_stock,
-                COUNT(*) FILTER (WHERE p.id IS NOT NULL AND COALESCE(p.current_stock,0) = 0)::int
-                    AS out_of_stock_count,
+                COUNT(*) FILTER (
+                    WHERE p.id IS NOT NULL AND COALESCE(p.current_stock, 0) = 0
+                )::int AS out_of_stock_count,
                 COUNT(*) FILTER (
                     WHERE p.id IS NOT NULL
-                      AND COALESCE(p.current_stock,0) > 0
-                      AND COALESCE(p.min_stock,0)     > 0
+                      AND COALESCE(p.current_stock, 0) > 0
+                      AND COALESCE(p.min_stock, 0) > 0
                       AND p.current_stock <= p.min_stock
                 )::int AS low_stock_count,
                 COUNT(*) FILTER (
                     WHERE p.id IS NOT NULL
-                      AND COALESCE(p.current_stock,0) > 0
-                      AND (COALESCE(p.min_stock,0) = 0 OR p.current_stock > p.min_stock)
+                      AND COALESCE(p.current_stock, 0) > 0
+                      AND (COALESCE(p.min_stock, 0) = 0
+                           OR p.current_stock > p.min_stock)
                 )::int AS healthy_count,
                 COALESCE(MAX(cf.total_sold), 0)  AS total_sold,
-                COALESCE(MAX(cf.total_cost), 0)  AS total_cost,
+                COALESCE(MAX(cf.total_cost),  0) AS total_cost,
                 COALESCE(MAX(cf.total_sold) - MAX(cf.total_cost), 0) AS total_profit,
                 CASE WHEN COALESCE(MAX(cf.total_sold), 0) > 0
                      THEN ROUND(
-                         ((COALESCE(MAX(cf.total_sold),0) - COALESCE(MAX(cf.total_cost),0))
-                          / COALESCE(MAX(cf.total_sold),1) * 100)::numeric, 1)
+                         ((COALESCE(MAX(cf.total_sold), 0) - COALESCE(MAX(cf.total_cost), 0))
+                          / COALESCE(MAX(cf.total_sold), 1) * 100)::numeric, 1)
                      ELSE 0 END AS profit_margin_pct
             FROM warehouse_categories wc
             LEFT JOIN products           p  ON p.category_id  = wc.id
@@ -126,9 +151,66 @@ async def get_categories(user=Depends(get_current_user)):
             ORDER BY wc.name ASC
         """)
         return [row_to_dict(r) for r in rows]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"تعذر تحميل فئات المستودع: {str(e)}")
 
+    except Exception:
+        # ── FALLBACK: cost_price column not added yet — use original safe query ──
+        try:
+            rows = await pool.fetch("""
+                WITH sold_by_category AS (
+                    SELECT
+                        p.category_id,
+                        COALESCE(SUM(s.total), 0) AS total_sold
+                    FROM products p
+                    LEFT JOIN (
+                        SELECT ii.product_id,
+                               COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0) AS total
+                        FROM invoice_items ii
+                        JOIN invoices i ON i.id = ii.invoice_id
+                        WHERE COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
+                        UNION ALL
+                        SELECT product_id, quantity * unit_price AS total
+                        FROM warehouse_invoice_items
+                    ) s ON s.product_id = p.id
+                    GROUP BY p.category_id
+                )
+                SELECT
+                    wc.id,
+                    wc.name,
+                    COALESCE(wc.icon, '📦') AS icon,
+                    COUNT(p.id)::int  AS product_count,
+                    COALESCE(SUM(p.current_stock), 0) AS total_stock,
+                    COALESCE(SUM(p.min_stock),     0) AS total_min_stock,
+                    COUNT(*) FILTER (
+                        WHERE p.id IS NOT NULL AND COALESCE(p.current_stock, 0) = 0
+                    )::int AS out_of_stock_count,
+                    COUNT(*) FILTER (
+                        WHERE p.id IS NOT NULL
+                          AND COALESCE(p.current_stock, 0) > 0
+                          AND COALESCE(p.min_stock, 0) > 0
+                          AND p.current_stock <= p.min_stock
+                    )::int AS low_stock_count,
+                    COUNT(*) FILTER (
+                        WHERE p.id IS NOT NULL
+                          AND COALESCE(p.current_stock, 0) > 0
+                          AND (COALESCE(p.min_stock, 0) = 0
+                               OR p.current_stock > p.min_stock)
+                    )::int AS healthy_count,
+                    COALESCE(MAX(sbc.total_sold), 0) AS total_sold,
+                    0::numeric AS total_cost,
+                    0::numeric AS total_profit,
+                    0::numeric AS profit_margin_pct
+                FROM warehouse_categories wc
+                LEFT JOIN products          p   ON p.category_id  = wc.id
+                LEFT JOIN sold_by_category  sbc ON sbc.category_id = wc.id
+                GROUP BY wc.id, wc.name, wc.icon
+                ORDER BY wc.name ASC
+            """)
+            return [row_to_dict(r) for r in rows]
+        except Exception as e2:
+            raise HTTPException(
+                status_code=500,
+                detail=f"تعذر تحميل فئات المستودع: {str(e2)}",
+            )
 @router.get("/{category_id}/products")
 async def get_category_products(category_id: int, user=Depends(get_current_user)):
     pool = await get_pool()
