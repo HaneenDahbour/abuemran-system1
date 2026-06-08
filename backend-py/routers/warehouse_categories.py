@@ -80,15 +80,24 @@ async def get_categories(user=Depends(get_current_user)):
                 GROUP BY product_id
             ),
             product_profit AS (
-                SELECT
-                    p.category_id,
-                    COALESCE(inv.revenue, 0) + COALESCE(wh.revenue, 0) AS total_revenue,
-                    (COALESCE(inv.qty_sold, 0) + COALESCE(wh.qty_sold, 0))
-                        * COALESCE(p.cost_price, 0) AS total_cost
-                FROM products p
-                LEFT JOIN invoice_sales  inv ON inv.product_id = p.id
-                LEFT JOIN warehouse_sales wh ON wh.product_id  = p.id
-            ),
+    SELECT
+        p.category_id,
+
+        COALESCE(inv.revenue, 0) + COALESCE(wh.revenue, 0) AS total_revenue,
+
+        CASE
+            WHEN COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.base_price, 0)) IS NOT NULL
+            THEN
+                (COALESCE(inv.qty_sold, 0) + COALESCE(wh.qty_sold, 0))
+                * COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.base_price, 0))
+            ELSE
+                COALESCE(inv.revenue, 0) + COALESCE(wh.revenue, 0)
+        END AS total_cost
+
+    FROM products p
+    LEFT JOIN invoice_sales  inv ON inv.product_id = p.id
+    LEFT JOIN warehouse_sales wh ON wh.product_id  = p.id
+),
             category_financials AS (
                 SELECT
                     category_id,
