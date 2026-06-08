@@ -810,10 +810,10 @@ async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
                 invoice = await conn.fetchrow(
                     """
                     SELECT inv.*, c.name AS client_name
-FROM invoices inv
-LEFT JOIN clients c ON c.id = inv.client_id
-WHERE inv.id=$1
-FOR UPDATE
+                    FROM invoices inv
+                    LEFT JOIN clients c ON c.id = inv.client_id
+                    WHERE inv.id=$1
+                    FOR UPDATE
                     """,
                     invoice_id,
                 )
@@ -855,12 +855,19 @@ FOR UPDATE
                 paid = min(money3(paid), total)
                 remaining = money3(total - paid)
 
-                # Create approved automatic payment for cash invoices
-                if paid > 0:
-                    recipient_name = clean_text(invoice["recipient_name"]) or clean_text(invoice["client_name"])
-                    if not recipient_name:
-                        raise HTTPException(status_code=400, detail="اسم المطلوب من السادة مطلوب قبل الاعتماد")
+                recipient_name = (
+                    clean_text(invoice["recipient_name"])
+                    or clean_text(invoice["client_name"])
+                )
 
+                # If there is money paid, we must know who paid it.
+                if paid > 0 and not recipient_name:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="لا يمكن اعتماد فاتورة فيها مبلغ مدفوع بدون اسم المطلوب من السادة"
+                    )
+
+                if paid > 0:
                     await conn.execute(
                         """
                         INSERT INTO recipient_payments
