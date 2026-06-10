@@ -251,16 +251,18 @@ async def delete_auto_payment_for_invoice(conn, invoice_id: int):
         marker,
     )
 
-    # legacy cleanup from old client-based payments
-    await conn.execute(
-        """
-        DELETE FROM payments
-        WHERE invoice_id = $1
-           OR COALESCE(notes, '') ILIKE $2
-        """,
-        invoice_id,
-        marker,
-    )
+    # legacy cleanup from old client-based payments.
+    # NOTE: the legacy `payments` table has no invoice_id column — match by the
+    # notes marker only, inside a savepoint so a failure (e.g. missing table)
+    # can't abort the main transaction.
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                "DELETE FROM payments WHERE COALESCE(notes, '') ILIKE $1",
+                marker,
+            )
+    except Exception:
+        pass
 
 async def restore_stock_from_invoice_items(conn, invoice_id: int, user):
     old_items = await conn.fetch(
