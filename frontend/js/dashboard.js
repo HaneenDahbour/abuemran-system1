@@ -1444,6 +1444,14 @@ function openInvoiceModal(invoice = null) {
     .replace(/\|/g, '').trim();
   const existingClientId = invoice?.client_id || '';
 
+  // Items mode vs manual amount mode — when editing, respect how the invoice was created
+  const hasItemsMode = !isEdit || (Array.isArray(invoice?.items) && invoice.items.length > 0);
+
+  // Recover the tax RATE (%) from stored amounts so editing doesn't wipe the tax
+  const taxRate = isEdit && Number(invoice?.net_amount) > 0
+    ? Number(((Number(invoice?.tax_amount || 0) / Number(invoice.net_amount)) * 100).toFixed(3))
+    : 0;
+
   window._invoiceItemIndex = 0;
   window._editingInvoiceId = isEdit ? invoice.id : null;
   window._invoiceSaving = false;
@@ -1513,12 +1521,12 @@ function openInvoiceModal(invoice = null) {
 
     <div style="margin:12px 0;display:flex;align-items:center;gap:10px">
       <label style="font-size:13px;font-weight:600;color:var(--tx2)">ربط بأصناف المستودع؟</label>
-      <input type="checkbox" id="inv_has_items" checked
+      <input type="checkbox" id="inv_has_items" ${hasItemsMode ? 'checked' : ''}
              onchange="toggleInvoiceItems()"
              style="width:16px;height:16px;cursor:pointer">
     </div>
 
-    <div id="inv-items-section">
+    <div id="inv-items-section" style="display:${hasItemsMode ? 'block' : 'none'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <div style="font-weight:700;font-size:13px">📦 الأصناف</div>
         <button class="btn btn-ghost btn-sm" onclick="addInvoiceItemRow()">+ إضافة صنف</button>
@@ -1532,7 +1540,7 @@ function openInvoiceModal(invoice = null) {
       <div id="inv-items-wrap" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
 
-    <div id="inv-manual-section" style="display:none">
+    <div id="inv-manual-section" style="display:${hasItemsMode ? 'none' : 'block'}">
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">المبلغ الصافي *</label>
@@ -1543,7 +1551,7 @@ function openInvoiceModal(invoice = null) {
         <div class="form-group">
           <label class="form-label">نسبة الضريبة %</label>
           <input class="form-input" id="inv_tax" type="number"
-                 value="0" min="0" step="0.001" oninput="calcInvoiceTax()">
+                 value="${taxRate}" min="0" step="0.001" oninput="calcInvoiceTax()">
         </div>
       </div>
     </div>
@@ -1644,8 +1652,13 @@ function openInvoiceModal(invoice = null) {
     if (oldItems.length) oldItems.forEach(item => addInvoiceItemRow(item));
     else addInvoiceItemRow();
 
-    calcInvoiceItemsTotal();
-    handleInvoicePaymentChange();
+    if (hasItemsMode) {
+      calcInvoiceItemsTotal();
+      handleInvoicePaymentChange();
+    } else {
+      // Manual mode: compute totals from net + tax, not from (hidden) item rows
+      calcInvoiceTax();
+    }
   });
 }
 function handleRecipientInput(value) {
