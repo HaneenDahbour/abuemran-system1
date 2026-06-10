@@ -5302,6 +5302,11 @@ async function deleteUser(id, name) {
 }
 
 function openEditUserModal(u) {
+  // Accept either an object or a JSON string (passed from onclick attributes)
+  if (typeof u === 'string') {
+    try { u = JSON.parse(u); }
+    catch { toast('تعذر تحميل بيانات المستخدم', 'error'); return; }
+  }
   const clients = window._clientsCache || [];
   const clientOpts = clients.map(c =>
     `<option value="${c.id}" ${c.id == u.client_id ? 'selected' : ''}>${escHtml(c.name)}</option>`
@@ -5361,7 +5366,9 @@ async function saveEditUser(id) {
     await API.updateUser(id, { full_name, role, password, client_id: client_id ? Number(client_id) : null });
     toast('تم تحديث بيانات المستخدم ✅', 'success');
     closeModal();
-    navigateTo('users');
+    window._employeesCache = null;
+    // Return to whichever page the edit started from (users or employees)
+    navigateTo(typeof currentSection !== 'undefined' && currentSection === 'employees' ? 'employees' : 'users');
   } catch (e) {
     toast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'حفظ التعديلات'; }
@@ -7543,14 +7550,6 @@ async function saveNewEmployee() {
     }
   }
 }
-async function deleteEmployee(id, name) {
-  if (!confirm(`حذف الموظف "${name}"؟`)) return;
-  try {
-    await API.deleteUser(id);
-    toast('تم حذف الموظف ✅', 'success');
-    navigateTo('employees');
-  } catch (e) { toast(e.message, 'error'); }
-}
 async function renderEmployees(container) {
   if (!isAdmin()) {
     container.innerHTML = `<div class="alert alert-danger">غير مصرح لك بالوصول</div>`;
@@ -7612,6 +7611,8 @@ async function renderEmployees(container) {
               <div style="font-weight:800;font-size:14px">${escHtml(emp.full_name)}</div>
               <div style="font-size:11px;color:var(--tx3)">${roleLabel(emp.role)}</div>
             </div>
+            <button class="btn btn-ghost btn-sm"
+                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null }))})">✏️</button>
             ${emp.id !== getUser()?.id
       ? `<button class="btn btn-danger btn-sm"
                    onclick="deleteEmployee(${emp.id}, ${jsString(emp.full_name)})">🗑️</button>`
