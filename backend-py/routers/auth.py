@@ -36,6 +36,7 @@ class CreateUserRequest(BaseModel):
     role: str
     client_id: Optional[int] = None
     recipient_name: Optional[str] = None
+    base_salary: Optional[float] = None
 
 @router.post("/login")
 async def login(data: LoginRequest):
@@ -115,6 +116,7 @@ async def get_users(user=Depends(get_current_user)):
             u.role,
             u.client_id,
             u.recipient_name,
+            COALESCE(u.base_salary, 0) AS base_salary,
             u.created_at,
 
             COUNT(i.id) AS invoice_count,
@@ -131,6 +133,7 @@ async def get_users(user=Depends(get_current_user)):
             u.role,
             u.client_id,
             u.recipient_name,
+            u.base_salary,
             u.created_at
         ORDER BY u.created_at DESC
     """)
@@ -176,9 +179,9 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
 
     new_user = await pool.fetchrow(
         """
-        INSERT INTO users (username, password_hash, full_name, role, client_id, recipient_name)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, username, full_name, role, client_id, recipient_name
+        INSERT INTO users (username, password_hash, full_name, role, client_id, recipient_name, base_salary)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id, username, full_name, role, client_id, recipient_name, base_salary
         """,
         username,
         hashed_password,
@@ -186,6 +189,7 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
         data.role,
         data.client_id,
         data.recipient_name.strip() if data.recipient_name else None,
+        round(float(data.base_salary or 0), 3),
     )
 
     try:
@@ -215,15 +219,17 @@ async def update_user(user_id: int, data: CreateUserRequest, user=Depends(get_cu
     if data.role not in valid_roles:
         raise HTTPException(status_code=400, detail="الصلاحية غير صالحة")
     pool = await get_pool()
-    updates = ["full_name=$1", "role=$2", "client_id=$3", "recipient_name=$4"]
-    params = [full_name, data.role, data.client_id, data.recipient_name]
+    updates = ["full_name=$1", "role=$2", "client_id=$3", "recipient_name=$4",
+               "base_salary=COALESCE($5, base_salary)"]
+    params = [full_name, data.role, data.client_id, data.recipient_name,
+              round(float(data.base_salary), 3) if data.base_salary is not None else None]
     if data.password:
         hashed = pwd_context.hash(data.password)
         updates.append(f"password_hash=${len(params)+1}")
         params.append(hashed)
     params.append(user_id)
     row = await pool.fetchrow(
-        f"UPDATE users SET {', '.join(updates)} WHERE id=${len(params)} RETURNING id, username, full_name, role, client_id, recipient_name",
+        f"UPDATE users SET {', '.join(updates)} WHERE id=${len(params)} RETURNING id, username, full_name, role, client_id, recipient_name, base_salary",
         *params
     )
     if not row:

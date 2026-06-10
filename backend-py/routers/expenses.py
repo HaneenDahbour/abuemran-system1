@@ -317,9 +317,120 @@ async def create_advance(data: AdvanceIn, user=Depends(get_current_user)):
             data.notes,
             user.get("id"),
         )
-        return row_to_dict(row)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"تعذر حفظ السلفة: {str(e)}")
+
+    out = row_to_dict(row)
+    out["settlement"] = await settle_advance_against_salary(
+        pool, data.user_id, employee_name, amount, advance_date, user
+    )
+    return out
+
+
+async def settle_advance_against_salary(pool, user_id, employee_name, amount, advance_date, user):
+    """
+    تسوية السلفة مع الراتب الشهري الأساسي:
+    - يُجمع كل سلف الشهر ويُقارن بالراتب الأساسي (users.base_salary)
+    - عند اكتمال الراتب عبر السلف → يُسجَّل راتب الشهر تلقائياً كمدفوع بملاحظة توضيحية
+    - إذا كان راتب الشهر مدفوعاً مسبقاً → تُعتبر السلفة ديناً إضافياً ويُنبَّه المستخدم
+    """
+    result = {
+        "auto_settled": False,
+        "already_paid": False,
+        "base_salary": 0.0,
+        "month_advances": 0.0,
+        "remaining_salary": None,
+    }
+    if not user_id:
+        return result
+
+    try:
+        base_salary = float(
+            await pool.fetchval(
+                "SELECT COALESCE(base_salary, 0) FROM users WHERE id=$1", user_id
+            ) or 0
+        )
+        if base_salary <= 0:
+            return result  # لا راتب أساسي معرّف — لا تسوية
+
+        month_start = advance_date.replace(day=1)
+        next_month = (
+            month_start.replace(year=month_start.year + 1, month=1)
+            if month_start.month == 12
+            else month_start.replace(month=month_start.month + 1)
+        )
+
+        month_advances = float(
+            await pool.fetchval(
+                """
+                SELECT COALESCE(SUM(amount), 0) FROM employee_advances
+                WHERE user_id=$1 AND advance_date >= $2 AND advance_date < $3
+                """,
+                user_id, month_start, next_month,
+            ) or 0
+        )
+
+        salary_row = await pool.fetchrow(
+            """
+            SELECT id, status FROM employee_salaries
+            WHERE employee_user_id=$1 AND salary_month >= $2 AND salary_month < $3
+            ORDER BY id LIMIT 1
+            """,
+            user_id, month_start, next_month,
+        )
+
+        result["base_salary"] = round(base_salary, 3)
+        result["month_advances"] = round(month_advances, 3)
+        month_label = month_start.strftime("%m/%Y")
+
+        if salary_row and salary_row["status"] == "paid":
+            # الراتب مدفوع مسبقاً — لا شيء يُخصم منه
+            result["already_paid"] = True
+            result["remaining_salary"] = 0.0
+            return result
+
+        if month_advances >= base_salary:
+            excess = round(month_advances - base_salary, 3)
+            note = (
+                f"🔒 إقفال تلقائي — راتب شهر {month_label} ({base_salary:.3f} د.أ) "
+                f"اكتمل سداده بالكامل عبر السلف (إجمالي سلف الشهر: {month_advances:.3f} د.أ)."
+            )
+            if excess > 0:
+                note += f" ⚠️ فائض {excess:.3f} د.أ يُحتسب ديناً إضافياً على الموظف."
+            note += f" آخر سلفة: {amount:.3f} د.أ بتاريخ {advance_date.isoformat()}."
+
+            if salary_row:
+                # سجل راتب موجود (غير مدفوع) — تحديثه إلى مدفوع
+                await pool.execute(
+                    """
+                    UPDATE employee_salaries
+                    SET status='paid', paid_date=$1,
+                        notes=COALESCE(notes,'') || ' | ' || $2
+                    WHERE id=$3
+                    """,
+                    advance_date, note, salary_row["id"],
+                )
+            else:
+                await pool.execute(
+                    """
+                    INSERT INTO employee_salaries
+                      (employee_user_id, employee_name, salary_amount, salary_month,
+                       paid_date, status, notes, created_by)
+                    VALUES ($1,$2,$3,$4,$5,'paid',$6,$7)
+                    """,
+                    user_id, employee_name, base_salary, month_start,
+                    advance_date, note, user.get("id"),
+                )
+
+            result["auto_settled"] = True
+            result["remaining_salary"] = 0.0
+        else:
+            result["remaining_salary"] = round(base_salary - month_advances, 3)
+
+    except Exception:
+        pass  # التسوية إضافة تحسينية — لا توقف تسجيل السلفة
+
+    return result
 
 
 
@@ -378,7 +489,8 @@ async def employee_financial_statement(
 
     try:
         salaries = await pool.fetch("""
-            SELECT id, salary_amount, salary_month, paid_date, status, notes
+            SELECT id, employee_user_id, employee_name,
+                   salary_amount, salary_month, paid_date, status, notes
             FROM employee_salaries
             WHERE employee_user_id = $1
             ORDER BY salary_month ASC
@@ -388,7 +500,8 @@ async def employee_financial_statement(
 
     try:
         advances = await pool.fetch("""
-            SELECT id, amount, advance_date, advance_type, notes
+            SELECT id, user_id, employee_name,
+                   amount, advance_date, advance_type, notes
             FROM employee_advances
             WHERE user_id = $1
             ORDER BY advance_date ASC

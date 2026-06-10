@@ -5337,6 +5337,14 @@ function openEditUserModal(u) {
         <input class="form-input" id="eu_pass" type="password" placeholder="اتركه فارغاً للإبقاء على الحالية">
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">
+        الراتب الشهري الأساسي
+        <span style="font-size:10px;color:var(--tx3);margin-right:4px">تُخصم منه السلف تلقائياً — 0 = بدون تسوية</span>
+      </label>
+      <input class="form-input" id="eu_base_salary" type="number" min="0" step="0.001"
+             value="${Number(u.base_salary || 0).toFixed(3)}">
+    </div>
     <div class="form-group" id="eu_client_wrap">
       <label class="form-label">ربط بعميل (للدور client)</label>
       <select class="form-select" id="eu_client_id">
@@ -5363,7 +5371,12 @@ async function saveEditUser(id) {
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
 
   try {
-    await API.updateUser(id, { full_name, role, password, client_id: client_id ? Number(client_id) : null });
+    const baseSalaryVal = document.getElementById('eu_base_salary')?.value;
+    await API.updateUser(id, {
+      full_name, role, password,
+      client_id: client_id ? Number(client_id) : null,
+      base_salary: baseSalaryVal !== '' && baseSalaryVal != null ? parseFloat(baseSalaryVal) || 0 : null,
+    });
     toast('تم تحديث بيانات المستخدم ✅', 'success');
     closeModal();
     window._employeesCache = null;
@@ -6972,6 +6985,11 @@ async function saveEditExpense(id) {
 
 // ── Edit Salary ──────────────────────────────────────────────
 function openEditSalaryModal(s) {
+  if (typeof s === 'string') {
+    try { s = JSON.parse(s); }
+    catch { toast('تعذر تحميل بيانات الراتب', 'error'); return; }
+  }
+  window._editingSalaryOrig = s;
   openModal(`
     <div class="modal-header">
       <div class="modal-title">✏️ تعديل راتب — ${escHtml(s.employee_name)}</div>
@@ -7026,7 +7044,8 @@ async function saveEditSalary(id) {
   const btn = document.querySelector('#global-modal .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   // Preserve the employee link + notes — backend overwrites them with whatever we send
-  const orig = (window._salariesCache || []).find(x => String(x.id) === String(id));
+  const orig = (window._salariesCache || []).find(x => String(x.id) === String(id))
+    || window._editingSalaryOrig || null;
   try {
     await API.updateSalary(id, {
       employee_user_id: orig?.employee_user_id ?? null,
@@ -7038,7 +7057,7 @@ async function saveEditSalary(id) {
     });
     toast('تم تحديث الراتب ✅', 'success');
     closeModal();
-    navigateTo('expenses');
+    navigateTo(typeof currentSection !== 'undefined' && currentSection === 'employees' ? 'employees' : 'expenses');
   } catch (e) {
     toast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
@@ -7047,6 +7066,11 @@ async function saveEditSalary(id) {
 
 // ── Edit Advance ─────────────────────────────────────────────
 function openEditAdvanceModal(a) {
+  if (typeof a === 'string') {
+    try { a = JSON.parse(a); }
+    catch { toast('تعذر تحميل بيانات السلفة', 'error'); return; }
+  }
+  window._editingAdvanceOrig = a;
   openModal(`
     <div class="modal-header">
       <div class="modal-title">✏️ تعديل سلفة — ${escHtml(a.employee_name)}</div>
@@ -7087,7 +7111,8 @@ async function saveEditAdvance(id) {
   const btn = document.querySelector('#global-modal .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   // Preserve the employee link + type — backend overwrites them with whatever we send
-  const orig = (window._advancesCache || []).find(x => String(x.id) === String(id));
+  const orig = (window._advancesCache || []).find(x => String(x.id) === String(id))
+    || window._editingAdvanceOrig || null;
   try {
     await API.updateAdvance(id, {
       user_id:      orig?.user_id ?? null,
@@ -7098,7 +7123,7 @@ async function saveEditAdvance(id) {
     });
     toast('تم تحديث السلفة ✅', 'success');
     closeModal();
-    navigateTo('expenses');
+    navigateTo(typeof currentSection !== 'undefined' && currentSection === 'employees' ? 'employees' : 'expenses');
   } catch (e) {
     toast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
@@ -7406,19 +7431,34 @@ async function saveGeneralAdvance() {
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
 
   try {
-    await API.createAdvance({
+    const result = await API.createAdvance({
       user_id: userId,
       employee_name: employeeName,
       amount,
       advance_date: document.getElementById('gadv_date')?.value,
       notes: document.getElementById('gadv_notes')?.value || null,
     });
-    toast('تم تسجيل السلفة ✅', 'success');
+    showAdvanceSettlementToast(result?.settlement);
     closeModal();
-    navigateTo('expenses');
+    navigateTo(typeof currentSection !== 'undefined' && currentSection === 'employees' ? 'employees' : 'expenses');
   } catch (e) {
     toast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'تسجيل السلفة'; }
+  }
+}
+
+// Toast describing how the advance affected this month's salary
+function showAdvanceSettlementToast(st) {
+  if (!st || !st.base_salary) {
+    toast('تم تسجيل السلفة ✅', 'success');
+    return;
+  }
+  if (st.auto_settled) {
+    toast(`🔒 اكتمل راتب الشهر (${fmt(st.base_salary)} د.أ) عبر السلف — سُجّل كمدفوع تلقائياً 🎉`, 'success');
+  } else if (st.already_paid) {
+    toast(`⚠️ راتب هذا الشهر مدفوع مسبقاً — سُجّلت السلفة كدين إضافي على الموظف`, 'info');
+  } else {
+    toast(`تم تسجيل السلفة ✅ — المتبقي من راتب الشهر: ${fmt(st.remaining_salary)} د.أ`, 'success');
   }
 }
 function openAdvanceModal(userId, employeeName) {
@@ -7489,12 +7529,22 @@ function openAddEmployeeModal() {
       </div>
     </div>
 
-    <div class="form-group">
-      <label class="form-label">الصلاحية</label>
-      <select class="form-select" id="emp_role">
-        <option value="employee">موظف مبيعات</option>
-        <option value="accountant">محاسب</option>
-      </select>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">الصلاحية</label>
+        <select class="form-select" id="emp_role">
+          <option value="employee">موظف مبيعات</option>
+          <option value="accountant">محاسب</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">
+          الراتب الشهري الأساسي
+          <span style="font-size:10px;color:var(--tx3);margin-right:4px">تُخصم منه السلف تلقائياً</span>
+        </label>
+        <input class="form-input" id="emp_base_salary" type="number"
+               min="0" step="0.001" placeholder="مثال: 250.000">
+      </div>
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
@@ -7536,6 +7586,7 @@ async function saveNewEmployee() {
       username,
       password,
       role,
+      base_salary: parseFloat(document.getElementById('emp_base_salary')?.value) || 0,
     });
 
     toast(`✅ تم إضافة ${name} — المستخدم: ${username} — كلمة المرور: ${password}`, 'success');
@@ -7577,11 +7628,26 @@ async function renderEmployees(container) {
     const empAdv = (advances || []).filter(a => String(a.user_id) === String(emp.id));
     const totalSalary = empSal.reduce((s, x) => s + parseFloat(x.salary_amount || 0), 0);
     const totalAdvances = empAdv.reduce((s, x) => s + parseFloat(x.amount || 0), 0);
+
+    // وضع راتب الشهر الحالي مقابل السلف
+    const ym = new Date().toISOString().slice(0, 7);
+    const baseSalary = Number(emp.base_salary || 0);
+    const monthAdvances = empAdv
+      .filter(a => String(a.advance_date || '').slice(0, 7) === ym)
+      .reduce((s, x) => s + parseFloat(x.amount || 0), 0);
+    const monthSalaryPaid = empSal.some(s =>
+      String(s.salary_month || '').slice(0, 7) === ym && s.status === 'paid');
+    const monthRemaining = monthSalaryPaid ? 0 : Math.max(baseSalary - monthAdvances, 0);
+
     return {
       ...emp,
       totalSalary,
       totalAdvances,
       netBalance: totalSalary - totalAdvances,
+      baseSalary,
+      monthAdvances,
+      monthSalaryPaid,
+      monthRemaining,
 
       invoiceCount: Number(emp.invoice_count || 0),
       invoiceTotal: Number(emp.invoice_total || 0),
@@ -7612,57 +7678,31 @@ async function renderEmployees(container) {
               <div style="font-size:11px;color:var(--tx3)">${roleLabel(emp.role)}</div>
             </div>
             <button class="btn btn-ghost btn-sm"
-                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null }))})">✏️</button>
+                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
             ${emp.id !== getUser()?.id
       ? `<button class="btn btn-danger btn-sm"
                    onclick="deleteEmployee(${emp.id}, ${jsString(emp.full_name)})">🗑️</button>`
       : '<span style="font-size:11px;color:var(--tx3)">أنت</span>'}
           </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-  <div style="background:#eef2ff;border-radius:8px;padding:8px;text-align:center">
-    <div style="font-size:10px;color:#1d4ed8;font-weight:700">عدد الفواتير</div>
-    <div style="font-size:15px;font-weight:800;color:#1d4ed8">${emp.invoiceCount}</div>
-  </div>
-
-  <div style="background:#eef2ff;border-radius:8px;padding:8px;text-align:center">
-    <div style="font-size:10px;color:#1d4ed8;font-weight:700">إجمالي الفواتير</div>
-    <div style="font-size:15px;font-weight:800;color:#1d4ed8">${fmt(emp.invoiceTotal)}</div>
-  </div>
-
-  <div style="background:var(--grl);border-radius:8px;padding:8px;text-align:center">
-    <div style="font-size:10px;color:var(--gr);font-weight:700">المعتمد</div>
-    <div style="font-size:15px;font-weight:800;color:var(--gr)">${fmt(emp.approvedInvoiceTotal)}</div>
-  </div>
-
-  <div style="background:#fff7ed;border-radius:8px;padding:8px;text-align:center">
-    <div style="font-size:10px;color:#c2410c;font-weight:700">قيد الانتظار</div>
-    <div style="font-size:15px;font-weight:800;color:#c2410c">${fmt(emp.pendingInvoiceTotal)}</div>
-  </div>
-</div>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-            <div style="background:var(--grl);border-radius:8px;padding:8px;text-align:center">
-              <div style="font-size:10px;color:var(--gr);font-weight:700">الرواتب</div>
-              <div style="font-size:15px;font-weight:800;color:var(--gr)">${fmt(emp.totalSalary)}</div>
+          ${emp.baseSalary > 0 ? `
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;
+                      background:${emp.monthSalaryPaid ? 'var(--grl)' : '#fffbeb'};
+                      border-radius:8px;padding:8px 12px;margin-bottom:12px">
+            <div style="font-size:11px;font-weight:700;color:var(--tx2)">
+              💵 الراتب: <strong>${fmt(emp.baseSalary)}</strong> د.أ
             </div>
-            <div style="background:var(--rdl);border-radius:8px;padding:8px;text-align:center">
-              <div style="font-size:10px;color:var(--rd);font-weight:700">السلف</div>
-              <div style="font-size:15px;font-weight:800;color:var(--rd)">${fmt(emp.totalAdvances)}</div>
+            <div style="font-size:11px;font-weight:800;
+                        color:${emp.monthSalaryPaid ? 'var(--gr)' : '#9a4500'}">
+              ${emp.monthSalaryPaid
+              ? '✅ راتب الشهر مدفوع'
+              : `المتبقي هذا الشهر: ${fmt(emp.monthRemaining)} د.أ`}
             </div>
-            <div style="background:${emp.netBalance >= 0 ? 'var(--grl)' : 'var(--rdl)'};
-                        border-radius:8px;padding:8px;text-align:center">
-              <div style="font-size:10px;color:${emp.netBalance >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:700">الصافي</div>
-              <div style="font-size:15px;font-weight:800;
-                          color:${emp.netBalance >= 0 ? 'var(--gr)' : 'var(--rd)'}">
-                ${fmt(Math.abs(emp.netBalance))}
-              </div>
-            </div>
-          </div>
+          </div>` : ''}
 
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <button class="btn btn-ghost btn-sm"
-              onclick="viewEmployeeStatement(${emp.id}, ${jsString(emp.full_name)})">📄 كشف</button>
             <button class="btn btn-primary btn-sm"
+              onclick="viewEmployeeStatement(${emp.id}, ${jsString(emp.full_name)})">📄 التفاصيل</button>
+            <button class="btn btn-ghost btn-sm"
               onclick="openSalaryForEmployee(${emp.id}, ${jsString(emp.full_name)})">💰 راتب</button>
             <button class="btn btn-ghost btn-sm"
               onclick="openAdvanceModal(${emp.id}, ${jsString(emp.full_name)})">➖ سلفة</button>
@@ -7997,6 +8037,24 @@ async function deleteSalary(id) {
   }
 }
 
+async function deleteSalaryFromStatement(id, userId, employeeName) {
+  if (!confirm('حذف هذا الراتب؟')) return;
+  try {
+    await API.deleteSalary(id);
+    toast('تم حذف الراتب ✅', 'success');
+    viewEmployeeStatement(userId, employeeName);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteAdvanceFromStatement(id, userId, employeeName) {
+  if (!confirm('حذف هذه السلفة؟')) return;
+  try {
+    await API.deleteAdvance(id);
+    toast('تم حذف السلفة ✅', 'success');
+    viewEmployeeStatement(userId, employeeName);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function viewEmployeeStatement(userId, employeeName) {
   openModal(`
     <div class="modal-header">
@@ -8030,8 +8088,9 @@ async function viewEmployeeStatement(userId, employeeName) {
         </span></td>
         <td style="font-size:12px;color:var(--tx3)">${fmtDate(s.paid_date)}</td>
         <td style="font-size:12px;color:var(--tx2)">${escHtml(s.notes || '—')}</td>
-        ${isAdmin() ? `<td>
+        ${isAdmin() ? `<td style="white-space:nowrap">
           <button class="btn btn-ghost btn-sm" onclick="openEditSalaryModal(${jsString(JSON.stringify(s))})">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSalaryFromStatement(${s.id}, ${userId}, ${jsString(employeeName)})">🗑️</button>
         </td>` : '<td></td>'}
       </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد رواتب</td></tr>';
 
@@ -8041,8 +8100,9 @@ async function viewEmployeeStatement(userId, employeeName) {
         <td style="color:var(--rd);font-weight:700">−${fmt(a.amount)} د.أ</td>
         <td style="font-size:12px;color:var(--tx2)">${escHtml(a.advance_type || 'سلفة')}</td>
         <td style="font-size:12px;color:var(--tx2)">${escHtml(a.notes || '—')}</td>
-        ${isAdmin() ? `<td>
+        ${isAdmin() ? `<td style="white-space:nowrap">
           <button class="btn btn-ghost btn-sm" onclick="openEditAdvanceModal(${jsString(JSON.stringify(a))})">✏️</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromStatement(${a.id}, ${userId}, ${jsString(employeeName)})">🗑️</button>
         </td>` : '<td></td>'}
       </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد سلف</td></tr>';
 
