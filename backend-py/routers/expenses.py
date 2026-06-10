@@ -202,24 +202,27 @@ async def create_salary(data: SalaryIn, user=Depends(get_current_user)):
     paid_date    = parse_date(data.paid_date)
     pool = await get_pool()
 
-    row = await pool.fetchrow(
-        """
-        INSERT INTO employee_salaries
-          (employee_user_id, employee_name, salary_amount, salary_month,
-           paid_date, status, notes, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-        RETURNING *
-        """,
-        data.employee_user_id,
-        employee_name,
-        amount,
-        salary_month,
-        paid_date,
-        data.status or "paid",
-        data.notes,
-        user.get("id"),
-    )
-    return row_to_dict(row)
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO employee_salaries
+              (employee_user_id, employee_name, salary_amount, salary_month,
+               paid_date, status, notes, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+            RETURNING *
+            """,
+            data.employee_user_id,
+            employee_name,
+            amount,
+            salary_month,
+            paid_date,
+            data.status or "paid",
+            data.notes,
+            user.get("id"),
+        )
+        return row_to_dict(row)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ الراتب: {str(e)}")
 
 
 
@@ -236,16 +239,19 @@ async def update_salary(salary_id: int, data: SalaryIn, user=Depends(get_current
     salary_month = parse_date(data.salary_month)
     paid_date = parse_date(data.paid_date)
     pool = await get_pool()
-    row = await pool.fetchrow(
-        """
-        UPDATE employee_salaries
-        SET employee_user_id=$1, employee_name=$2, salary_amount=$3,
-            salary_month=$4, paid_date=$5, status=$6, notes=$7
-        WHERE id=$8 RETURNING *
-        """,
-        data.employee_user_id, employee_name, amount,
-        salary_month, paid_date, data.status or "paid", data.notes, salary_id,
-    )
+    try:
+        row = await pool.fetchrow(
+            """
+            UPDATE employee_salaries
+            SET employee_user_id=$1, employee_name=$2, salary_amount=$3,
+                salary_month=$4, paid_date=$5, status=$6, notes=$7
+            WHERE id=$8 RETURNING *
+            """,
+            data.employee_user_id, employee_name, amount,
+            salary_month, paid_date, data.status or "paid", data.notes, salary_id,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر تعديل الراتب: {str(e)}")
     if not row:
         raise HTTPException(status_code=404, detail="الراتب غير موجود")
     return row_to_dict(row)
@@ -295,22 +301,25 @@ async def create_advance(data: AdvanceIn, user=Depends(get_current_user)):
     advance_date = parse_date(data.advance_date)
     pool = await get_pool()
 
-    row = await pool.fetchrow(
-        """
-        INSERT INTO employee_advances
-          (user_id, employee_name, amount, advance_date, advance_type, notes, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
-        RETURNING *
-        """,
-        data.user_id,
-        employee_name,
-        amount,
-        advance_date,
-        data.advance_type or "advance",
-        data.notes,
-        user.get("id"),
-    )
-    return row_to_dict(row)
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO employee_advances
+              (user_id, employee_name, amount, advance_date, advance_type, notes, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            RETURNING *
+            """,
+            data.user_id,
+            employee_name,
+            amount,
+            advance_date,
+            data.advance_type or "advance",
+            data.notes,
+            user.get("id"),
+        )
+        return row_to_dict(row)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ السلفة: {str(e)}")
 
 
 
