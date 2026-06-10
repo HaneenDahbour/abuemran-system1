@@ -363,6 +363,14 @@ function openInvoiceModalFromEncoded(encoded) {
   }
   openInvoiceModal(data);
 }
+function editInvoiceById(invoiceId) {
+  const inv = (window._invoicesCache || []).find(
+    x => String(x.id) === String(invoiceId)
+  );
+  if (!inv) { toast('لم يتم العثور على الفاتورة', 'error'); return; }
+  closeModal();
+  openInvoiceModal(inv);
+}
 function printInvoicesListFromEncoded(encoded) {
   const data = decodePayload(encoded);
   if (!data) {
@@ -1318,6 +1326,28 @@ function showInvoiceDetails(invoiceId) {
 
   const items = inv.items || [];
   const writerName = inv.attributed_employee_name || inv.created_by_name || '—';
+  const isPending = (inv.status || 'approved') === 'pending';
+
+  // Action buttons for pending invoices — review, fix, then approve from one place
+  let actionsHtml = '';
+  if (isPending) {
+    let btns = '';
+    if (isAccountant()) {
+      btns += `<button class="btn btn-primary" onclick="editInvoiceById(${jsString(inv.id)})">✏️ تعديل الفاتورة</button>`;
+    }
+    if (isAdmin()) {
+      btns += `
+        <button class="btn btn-success" onclick="closeModal(); approveInvoice(${inv.id})">✅ اعتماد</button>
+        <button class="btn btn-danger"  onclick="closeModal(); rejectInvoiceModal(${inv.id})">✗ رفض</button>`;
+    }
+    if (btns) {
+      actionsHtml = `
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:14px;
+                    border-top:1px solid var(--brd)">
+          ${btns}
+        </div>`;
+    }
+  }
 
   openModal(`
     <div class="modal-header">
@@ -1354,6 +1384,7 @@ function showInvoiceDetails(invoiceId) {
         </tbody>
       </table>
     </div>
+    ${actionsHtml}
   `);
 }
 function downloadInvoicePDF(invoiceId) {
@@ -1400,7 +1431,12 @@ function openInvoiceModal(invoice = null) {
     ? String(invoice.date).split('T')[0]
     : new Date().toISOString().split('T')[0];
 
-  const paid = Number(invoice?.paid_amount || 0);
+  // Pending invoices: paid_amount is always 0 until approval — the amount the
+  // employee recorded lives in initial_paid_amount. Use it so editing a pending
+  // invoice doesn't silently wipe the recorded payment.
+  const paid = (invoice?.status || 'approved') === 'pending'
+    ? Number(invoice?.initial_paid_amount || 0)
+    : Number(invoice?.paid_amount || 0);
   const recipient = invoice?.recipient_name ||
     String(invoice?.notes || '').match(/المطلوب من السادة:\s*([^|]+)/)?.[1]?.trim() || '';
   const cleanNotes = (invoice?.notes || '')
