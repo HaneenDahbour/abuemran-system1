@@ -109,6 +109,8 @@
     getUsers: () => apiFetch('/auth/users'),
     createUser: data =>
       apiFetch('/auth/users', { method: 'POST', body: JSON.stringify(data) }),
+    updateUser: (id, data) =>
+      apiFetch(`/auth/users/${requireId(id, 'معرّف المستخدم')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteUser: id =>
       apiFetch(`/auth/users/${requireId(id, 'معرّف المستخدم')}`, { method: 'DELETE' }),
     getEmployeesList: () => apiFetch('/auth/employees-list'),
@@ -147,21 +149,28 @@
         body: JSON.stringify({ reason }),
       }),
     // ── Expenses / Salaries / Advances ─────────────────────────────
+    getEmployeeStatement: (userId) => apiFetch(`/expenses/employee/${requireId(userId, 'معرّف الموظف')}/statement`),
     getExpenses: () => apiFetch('/expenses'),
     createExpense: data =>
       apiFetch('/expenses', { method: 'POST', body: JSON.stringify(data) }),
+    updateExpense: (id, data) =>
+      apiFetch(`/expenses/${requireId(id, 'معرّف المصروف')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteExpense: id =>
       apiFetch(`/expenses/${requireId(id, 'معرّف المصروف')}`, { method: 'DELETE' }),
 
     getSalaries: () => apiFetch('/expenses/salaries'),
     createSalary: data =>
       apiFetch('/expenses/salaries', { method: 'POST', body: JSON.stringify(data) }),
+    updateSalary: (id, data) =>
+      apiFetch(`/expenses/salaries/${requireId(id, 'معرّف الراتب')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteSalary: id =>
       apiFetch(`/expenses/salaries/${requireId(id, 'معرّف الراتب')}`, { method: 'DELETE' }),
 
     getAdvances: () => apiFetch('/expenses/advances'),
     createAdvance: data =>
       apiFetch('/expenses/advances', { method: 'POST', body: JSON.stringify(data) }),
+    updateAdvance: (id, data) =>
+      apiFetch(`/expenses/advances/${requireId(id, 'معرّف السلفة')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteAdvance: id =>
       apiFetch(`/expenses/advances/${requireId(id, 'معرّف السلفة')}`, { method: 'DELETE' }),
 
@@ -289,6 +298,7 @@
 
     // ── Recipients ────────────────────────────────────────────────
     getRecipients: () => apiFetch('/recipients'),
+    getRecipientPayments: () => apiFetch('/recipients/payments'),
     getRecipientStatement: name =>
       apiFetch(`/recipients/${encodeURIComponent(name)}/statement`),
     createRecipientPayment: data =>

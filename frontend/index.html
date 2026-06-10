@@ -676,6 +676,126 @@
   <!-- ═══════════════ TOAST CONTAINER ═══════════════ -->
   <div id="toast-wrap"></div>
 
+  <!-- ═══════════════ FLOATING CALCULATOR ═══════════════ -->
+  <button id="calc-toggle" title="الآلة الحاسبة" aria-label="افتح الآلة الحاسبة">🧮</button>
+
+  <div id="calc-panel" role="dialog" aria-label="الآلة الحاسبة">
+    <div class="calc-display">
+      <div class="calc-expr" id="calc-expr"></div>
+      <div class="calc-screen" id="calc-screen">0</div>
+    </div>
+    <div class="calc-grid">
+      <button class="calc-btn clear" data-calc="AC">AC</button>
+      <button class="calc-btn op"    data-calc="+/-">+/-</button>
+      <button class="calc-btn op"    data-calc="%">%</button>
+      <button class="calc-btn op"    data-calc="/">÷</button>
+
+      <button class="calc-btn" data-calc="7">7</button>
+      <button class="calc-btn" data-calc="8">8</button>
+      <button class="calc-btn" data-calc="9">9</button>
+      <button class="calc-btn op" data-calc="*">×</button>
+
+      <button class="calc-btn" data-calc="4">4</button>
+      <button class="calc-btn" data-calc="5">5</button>
+      <button class="calc-btn" data-calc="6">6</button>
+      <button class="calc-btn op" data-calc="-">−</button>
+
+      <button class="calc-btn" data-calc="1">1</button>
+      <button class="calc-btn" data-calc="2">2</button>
+      <button class="calc-btn" data-calc="3">3</button>
+      <button class="calc-btn op" data-calc="+">+</button>
+
+      <button class="calc-btn zero" data-calc="0">0</button>
+      <button class="calc-btn"     data-calc=".">.</button>
+      <button class="calc-btn eq"  data-calc="=">=</button>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    var screen   = document.getElementById('calc-screen');
+    var exprEl   = document.getElementById('calc-expr');
+    var panel    = document.getElementById('calc-panel');
+    var toggle   = document.getElementById('calc-toggle');
+    var current  = '0';
+    var expr     = '';
+    var justCalc = false;
+
+    toggle.addEventListener('click', function() {
+      panel.classList.toggle('open');
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!panel.contains(e.target) && e.target !== toggle) {
+        panel.classList.remove('open');
+      }
+    });
+
+    function updateScreen() {
+      screen.textContent = current.length > 10
+        ? parseFloat(current).toExponential(4)
+        : current;
+      exprEl.textContent = expr;
+    }
+
+    document.querySelectorAll('.calc-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var v = this.dataset.calc;
+
+        if (v === 'AC') {
+          current = '0'; expr = ''; justCalc = false;
+        } else if (v === '+/-') {
+          current = String(parseFloat(current) * -1);
+        } else if (v === '%') {
+          current = String(parseFloat(current) / 100);
+        } else if (v === '=') {
+          try {
+            expr = expr + current;
+            var result = Function('"use strict"; return (' + expr + ')')();
+            current = String(Math.round(result * 1000000) / 1000000);
+            expr = '';
+            justCalc = true;
+          } catch(e) {
+            current = 'خطأ'; expr = '';
+          }
+        } else if (['+','-','*','/'].indexOf(v) >= 0) {
+          expr = expr + current + ' ' + v + ' ';
+          current = '0'; justCalc = false;
+        } else if (v === '.') {
+          if (justCalc) { current = '0.'; justCalc = false; return; }
+          if (current.indexOf('.') < 0) current += '.';
+        } else {
+          if (justCalc || current === '0' || current === 'خطأ') {
+            current = v; justCalc = false;
+          } else {
+            if (current.replace(/[^0-9]/g,'').length < 12) current += v;
+          }
+        }
+        updateScreen();
+      });
+    });
+
+    document.addEventListener('keydown', function(e) {
+      if (!panel.classList.contains('open')) return;
+      var map = {
+        '0':'0','1':'1','2':'2','3':'3','4':'4',
+        '5':'5','6':'6','7':'7','8':'8','9':'9',
+        '.':'.','+'  :'+','-':'-','*':'*','/':'/',
+        'Enter':'=','Escape':'AC','Backspace':'BACK'
+      };
+      var k = map[e.key];
+      if (!k) return;
+      e.preventDefault();
+      if (k === 'BACK') {
+        if (current.length > 1) current = current.slice(0,-1);
+        else current = '0';
+        updateScreen(); return;
+      }
+      document.querySelector('[data-calc="' + k + '"]')?.click();
+    });
+  })();
+  </script>
+
   <!-- ═══════════════ SCRIPTS ═══════════════ -->
 <script src="js/api.js?v=slash-fix-20260602"></script>
   <script src="js/auth.js"></script>

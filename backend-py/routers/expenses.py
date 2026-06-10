@@ -129,6 +129,33 @@ async def create_expense(data: ExpenseIn, user=Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"تعذر حفظ المصروف: {str(e)}")
+
+
+@router.put("/{expense_id}")
+async def update_expense(expense_id: int, data: ExpenseIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    name = str(data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم المصروف مطلوب")
+    amount = round(float(data.amount or 0), 3)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+    expense_date = parse_date(data.expense_date)
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE cashbox_expenses
+        SET name=$1, description=$1, amount=$2, expense_type=$3,
+            category=$4, is_fixed=$5, expense_date=$6, notes=$7
+        WHERE id=$8 RETURNING *
+        """,
+        name, amount, data.expense_type or "daily",
+        data.category, bool(data.is_fixed), expense_date, data.notes, expense_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="المصروف غير موجود")
+    return row_to_dict(row)
+
 @router.delete("/{expense_id}")
 async def delete_expense(expense_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
@@ -195,6 +222,34 @@ async def create_salary(data: SalaryIn, user=Depends(get_current_user)):
     return row_to_dict(row)
 
 
+
+
+@router.put("/salaries/{salary_id}")
+async def update_salary(salary_id: int, data: SalaryIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    employee_name = str(data.employee_name or "").strip()
+    if not employee_name:
+        raise HTTPException(status_code=400, detail="اسم الموظف مطلوب")
+    amount = round(float(data.salary_amount or 0), 3)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="قيمة الراتب يجب أن تكون أكبر من صفر")
+    salary_month = parse_date(data.salary_month)
+    paid_date = parse_date(data.paid_date)
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE employee_salaries
+        SET employee_user_id=$1, employee_name=$2, salary_amount=$3,
+            salary_month=$4, paid_date=$5, status=$6, notes=$7
+        WHERE id=$8 RETURNING *
+        """,
+        data.employee_user_id, employee_name, amount,
+        salary_month, paid_date, data.status or "paid", data.notes, salary_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="الراتب غير موجود")
+    return row_to_dict(row)
+
 @router.delete("/salaries/{salary_id}")
 async def delete_salary(salary_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
@@ -257,6 +312,33 @@ async def create_advance(data: AdvanceIn, user=Depends(get_current_user)):
     )
     return row_to_dict(row)
 
+
+
+
+@router.put("/advances/{advance_id}")
+async def update_advance(advance_id: int, data: AdvanceIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    employee_name = str(data.employee_name or "").strip()
+    if not employee_name:
+        raise HTTPException(status_code=400, detail="اسم الموظف مطلوب")
+    amount = round(float(data.amount or 0), 3)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+    advance_date = parse_date(data.advance_date)
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE employee_advances
+        SET user_id=$1, employee_name=$2, amount=$3,
+            advance_date=$4, advance_type=$5, notes=$6
+        WHERE id=$7 RETURNING *
+        """,
+        data.user_id, employee_name, amount,
+        advance_date, data.advance_type or "advance", data.notes, advance_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="السلفة غير موجودة")
+    return row_to_dict(row)
 
 @router.delete("/advances/{advance_id}")
 async def delete_advance(advance_id: int, user=Depends(get_current_user)):

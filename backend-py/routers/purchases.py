@@ -56,7 +56,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
         INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
         VALUES ($1, $2, $3, 'purchase', $4, $5)
         """,
-        safe_uuid(user.get("id")),
+        user.get("id"),
         user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
         action,
         entity_id,
@@ -186,7 +186,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                     purchase_date,
                     total,
                     notes,
-                    safe_uuid(user.get("id")),
+                    user.get("id"),
                 )
 
                 for item in data.items:
@@ -292,7 +292,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                         quantity,
                         purchase_id,
                         f"Ø§Ø³ØªÙ„Ø§Ù… Ù…Ø´ØªØ±ÙŠØ§Øª #{purchase['invoice_number']}",
-                        safe_uuid(user.get("id")),
+                        user.get("id"),
                     )
 
                 updated_purchase = await conn.fetchrow(

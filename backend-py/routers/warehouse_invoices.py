@@ -128,7 +128,7 @@ async def create_warehouse_invoice(
                 invoice_date,
                 data.notes or None,
                 total,
-                safe_uuid(user.get("id")),
+                user.get("id"),
             )
 
             for item in data.items:
@@ -167,7 +167,7 @@ async def create_warehouse_invoice(
                         item.quantity,
                         inv["id"],
                         f"ÙØ§ØªÙˆØ±Ø© Ù…Ø³ØªÙˆØ¯Ø¹ #{invoice_number}",
-                        safe_uuid(user.get("id")),
+                        user.get("id"),
                     )
                 except Exception:
                     pass
@@ -178,7 +178,7 @@ async def create_warehouse_invoice(
                 INSERT INTO audit_log (user_id, user_name, action, detail)
                 VALUES ($1, $2, 'Ø£Ø¶Ø§Ù ÙØ§ØªÙˆØ±Ø© Ù…Ø³ØªÙˆØ¯Ø¹', $3)
                 """,
-                safe_uuid(user.get("id")),
+                user.get("id"),
                 user.get("full_name"),
                 f"ÙØ§ØªÙˆØ±Ø© #{invoice_number} â€” {total:.2f} Ø¯.Ø£",
             )

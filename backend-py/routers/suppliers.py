@@ -47,7 +47,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
         INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
         VALUES ($1, $2, $3, 'supplier', $4, $5)
         """,
-        safe_uuid(user.get("id")),
+        user.get("id"),
         user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
         action,
         entity_id,
@@ -197,7 +197,7 @@ async def add_supplier_payment(
             pay_date,
             data.notes,
             data.payment_method or "cash",
-            safe_uuid(user.get("id")),
+            user.get("id"),
         )
 
         try:

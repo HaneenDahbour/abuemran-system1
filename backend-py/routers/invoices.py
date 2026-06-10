@@ -114,7 +114,7 @@ async def insert_audit(conn, user, action: str, entity_id: int, detail: str):
             INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
             VALUES ($1, $2, $3, 'invoice', $4, $5)
             """,
-            safe_uuid(user.get("id")),
+            user.get("id"),
             user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
             action,
             entity_id,
@@ -309,7 +309,7 @@ async def restore_stock_from_invoice_items(conn, invoice_id: int, user):
                 item["product_id"],
                 quantity,
                 "Ø¥Ø±Ø¬Ø§Ø¹ Ù…Ø®Ø²ÙˆÙ† Ø¨Ø³Ø¨Ø¨ ØªØ¹Ø¯ÙŠÙ„/Ø­Ø°Ù ÙØ§ØªÙˆØ±Ø©",
-                safe_uuid(user.get("id")),
+                user.get("id"),
             )
 
 
@@ -383,7 +383,7 @@ async def insert_invoice_items_and_deduct_stock(
             item["product_id"],
             quantity,
             f"خصم بسبب فاتورة مبيعات #{invoice_number}",
-            safe_uuid(user.get("id")),
+            user.get("id"),
         )
 async def insert_auto_payment(
     conn,
@@ -489,7 +489,7 @@ async def deduct_stock_for_approved_invoice(conn, invoice_id: int, invoice_numbe
             """,
             item["product_id"], qty,
             f"Ø®ØµÙ… Ø¨Ø³Ø¨Ø¨ Ø§Ø¹ØªÙ…Ø§Ø¯ ÙØ§ØªÙˆØ±Ø© #{invoice_number}",
-            safe_uuid(user.get("id")),
+            user.get("id"),
         )
 @router.get("")
 async def get_invoices(user=Depends(get_current_user)):

@@ -256,7 +256,7 @@ async def approve_payment(payment_id: int, user=Depends(get_current_user)):
             WHERE id=$2 AND status='pending'
             RETURNING *
             """,
-            safe_uuid(user.get("id")),
+            user.get("id"),
             payment_id,
         )
 
@@ -308,7 +308,7 @@ async def reject_payment(
             RETURNING *
             """,
             data.reason.strip(),
-            safe_uuid(user.get("id")),
+            user.get("id"),
             payment_id,
         )
 

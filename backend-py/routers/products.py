@@ -58,7 +58,7 @@ async def insert_audit(conn, user, action: str, detail: str):
         INSERT INTO audit_log (user_id, user_name, action, detail)
         VALUES ($1, $2, $3, $4)
         """,
-        safe_uuid(user.get("id")),
+        user.get("id"),
         user.get("full_name") or user.get("username") or "مستخدم",
         action,
         detail,
@@ -121,7 +121,8 @@ class ProductRequest(BaseModel):
     category_id: Optional[int] = None
     unit: Optional[str] = "قطعة"
     min_stock: Optional[float] = 0
-    base_price: Optional[float] = 0       # ← NEW: سعر التكلفة
+    cost_price: Optional[float] = 0       # سعر التكلفة / الشراء
+    base_price: Optional[float] = None    # legacy alias — ignored if cost_price provided
     properties: Optional[Dict[str, Any]] = Field(default_factory=dict)
     opening_quantity: Optional[float] = 0
     final_stock: Optional[float] = None
@@ -399,7 +400,7 @@ async def create_product(data: ProductRequest, user=Depends(get_current_user)):
     unit = clean_text(data.unit) or "قطعة"
     min_stock = float(data.min_stock or 0)
     opening_quantity = float(data.opening_quantity or 0)
-    base_price = round(float(data.base_price or 0), 3)
+    base_price = round(float(data.cost_price if data.cost_price is not None else (data.base_price or 0)), 3)
     category_id = int(data.category_id) if data.category_id else None
 
     if not name:
@@ -453,8 +454,8 @@ async def create_product(data: ProductRequest, user=Depends(get_current_user)):
                 row = await conn.fetchrow(
                     """
                     INSERT INTO products
-                    (name, sku, category_id, category, unit, min_stock, current_stock, properties, base_price)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9)
+                    (name, sku, category_id, category, unit, min_stock, current_stock, properties, cost_price, base_price)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$9)
                     RETURNING *
                     """,
                     name, sku, category_id, category_name, unit, min_stock,
@@ -473,7 +474,7 @@ async def create_product(data: ProductRequest, user=Depends(get_current_user)):
                         "in",
                         opening_quantity,
                         f"كمية افتتاحية: {opening_quantity} {unit}",
-                        safe_uuid(user.get("id")),
+                        user.get("id"),
                     )
 
                 await insert_audit(
@@ -642,7 +643,7 @@ async def import_products_excel(
                                         "in" if diff > 0 else "out",
                                         abs(diff),
                                         f"تحديث من Excel: من {old_stock} إلى {current_stock}",
-                                        safe_uuid(user.get("id")),
+                                        user.get("id"),
                                     )
 
                                 updated += 1
@@ -679,7 +680,7 @@ async def import_products_excel(
                                 created["id"],
                                 current_stock,
                                 f"استيراد Excel — مخزون افتتاحي: {current_stock}",
-                                safe_uuid(user.get("id")),
+                                user.get("id"),
                             )
 
                         inserted += 1
@@ -961,6 +962,58 @@ async def export_products_excel(user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/profit-analysis")
+async def get_profit_analysis(user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                p.id, p.name, p.sku, p.unit,
+                COALESCE(p.cost_price, p.base_price, 0) AS cost_price,
+                p.current_stock,
+                wc.name                                  AS category_name,
+                COALESCE(s.total_sold_qty, 0)            AS total_sold_qty,
+                COALESCE(s.total_revenue, 0)             AS total_revenue,
+                CASE WHEN COALESCE(s.total_sold_qty,0) > 0
+                     THEN ROUND((s.total_revenue / s.total_sold_qty)::numeric, 3)
+                     ELSE 0 END                          AS avg_selling_price,
+                CASE WHEN COALESCE(p.cost_price, p.base_price, 0) > 0
+                          AND COALESCE(s.total_sold_qty,0) > 0
+                     THEN ROUND((s.total_revenue/s.total_sold_qty
+                          - COALESCE(p.cost_price, p.base_price, 0))::numeric, 3)
+                     ELSE 0 END                          AS profit_per_unit,
+                CASE WHEN COALESCE(p.cost_price, p.base_price, 0) > 0
+                          AND COALESCE(s.total_sold_qty,0) > 0
+                     THEN ROUND(
+                       ((s.total_revenue/s.total_sold_qty
+                          - COALESCE(p.cost_price, p.base_price, 0))
+                        / COALESCE(p.cost_price, p.base_price, 1) * 100)::numeric, 2)
+                     ELSE 0 END                          AS profit_margin_pct,
+                CASE WHEN COALESCE(p.cost_price, p.base_price, 0) > 0
+                          AND COALESCE(s.total_sold_qty,0) > 0
+                     THEN COALESCE(s.total_sold_qty,0)
+                          * (s.total_revenue/s.total_sold_qty
+                             - COALESCE(p.cost_price, p.base_price, 0))
+                     ELSE 0 END                          AS total_profit
+            FROM products p
+            LEFT JOIN warehouse_categories wc ON wc.id = p.category_id
+            LEFT JOIN (
+                SELECT ii.product_id,
+                       SUM(ii.quantity) AS total_sold_qty,
+                       SUM(COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0)) AS total_revenue
+                FROM invoice_items ii
+                JOIN invoices i ON i.id = ii.invoice_id
+                WHERE COALESCE(NULLIF(i.status,''),'approved') = 'approved'
+                GROUP BY ii.product_id
+            ) s ON s.product_id = p.id
+            ORDER BY total_profit DESC NULLS LAST, p.name ASC
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{product_id}")
 async def get_product(product_id: UUID, user=Depends(get_current_user)):
     pool = await get_pool()
@@ -1067,17 +1120,18 @@ async def update_product(product_id: UUID, data: ProductRequest, user=Depends(ge
                 }
                 props_json = json.dumps(merged_properties, ensure_ascii=False)
 
+                cost_price_val = round(float(data.cost_price if data.cost_price is not None else (data.base_price or 0)), 3)
                 row = await conn.fetchrow(
                     """
                     UPDATE products
                     SET name=$1, sku=$2, category_id=$3, category=$4,
                         unit=$5, min_stock=$6, properties=$7::jsonb,
-                        base_price=$8
+                        cost_price=$8, base_price=$8
                     WHERE id=$9
                     RETURNING *
                     """,
                     name, sku, category_id, category_name, unit, min_stock,
-                    props_json, round(float(data.base_price or 0), 3), product_id,
+                    props_json, cost_price_val, product_id,
                 )
 
                 if data.final_stock is not None:
@@ -1108,7 +1162,7 @@ async def update_product(product_id: UUID, data: ProductRequest, user=Depends(ge
                             "in" if diff > 0 else "out",
                             abs(diff),
                             f"تعديل الكمية من {old_stock} إلى {final_stock}",
-                            safe_uuid(user.get("id")),
+                            user.get("id"),
                         )
 
                         await insert_audit(
@@ -1195,7 +1249,7 @@ async def adjust_stock(product_id: UUID, data: AdjustRequest, user=Depends(get_c
                     "in" if qty > 0 else "out",
                     abs(qty),
                     data.notes or "تعديل يدوي",
-                    safe_uuid(user.get("id")),
+                    user.get("id"),
                 )
 
                 await insert_audit(
@@ -1212,53 +1266,6 @@ async def adjust_stock(product_id: UUID, data: AdjustRequest, user=Depends(get_c
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/profit-analysis")
-async def get_profit_analysis(user=Depends(get_current_user)):
-    require_role(user, "admin", "accountant")
-    pool = await get_pool()
-    try:
-        rows = await pool.fetch("""
-            SELECT
-                p.id, p.name, p.sku, p.unit,
-                COALESCE(p.base_price, 0)            AS base_price,
-                p.current_stock,
-                wc.name                              AS category_name,
-                COALESCE(s.total_sold_qty, 0)        AS total_sold_qty,
-                COALESCE(s.total_revenue, 0)         AS total_revenue,
-                CASE WHEN COALESCE(s.total_sold_qty,0) > 0
-                     THEN ROUND((s.total_revenue / s.total_sold_qty)::numeric, 3)
-                     ELSE 0 END                      AS avg_selling_price,
-                CASE WHEN COALESCE(p.base_price,0) > 0
-                          AND COALESCE(s.total_sold_qty,0) > 0
-                     THEN ROUND((s.total_revenue/s.total_sold_qty - p.base_price)::numeric, 3)
-                     ELSE 0 END                      AS profit_per_unit,
-                CASE WHEN COALESCE(p.base_price,0) > 0
-                          AND COALESCE(s.total_sold_qty,0) > 0
-                     THEN ROUND(
-                       ((s.total_revenue/s.total_sold_qty - p.base_price)
-                        / p.base_price * 100)::numeric, 2)
-                     ELSE 0 END                      AS profit_margin_pct,
-                CASE WHEN COALESCE(p.base_price,0) > 0
-                          AND COALESCE(s.total_sold_qty,0) > 0
-                     THEN COALESCE(s.total_sold_qty,0)
-                          * (s.total_revenue/s.total_sold_qty - p.base_price)
-                     ELSE 0 END                      AS total_profit
-            FROM products p
-            LEFT JOIN warehouse_categories wc ON wc.id = p.category_id
-            LEFT JOIN (
-                SELECT ii.product_id,
-                       SUM(ii.quantity) AS total_sold_qty,
-                       SUM(COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0)) AS total_revenue
-                FROM invoice_items ii
-                JOIN invoices i ON i.id = ii.invoice_id
-                WHERE COALESCE(NULLIF(i.status,''),'approved') = 'approved'
-                GROUP BY ii.product_id
-            ) s ON s.product_id = p.id
-            ORDER BY total_profit DESC NULLS LAST, p.name ASC
-        """)
-        return [row_to_dict(r) for r in rows]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 @router.get("/{product_id}/movements")
 async def get_movements(product_id: UUID, user=Depends(get_current_user)):
     pool = await get_pool()

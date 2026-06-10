@@ -16,7 +16,12 @@ async def connect_db():
         raise Exception("DATABASE_URL is missing in .env file")
 
     pool = await asyncpg.create_pool(
-        database_url, ssl="require", statement_cache_size=0
+        database_url,
+        ssl="require",
+        statement_cache_size=0,
+        min_size=2,
+        max_size=10,
+        command_timeout=30,
     )
 
     print("✅ Connected to Supabase PostgreSQL")

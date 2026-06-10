@@ -69,10 +69,25 @@ async def get_stats(user=Depends(get_current_user)):
                     (SELECT COUNT(*) FROM checks WHERE due_date = CURRENT_DATE AND status='pending')
                         AS today_checks,
 
-                    (SELECT COUNT(*) FROM users WHERE role IN ('admin', 'accountant', 'employee'))
+                    (SELECT COUNT(*) FROM clients)
                         AS active_clients,
 
-                    0 AS pending_payments
+                    0 AS pending_payments,
+
+                    (SELECT COALESCE(SUM(cf.total_sold - cf.total_cost), 0)
+                     FROM (
+                         SELECT
+                             p.category_id,
+                             COALESCE(SUM(COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0)), 0) AS total_sold,
+                             COALESCE(SUM(ii.quantity * COALESCE(NULLIF(p.cost_price,0), NULLIF(p.base_price,0), 0)), 0) AS total_cost
+                         FROM invoice_items ii
+                         JOIN invoices inv ON inv.id = ii.invoice_id
+                         JOIN products p ON p.id = ii.product_id
+                         WHERE COALESCE(NULLIF(inv.status,''), 'approved') = 'approved'
+                         GROUP BY p.category_id
+                     ) cf
+                    ) AS total_profit
+
                 FROM approved_inv, extra_payments
             """)
         return row_to_dict(row)
@@ -226,7 +241,7 @@ async def add_cashbox_expense(data: dict, user=Depends(get_current_user)):
             round(amount, 3),
             description,
             exp_date,
-            safe_uuid(user.get("id")) if hasattr(user, "get") else None,
+            user.get("id") if hasattr(user, "get") else None,
         )
         return {
             k: (

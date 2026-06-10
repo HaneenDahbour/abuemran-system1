@@ -47,7 +47,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
         INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
         VALUES ($1, $2, $3, 'client', $4, $5)
         """,
-        safe_uuid(user.get("id")),
+        user.get("id"),
         user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
         action,
         entity_id,
@@ -145,6 +145,12 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
                      FROM payments p
                      WHERE p.client_id = c.id
                        AND p.status = 'approved'
+                   ), 0)
+                   -
+                   COALESCE((
+                     SELECT SUM(rp.amount)
+                     FROM recipient_payments rp
+                     WHERE rp.client_id = c.id
                    ), 0) AS balance
             FROM clients c
             WHERE c.id = $1
@@ -179,7 +185,7 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
         # Ø¬Ù„Ø¨ ÙƒÙ„ Ø§Ù„ÙÙˆØ§ØªÙŠØ± Ù…Ø¹ Ø­Ø³Ø§Ø¨ Ø§Ù„Ù…Ø¯ÙÙˆØ¹ Ù„ÙƒÙ„ ÙØ§ØªÙˆØ±Ø©
         invoices = await pool.fetch(
             """
-            SELECT 
+            SELECT
                 i.id,
                 i.invoice_number,
                 i.total_amount,
@@ -189,14 +195,13 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
                 i.date,
                 i.notes,
                 COALESCE((
-                    SELECT SUM(p.amount)
-                    FROM payments p
-                    WHERE p.client_id = i.client_id
-                      AND p.status = 'approved'
-                      AND COALESCE(p.notes, '') ILIKE ('%invoice_id:' || i.id::text || '%')
+                    SELECT SUM(rp.amount)
+                    FROM recipient_payments rp
+                    WHERE rp.invoice_id = i.id
                 ), 0) AS paid_from_invoice
             FROM invoices i
             WHERE i.client_id = $1
+              AND COALESCE(i.status, 'approved') = 'approved'
             ORDER BY i.date ASC, i.id ASC
             """,
             client_id,
@@ -205,20 +210,16 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
         # Ø¬Ù„Ø¨ ÙƒÙ„ Ø§Ù„Ø¯ÙØ¹Ø§Øª
         payments = await pool.fetch(
             """
-            SELECT 
-                p.id,
-                p.amount,
-                p.payment_date AS date,
-                p.notes,
-                p.payment_method,
-                CASE 
-                    WHEN COALESCE(p.notes, '') ILIKE '%invoice_id:%' 
-                    THEN TRUE ELSE FALSE 
-                END AS is_invoice_payment
-            FROM payments p
-            WHERE p.client_id = $1
-              AND p.status = 'approved'
-            ORDER BY p.payment_date ASC, p.id ASC
+            SELECT
+                rp.id,
+                rp.amount,
+                rp.payment_date AS date,
+                rp.notes,
+                rp.payment_method,
+                CASE WHEN rp.invoice_id IS NOT NULL THEN TRUE ELSE FALSE END AS is_invoice_payment
+            FROM recipient_payments rp
+            WHERE rp.client_id = $1
+            ORDER BY rp.payment_date ASC, rp.id ASC
             """,
             client_id,
         )
@@ -498,7 +499,7 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
                                 item["product_id"],
                                 quantity,
                                 f"Ø¥Ø±Ø¬Ø§Ø¹ Ù…Ø®Ø²ÙˆÙ† Ø¨Ø³Ø¨Ø¨ Ø­Ø°Ù Ø§Ù„Ø¹Ù…ÙŠÙ„ {client['name']} / ÙØ§ØªÙˆØ±Ø© #{item['invoice_number']}",
-                                safe_uuid(user.get("id")),
+                                user.get("id"),
                             )
 
                     await conn.execute(
@@ -507,6 +508,7 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
                     )
 
                 # Ø­Ø°Ù Ø­Ø±ÙƒØ§Øª Ø§Ù„Ø¹Ù…ÙŠÙ„ Ø§Ù„Ù…Ø§Ù„ÙŠØ©
+                await conn.execute("DELETE FROM recipient_payments WHERE client_id=$1", client_id)
                 await conn.execute("DELETE FROM payments WHERE client_id=$1", client_id)
                 await conn.execute("DELETE FROM checks WHERE client_id=$1", client_id)
                 await conn.execute("DELETE FROM invoices WHERE client_id=$1", client_id)

@@ -183,6 +183,42 @@ function escHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * confirmDanger(title, lines, onConfirm)
+ * Shows a rich danger confirmation modal.
+ * lines = array of strings describing what will be affected.
+ * onConfirm = async function to run when user clicks delete.
+ */
+function confirmDanger(title, lines, onConfirm) {
+  const listHtml = lines.map(l =>
+    `<div style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid #f5e5e5">
+       <span style="color:#c21515;font-size:13px;flex-shrink:0">⚠️</span>
+       <span style="font-size:13px;color:#3a2020">${escHtml(l)}</span>
+     </div>`
+  ).join('');
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title" style="color:#c21515">🗑️ ${escHtml(title)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div style="background:#fff5f5;border:1px solid #fcd0d0;border-radius:12px;padding:14px;margin-bottom:16px">
+      <div style="font-size:12px;font-weight:700;color:#c21515;margin-bottom:8px">سيتم حذف أو تأثر التالي:</div>
+      ${listHtml}
+    </div>
+    <div style="font-size:12px;color:#888;margin-bottom:16px">هذا الإجراء لا يمكن التراجع عنه.</div>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-danger" style="flex:1" id="confirm-danger-btn" onclick="
+        document.getElementById('confirm-danger-btn').disabled=true;
+        document.getElementById('confirm-danger-btn').textContent='جاري الحذف...';
+        window._confirmDangerFn && window._confirmDangerFn();
+      ">تأكيد الحذف</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+  window._confirmDangerFn = onConfirm;
+}
+
 function jsString(value) {
   return `'${String(value ?? '')
     .replace(/\\/g, '\\\\')
@@ -734,6 +770,22 @@ async function renderDashboard(container) {
         <div class="metric-value">${stats.today_checks || 0}</div>
         <div class="metric-sub">شيك مستحق</div>
       </div>
+      <div class="metric-card" style="background:linear-gradient(135deg,#0a7650,#057a55);color:white">
+        <div class="metric-icon">📊</div>
+        <div class="metric-label" style="color:rgba(255,255,255,.8)">إجمالي الربح</div>
+        <div class="metric-value" style="color:white">${fmt(stats.total_profit || 0)}</div>
+        <div class="metric-sub" style="color:rgba(255,255,255,.7)">
+          ${stats.total_sales > 0
+            ? 'هامش ' + (((stats.total_profit || 0) / stats.total_sales) * 100).toFixed(1) + '%'
+            : 'بناءً على سعر التكلفة'}
+        </div>
+      </div>
+      <div class="metric-card" style="background:linear-gradient(135deg,#1a4fd6,#1652cc);color:white">
+        <div class="metric-icon">👥</div>
+        <div class="metric-label" style="color:rgba(255,255,255,.8)">العملاء المسجّلون</div>
+        <div class="metric-value" style="color:white">${stats.active_clients || 0}</div>
+        <div class="metric-sub" style="color:rgba(255,255,255,.7)">عميل في النظام</div>
+      </div>
     </div>
 
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px">
@@ -916,7 +968,6 @@ function openClientModal(data = null) {
       </div>
     </div>
     <div class="form-row">
-
       <div class="form-group">
         <label class="form-label">مستوى الخطر</label>
         <select class="form-select" id="cl_risk">
@@ -924,6 +975,11 @@ function openClientModal(data = null) {
           <option value="medium" ${data?.risk_level === 'medium' ? 'selected' : ''}>متوسط</option>
           <option value="high"   ${data?.risk_level === 'high' ? 'selected' : ''}>عالٍ</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">حد الائتمان (د.أ)</label>
+        <input class="form-input" id="cl_credit" type="number" min="0" step="0.001"
+               value="${Number(data?.credit_limit || 0).toFixed(3)}" placeholder="0.000">
       </div>
     </div>
     <div class="form-group">
@@ -948,7 +1004,7 @@ async function saveNewClient() {
     const newClient = await API.createClient({
       name,
       department: document.getElementById('cl_dept')?.value || 'porcelain',
-      credit_limit: 0,
+      credit_limit: parseFloat(document.getElementById('cl_credit')?.value || '0') || 0,
       risk_level: document.getElementById('cl_risk')?.value || 'low',
       phone: document.getElementById('cl_phone')?.value || null,
     });
@@ -986,7 +1042,7 @@ async function saveEditClient(id) {
     const updated = await API.updateClient(id, {
       name,
       department: document.getElementById('cl_dept')?.value || 'porcelain',
-      credit_limit: 0,
+      credit_limit: parseFloat(document.getElementById('cl_credit')?.value || '0') || 0,
       risk_level: document.getElementById('cl_risk')?.value || 'low',
       phone: document.getElementById('cl_phone')?.value || null,
     });
@@ -1008,7 +1064,15 @@ async function saveEditClient(id) {
 }
 
 async function deleteClient(id, name) {
-  if (!confirm(`هل أنت متأكد من حذف العميل "${name}"؟`)) return;
+  const inv = (window._invoicesCache || []).filter(i => i.client_id === id);
+  const lines = [
+    `العميل: ${name}`,
+    `${inv.length} فاتورة مرتبطة به (ستُحذف جميعها)`,
+    'كل المقبوضات والشيكات الخاصة بهذا العميل',
+    'إرجاع كميات المستودع لكل فاتورة معتمدة',
+    'إلغاء ربط حساب المستخدم بهذا العميل (إن وجد)',
+  ];
+  confirmDanger(`حذف العميل "${name}"`, lines, async () => {
   const row = document.querySelector(`#clients-tbody tr[data-client-id="${id}"]`);
   if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
   try {
@@ -1035,182 +1099,8 @@ async function deleteClient(id, name) {
     if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
     toast(e.message, 'error');
   }
-}
-async function viewClientStatement(id, name) {
-  openModal(`
-    <div class="modal-header">
-      <div class="modal-title">📄 كشف حساب — ${escHtml(name)}</div>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-    <div id="stmt-content">
-      <div class="loading"><div class="spinner"></div><p>جاري التحميل...</p></div>
-    </div>
-  `, '780px');
-
-  try {
-    const data = await API.getClientStatement(id);
-    const el = document.getElementById('stmt-content');
-    if (!el) return;
-
-    const txs = data.transactions || [];
-    const s = data.summary || {};
-    const balance = parseFloat(data.balance || 0);
-    const limit = parseFloat(data.credit_limit || 0);
-    const overLimit = limit > 0 && balance > limit;
-    const encoded = encodePayload(data);
-
-    const pmBadge = (method) => {
-      const map = {
-        cash: '<span style="background:#edfaf4;color:#057a55;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">نقد</span>',
-        credit: '<span style="background:#fff0f0;color:#c21515;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">ذمم</span>',
-        partial: '<span style="background:#fff8ee;color:#9a4500;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">جزئي</span>',
-        check: '<span style="background:#eef3ff;color:#1a4fd6;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">شيك</span>',
-        transfer: '<span style="background:#eef3ff;color:#1a4fd6;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700">حوالة</span>',
-      };
-      return map[method] || '';
-    };
-
-    el.innerHTML = `
-      <!-- ملخص الحساب -->
-      <div style="background:#1a1815;color:white;padding:18px 20px;border-radius:12px;margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
-          <div>
-            <div style="font-size:11px;opacity:.5;margin-bottom:4px">المتبقي على زبائن العميل</div>
-            <div style="font-size:32px;font-weight:800;letter-spacing:-1px;color:${balance > 0 ? '#ff6b6b' : '#51cf66'}">
-              ${fmt(Math.abs(balance))} د.أ
-            </div>
-            <div style="font-size:11px;opacity:.5;margin-top:4px">
-              ${balance > 0 ? '← المتبقي على زبائن هذا العميل' : '← لا يوجد متبقي على زبائنه'}
-            </div>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
-            <div style="background:rgba(255,255,255,.08);border-radius:8px;padding:8px 12px">
-              <div style="opacity:.5;font-size:10px;margin-bottom:2px">إجمالي الفواتير</div>
-              <div style="font-weight:700">${fmt(s.total_invoiced)} د.أ</div>
-            </div>
-            <div style="background:rgba(255,255,255,.08);border-radius:8px;padding:8px 12px">
-              <div style="opacity:.5;font-size:10px;margin-bottom:2px">إجمالي المدفوع</div>
-              <div style="font-weight:700;color:#51cf66">${fmt(s.total_paid)} د.أ</div>
-            </div>
-            <div style="background:rgba(255,255,255,.08);border-radius:8px;padding:8px 12px">
-              <div style="opacity:.5;font-size:10px;margin-bottom:2px">نقد فوري</div>
-              <div style="font-weight:700;color:#51cf66">${fmt(s.total_cash_on_invoices)} د.أ</div>
-            </div>
-            <div style="background:rgba(255,255,255,.08);border-radius:8px;padding:8px 12px">
-              <div style="opacity:.5;font-size:10px;margin-bottom:2px">ذمم متبقية</div>
-              <div style="font-weight:700;color:#ff6b6b">${fmt(s.total_credit_invoices)} د.أ</div>
-            </div>
-          </div>
-        </div>
-
-        ${overLimit ? `
-          <div style="margin-top:12px;padding:8px 12px;background:rgba(255,0,0,.2);border-radius:8px;font-size:12px;font-weight:700">
-            ⚠️ تجاوز حد الائتمان ${fmt(limit)} د.أ — الرصيد الحالي ${fmt(balance)} د.أ
-          </div>` : ''}
-      </div>
-
-      <!-- شريط الإحصائيات -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
-        <div style="background:#edfaf4;border-radius:10px;padding:10px 14px;border:1px solid rgba(10,118,80,.1)">
-          <div style="font-size:10px;color:#057a55;font-weight:700;margin-bottom:2px">💰 نقد مدفوع</div>
-          <div style="font-size:16px;font-weight:800;color:#057a55">${fmt(s.total_cash_on_invoices)} د.أ</div>
-        </div>
-        <div style="background:#fff0f0;border-radius:10px;padding:10px 14px;border:1px solid rgba(194,21,21,.1)">
-          <div style="font-size:10px;color:#c21515;font-weight:700;margin-bottom:2px">📋 ذمم قائمة</div>
-          <div style="font-size:16px;font-weight:800;color:#c21515">${fmt(s.total_credit_invoices)} د.أ</div>
-        </div>
-        <div style="background:#eef3ff;border-radius:10px;padding:10px 14px;border:1px solid rgba(26,79,214,.1)">
-          <div style="font-size:10px;color:#1a4fd6;font-weight:700;margin-bottom:2px">💳 مقبوضات إضافية</div>
-          <div style="font-size:16px;font-weight:800;color:#1a4fd6">${fmt(s.total_standalone_payments)} د.أ</div>
-        </div>
-      </div>
-
-      <!-- جدول الحركات -->
-      <div style="border:1px solid #e8e5e0;border-radius:10px;overflow:hidden">
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead>
-            <tr style="background:#f5f3f0">
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94;white-space:nowrap">التاريخ</th>
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94">البيان</th>
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94;white-space:nowrap">نوع الدفع</th>
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94;white-space:nowrap">مدين (فاتورة)</th>
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94;white-space:nowrap">نقد مدفوع</th>
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94;white-space:nowrap">دائن (قبض)</th>
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94;white-space:nowrap">ذمم متبقية</th>
-              <th style="padding:10px 12px;text-align:right;font-size:10px;font-weight:700;color:#9e9a94;white-space:nowrap">الرصيد</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${txs.length ? txs.map((t, idx) => {
-      const isInv = t.type === 'invoice';
-      const isStandalone = t.type === 'payment' && !t.is_invoice_payment;
-      const isInvPay = t.type === 'payment' && t.is_invoice_payment;
-      const bg = isInvPay
-        ? 'background:#f9fff9'
-        : isInv && parseFloat(t.remaining_amount) > 0
-          ? 'background:#fff9f9'
-          : idx % 2 === 0 ? '' : 'background:#faf9f7';
-
-      return `<tr style="border-top:1px solid #f0ede8;${bg}">
-                <td style="padding:10px 12px;color:#9e9a94;white-space:nowrap">${fmtDate(t.date)}</td>
-                <td style="padding:10px 12px">
-                  ${isInv
-          ? `<div style="font-weight:700">فاتورة #${escHtml(t.description || t.id)}</div>
-                       ${t.notes ? `<div style="font-size:10px;color:#9e9a94;margin-top:2px">${escHtml(t.notes.replace(/invoice_id:\d+\|?/g, '').replace(/method:\w+/g, '').trim())}</div>` : ''}`
-          : isInvPay
-            ? `<div style="color:#057a55;font-weight:600">↳ واصل ${escHtml(t.payment_method === 'cash' ? 'نقد' : t.payment_method === 'check' ? 'شيك' : 'حوالة')}</div>`
-            : `<div style="font-weight:600">مقبوضة مستقلة</div>
-                         ${t.notes ? `<div style="font-size:10px;color:#9e9a94">${escHtml(t.notes.replace(/method:\w+/g, '').trim())}</div>` : ''}`
-        }
-                </td>
-                <td style="padding:10px 12px">${isInv ? pmBadge(t.payment_method) : ''}</td>
-                <td style="padding:10px 12px;color:#c21515;font-weight:700;text-align:left">
-                  ${isInv ? fmt(t.amount) : '—'}
-                </td>
-                <td style="padding:10px 12px;color:#057a55;font-weight:700;text-align:left">
-                  ${isInv && parseFloat(t.paid_amount) > 0 ? fmt(t.paid_amount) : '—'}
-                </td>
-                <td style="padding:10px 12px;color:#057a55;font-weight:700;text-align:left">
-                  ${!isInv ? fmt(t.amount) : '—'}
-                </td>
-                <td style="padding:10px 12px;text-align:left">
-                  ${isInv && parseFloat(t.remaining_amount) > 0
-          ? `<span style="color:#c21515;font-weight:700">${fmt(t.remaining_amount)}</span>`
-          : isInv
-            ? '<span style="color:#057a55;font-size:11px">✓ مسدد</span>'
-            : '—'}
-                </td>
-                <td style="padding:10px 12px;font-weight:800;text-align:left;${parseFloat(t.running_balance) > 0 ? 'color:#c21515' : 'color:#057a55'}">
-                  ${fmt(Math.abs(t.running_balance))}
-                  <div style="font-size:9px;font-weight:400;color:#9e9a94">${parseFloat(t.running_balance) > 0 ? 'عليه' : 'له'}</div>
-                </td>
-              </tr>`;
-    }).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:#9e9a94">لا توجد حركات</td></tr>`}
-          </tbody>
-          <!-- إجمالي الجدول -->
-          <tfoot>
-            <tr style="background:#1a1815;color:white">
-              <td colspan="3" style="padding:10px 12px;font-weight:700;font-size:12px">الإجماليات</td>
-              <td style="padding:10px 12px;font-weight:800;text-align:left">${fmt(s.total_invoiced)}</td>
-              <td style="padding:10px 12px;font-weight:800;color:#51cf66;text-align:left">${fmt(s.total_cash_on_invoices)}</td>
-              <td style="padding:10px 12px;font-weight:800;color:#51cf66;text-align:left">${fmt(s.total_standalone_payments)}</td>
-              <td style="padding:10px 12px;font-weight:800;color:#ff6b6b;text-align:left">${fmt(s.total_credit_invoices)}</td>
-              <td style="padding:10px 12px;font-weight:800;text-align:left">${fmt(Math.abs(balance))}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-
-      <!-- أزرار -->
-      <div style="display:flex;gap:8px;margin-top:14px">
-        <button class="btn btn-ghost btn-sm" onclick="printStatementFromEncoded(${jsString(name)}, ${jsString(encoded)})">🖨️ طباعة</button>
-        <button class="btn btn-ghost btn-sm" onclick="closeModal()">إغلاق</button>
-      </div>
-    `;
-  } catch (e) {
-    const el = document.getElementById('stmt-content');
-    if (el) el.innerHTML = `<div class="alert alert-danger">${escHtml(e.message)}</div>`;
-  }
+    closeModal();
+  });
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1552,15 +1442,12 @@ function openInvoiceModal(invoice = null) {
 
     <div class="form-group">
       <label class="form-label">المطلوب من السادة *</label>
-      <input class="form-input" id="inv_recipient"
-             list="inv-clients-datalist"
-             value="${escHtml(recipient)}"
-             placeholder="اكتب اسم الزبون أو اختر من العملاء"
-             oninput="handleRecipientInput(this.value)"
-             autocomplete="off"
-             required>
-      <datalist id="inv-clients-datalist">${clientDatalist}</datalist>
-      <input type="hidden" id="inv_client_id" value="${escHtml(String(existingClientId))}">
+      <select class="form-select" id="inv_client_select" onchange="handleClientSelectChange()" required>
+        <option value="">— اختر العميل —</option>
+        ${(window._clientsCache || []).map(c =>
+          `<option value="${c.id}" ${String(c.id) === String(existingClientId) ? 'selected' : ''}>${escHtml(c.name)}</option>`
+        ).join('')}
+      </select>
       <div id="inv_client_info"
            style="font-size:11px;color:var(--gr);margin-top:4px;display:${existingClientId ? 'block' : 'none'}">
         ✓ مرتبط بحساب عميل
@@ -1665,18 +1552,22 @@ function openInvoiceModal(invoice = null) {
     </div>
   `, '980px');
 
-  // Ensure clients datalist is populated
+  // Ensure clients dropdown is populated
   if (!window._clientsCache || !window._clientsCache.length) {
     API.getClients().then(cls => {
       window._clientsCache = cls || [];
-      const dl = document.getElementById('inv-clients-datalist');
-      if (dl) dl.innerHTML = cls.map(c =>
-        `<option value="${escHtml(c.name)}" data-id="${c.id}">`).join('');
-      const recipEl = document.getElementById('inv_recipient');
-      if (recipEl?.value) handleRecipientInput(recipEl.value);
+      const sel = document.getElementById('inv_client_select');
+      if (sel) {
+        const currentVal = sel.value;
+        sel.innerHTML = '<option value="">— اختر العميل —</option>' +
+          cls.map(c =>
+            `<option value="${c.id}" ${String(c.id) === String(currentVal) ? 'selected' : ''}>${escHtml(c.name)}</option>`
+          ).join('');
+        handleClientSelectChange();
+      }
     }).catch(() => { });
-  } else if (recipient) {
-    setTimeout(() => handleRecipientInput(recipient), 50);
+  } else if (existingClientId) {
+    setTimeout(() => handleClientSelectChange(), 50);
   }
 
   // Load products + categories + employees
@@ -1727,6 +1618,19 @@ function handleRecipientInput(value) {
   if (infoEl) {
     infoEl.style.display = match ? 'block' : 'none';
     if (match) infoEl.textContent = `✓ مرتبط بحساب ${match.name}`;
+  }
+}
+
+function handleClientSelectChange() {
+  const sel = document.getElementById('inv_client_select');
+  const infoEl = document.getElementById('inv_client_info');
+  if (!sel || !infoEl) return;
+  if (sel.value) {
+    const name = sel.options[sel.selectedIndex]?.text?.trim() || '';
+    infoEl.style.display = 'block';
+    infoEl.textContent = `✓ مرتبط بحساب ${name}`;
+  } else {
+    infoEl.style.display = 'none';
   }
 }
 function toggleInvoiceItems() {
@@ -2455,8 +2359,8 @@ async function saveInvoice() {
   const btn = document.getElementById('save-invoice-btn');
   const invoiceId = window._editingInvoiceId || null;
 
-  const rawClientId = document.getElementById('inv_client_id')?.value;
-  const client_id = rawClientId ? parseInt(rawClientId) : null;
+  const clientSelect = document.getElementById('inv_client_select');
+  const client_id = clientSelect?.value ? parseInt(clientSelect.value) : null;
   const attributed_employee_id = parseInt(document.getElementById('inv_employee_id')?.value) || null;
   const hasItems = document.getElementById('inv_has_items')?.checked;
   const invNum = document.getElementById('inv_num')?.value.trim() || `INV-${Date.now()}`;
@@ -2541,17 +2445,17 @@ async function saveInvoice() {
     return;
   }
 
-  const recipientName = document.getElementById('inv_recipient')?.value?.trim() || '';
-  if (!recipientName) {
-    toast('اسم الزبون / مطلوب من السادة مطلوب', 'error');
+  const recipientName = clientSelect?.selectedIndex > 0
+    ? (clientSelect.options[clientSelect.selectedIndex]?.text?.trim() || '')
+    : '';
+  if (!recipientName || !client_id) {
+    toast('اختر العميل أولاً', 'error');
     return;
   }
   const normalNotes = document.getElementById('inv_notes')?.value?.trim() || '';
 
   const payload = {
     client_id,
-    recipient_name: document.getElementById('inv_recipient')?.value?.trim(),
-
     attributed_employee_id,
     invoice_number: invNum,
     net_amount: net,
@@ -2560,7 +2464,7 @@ async function saveInvoice() {
     paid_amount: paidAmount,
     invoice_date: document.getElementById('inv_date')?.value,
     payment_method: paymentMethod,
-    recipient_name: recipientName || undefined,
+    recipient_name: recipientName,
     notes: normalNotes || undefined,
     items: items.length ? items : undefined,
   };
@@ -2622,7 +2526,18 @@ async function saveInvoice() {
 }
 
 async function deleteInvoice(id) {
-  if (!confirm('حذف الفاتورة؟')) return;
+  const inv = (window._invoicesCache || []).find(i => i.id === id || i.id === Number(id));
+  const isApproved = !inv || (inv.status || 'approved') === 'approved';
+  const itemCount = inv?.items?.length || 0;
+  const lines = [
+    `الفاتورة رقم: ${inv?.invoice_number || id}`,
+    `المبلغ: ${fmt(inv?.total_amount || 0)} د.أ`,
+    isApproved && itemCount > 0
+      ? `إرجاع ${itemCount} صنف إلى المستودع (تراجع عن خصم الكميات)`
+      : 'الفاتورة معلّقة — لا يوجد أثر على المستودع',
+    'حذف المقبوضة المرتبطة بها (إن وجدت)',
+  ].filter(Boolean);
+  confirmDanger('حذف الفاتورة', lines, async () => {
   const row = document.querySelector(`#inv-tbody tr[data-invoice-id="${id}"]`);
   if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
   try {
@@ -2642,6 +2557,8 @@ async function deleteInvoice(id) {
     if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
     toast(e.message, 'error');
   }
+    closeModal();
+  });
 }
 
 async function approveInvoice(id) {
@@ -2804,15 +2721,21 @@ async function renderPayments(container) {
   `;
 }
 async function deleteRecipientPayment(id) {
-  if (!confirm('حذف هذه المقبوضة؟')) return;
-
-  try {
-    await API.deleteRecipientPayment(id);
-    toast('تم حذف المقبوضة ✅', 'success');
-    navigateTo('payments');
-  } catch (e) {
-    toast(e.message, 'error');
-  }
+  const lines = [
+    'سيتم حذف هذه المقبوضة',
+    'سيتم تحديث رصيد العميل تلقائياً',
+  ];
+  confirmDanger('حذف المقبوضة', lines, async () => {
+    try {
+      await API.deleteRecipientPayment(id);
+      toast('تم حذف المقبوضة ✅', 'success');
+      closeModal();
+      navigateTo('payments');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
 }
 function openPaymentModal(clientId = null, invoiceId = null) {
   window._paymentInvoiceId = invoiceId || null;
@@ -2837,10 +2760,20 @@ function openPaymentModal(clientId = null, invoiceId = null) {
       </div>
     `}
 
-    <div class="form-group">
-  <label class="form-label">كتبها الموظف</label>
-  <input class="form-input" value="${escHtml((getUser() || {}).full_name || '—')}" disabled>
-</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">العميل</label>
+        <input class="form-input"
+               value="${escHtml((window._clientsCache || []).find(c => c.id == clientId)?.name || '—')}"
+               disabled style="background:#f5f3f0;color:var(--tx2)">
+        <input type="hidden" id="pay_client" value="${clientId || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">كتبها الموظف</label>
+        <input class="form-input" value="${escHtml((getUser() || {}).full_name || '—')}" disabled
+               style="background:#f5f3f0;color:var(--tx2)">
+      </div>
+    </div>
 
     <div class="form-row">
       <div class="form-group">
@@ -2936,7 +2869,13 @@ async function savePayment() {
   }
 }
 async function deletePayment(id) {
-  if (!confirm('حذف هذه المقبوضة؟')) return;
+  const p = (window._paymentsCache || []).find(x => x.id === id || x.id === Number(id));
+  const lines = [
+    `المبلغ: ${p ? fmt(p.amount) + ' د.أ' : '—'}`,
+    `العميل: ${p?.client_name || '—'}`,
+    'سيتم حذف هذه المقبوضة نهائياً من سجل المدفوعات',
+  ];
+  confirmDanger('حذف المقبوضة', lines, async () => {
   const row = document.querySelector(`#pay-tbody tr[data-payment-id="${id}"]`);
   if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
   try {
@@ -2951,6 +2890,8 @@ async function deletePayment(id) {
     if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
     toast(e.message, 'error');
   }
+  closeModal();
+  });
 }
 
 /* ═══════════════════════════════════════════════════
@@ -3030,8 +2971,8 @@ function filterChecksTable(val) {
   });
 }
 function openCheckModal() {
-  const clientDatalist = (window._clientsCache || [])
-    .map(c => `<option value="${escHtml(c.name)}" data-id="${c.id}">`)
+  const clientOpts = (window._clientsCache || [])
+    .map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`)
     .join('');
 
   openModal(`
@@ -3042,17 +2983,10 @@ function openCheckModal() {
 
     <div class="form-group">
       <label class="form-label">العميل *</label>
-      <input class="form-input" id="chk_client_name"
-             list="check-clients-datalist"
-             placeholder="اكتب اسم العميل أو اختر من القائمة"
-             oninput="handleCheckClientInput(this.value)"
-             autocomplete="off">
-      <datalist id="check-clients-datalist">${clientDatalist}</datalist>
-      <input type="hidden" id="chk_client">
-      <div id="chk_client_info"
-           style="font-size:11px;color:var(--gr);margin-top:4px;display:none">
-        ✓ تم التعرف على العميل
-      </div>
+      <select class="form-select" id="chk_client">
+        <option value="">— اختر العميل —</option>
+        ${clientOpts}
+      </select>
     </div>
 
     <div class="form-row">
@@ -3084,29 +3018,6 @@ function openCheckModal() {
     </div>
   `);
 
-  // Load clients if not cached
-  if (!window._clientsCache || !window._clientsCache.length) {
-    API.getClients().then(cls => {
-      window._clientsCache = cls || [];
-      const dl = document.getElementById('check-clients-datalist');
-      if (dl) dl.innerHTML = cls.map(c =>
-        `<option value="${escHtml(c.name)}" data-id="${c.id}">`
-      ).join('');
-    }).catch(() => { });
-  }
-}
-
-function handleCheckClientInput(value) {
-  const clients = window._clientsCache || [];
-  const trimmed = (value || '').trim().toLowerCase();
-  const match = clients.find(c => c.name.trim().toLowerCase() === trimmed);
-  const idEl = document.getElementById('chk_client');
-  const infoEl = document.getElementById('chk_client_info');
-  if (idEl) idEl.value = match ? String(match.id) : '';
-  if (infoEl) {
-    infoEl.style.display = match ? 'block' : 'none';
-    if (match) infoEl.textContent = `✓ ${match.name}`;
-  }
 }
 
 async function saveCheck() {
@@ -3117,7 +3028,6 @@ async function saveCheck() {
 
   if (!client_id) {
     toast('يرجى اختيار العميل من القائمة', 'error');
-    document.getElementById('chk_client_name')?.focus();
     return;
   }
   if (!amount || !due_date || !check_number) {
@@ -3180,7 +3090,14 @@ async function updateCheck(id, status) {
 }
 
 async function deleteCheck(id) {
-  if (!confirm('حذف هذا الشيك؟')) return;
+  const ch = (window._checksCache || []).find(x => x.id === id || x.id === Number(id));
+  const lines = [
+    `رقم الشيك: ${ch?.check_number || '—'}`,
+    `المبلغ: ${ch ? fmt(ch.amount) + ' د.أ' : '—'}`,
+    `الحالة: ${ch?.status || '—'}`,
+    'سيتم حذف الشيك نهائياً من السجل',
+  ];
+  confirmDanger('حذف الشيك', lines, async () => {
   const row = document.querySelector(`tr[data-check-id="${id}"]`);
   if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
   try {
@@ -3195,6 +3112,8 @@ async function deleteCheck(id) {
     if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
     toast(e.message, 'error');
   }
+  closeModal();
+  });
 }
 
 /* ═══════════════════════════════════════════════════
@@ -3471,7 +3390,11 @@ async function viewPurchaseItems(id) {
 }
 
 async function deletePurchase(id) {
-  if (!confirm('حذف فاتورة الشراء؟')) return;
+  const lines = [
+    'فاتورة الشراء وكل بنودها',
+    'ملاحظة: لا يمكن حذف فاتورة مستلمة — المخزون محمي',
+  ];
+  confirmDanger('حذف فاتورة الشراء', lines, async () => {
   try {
     await API.deletePurchase(id);
     toast('تم الحذف', 'success');
@@ -3479,6 +3402,8 @@ async function deletePurchase(id) {
   } catch (e) {
     toast(e.message, 'error');
   }
+  closeModal();
+  });
 }
 
 async function doLogin(username, password) {
@@ -4099,6 +4024,7 @@ async function saveCategory() {
       icon: document.getElementById('cat_icon').value.trim() || '📦'
     });
     toast('تمت إضافة الفئة', 'success');
+    window._whCategoriesCache = null;
     closeModal();
     navigateTo('warehouse');
   } catch (e) {
@@ -4222,7 +4148,14 @@ async function exportWarehouseExcel() {
   }
 }
 async function deleteCategoryConfirm(id) {
-  if (!confirm('حذف هذه الفئة؟ سيتم إلغاء ربط أصنافها بالفئة، ولن يتم حذف الأصناف نفسها.')) return;
+  const cat = (window._whCategoriesCache || []).find(c => c.id === id || c.id === Number(id));
+  const prodCount = cat?.product_count || 0;
+  const lines = [
+    `الفئة: ${cat?.name || id}`,
+    `${prodCount} صنف مرتبط — سيتم فصلهم عن الفئة (لن يُحذفوا)`,
+    'لن يتأثر المخزون ولا الفواتير القديمة',
+  ];
+  confirmDanger('حذف الفئة', lines, async () => {
 
   try {
     await API.deleteWarehouseCategory(id);
@@ -4236,6 +4169,8 @@ async function deleteCategoryConfirm(id) {
   } catch (e) {
     toast(e.message || 'تعذر حذف الفئة', 'error');
   }
+  closeModal();
+  });
 }
 
 function openEditCategoryModal(id) {
@@ -4277,6 +4212,7 @@ async function saveEditCategory(id) {
       icon: document.getElementById('ecat_icon').value.trim() || '📦'
     });
     toast('تم تحديث الفئة', 'success');
+    window._whCategoriesCache = null;
     closeModal();
     navigateTo('warehouse');
   } catch (e) {
@@ -4820,7 +4756,16 @@ async function deleteProduct(id, catId = null, btn = null) {
     return;
   }
   if (window._productBusy) { toast('جاري تنفيذ عملية أخرى...', 'warning'); return; }
-  if (!confirm('حذف الصنف؟')) return;
+  const prod = (window._productsCache || []).find(p => String(p.id) === String(id));
+  const lines = [
+    `الصنف: ${prod?.name || id}`,
+    `الكمية الحالية: ${prod?.current_stock ?? '—'} ${prod?.unit || ''}`,
+    'كل حركات مخزونه (سجل الحركات)',
+    'ملاحظة: لا يمكن حذف صنف مستخدم في فواتير',
+  ];
+  await new Promise(resolve => {
+    confirmDanger('حذف الصنف', lines, resolve);
+  });
 
   window._productBusy = true;
   const row = document.querySelector(`tr[data-product-id="${productId}"]`);
@@ -5212,9 +5157,12 @@ async function renderUsers(container) {
                   <td>${roleBadge(u.role)}</td>
                   <td style="font-size:12px; color:var(--tx3)">${fmtDate(u.created_at)}</td>
                   <td>
-                    ${u.id !== getUser()?.id
-          ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, ${jsString(u.full_name)})">🗑️ حذف</button>`
-          : '<span style="font-size:12px; color:var(--tx3)">أنت</span>'}
+                    <div style="display:flex;gap:6px">
+                      <button class="btn btn-ghost btn-sm" onclick="openEditUserModal(${jsString(JSON.stringify(u))})">✏️</button>
+                      ${u.id !== getUser()?.id
+                        ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, ${jsString(u.full_name)})">🗑️</button>`
+                        : '<span style="font-size:12px; color:var(--tx3)">أنت</span>'}
+                    </div>
                   </td>
                 </tr>`).join('')
       : emptyRow('لا يوجد مستخدمون', 5)}
@@ -5283,13 +5231,87 @@ async function saveUser() {
 }
 
 async function deleteUser(id, name) {
-  if (!confirm(`حذف المستخدم "${name}"؟`)) return;
+  confirmDanger(`حذف المستخدم "${name}"`, [
+    `المستخدم: ${name}`,
+    'سيتم حذف الحساب نهائياً',
+    'لن تتأثر الفواتير أو السجلات المرتبطة به',
+  ], async () => {
+    try {
+      await API.deleteUser(id);
+      toast('تم حذف المستخدم', 'success');
+      closeModal();
+      navigateTo('users');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+function openEditUserModal(u) {
+  const clients = window._clientsCache || [];
+  const clientOpts = clients.map(c =>
+    `<option value="${c.id}" ${c.id == u.client_id ? 'selected' : ''}>${escHtml(c.name)}</option>`
+  ).join('');
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل مستخدم — ${escHtml(u.full_name)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الاسم الكامل *</label>
+      <input class="form-input" id="eu_name" value="${escHtml(u.full_name || '')}">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">الصلاحية *</label>
+        <select class="form-select" id="eu_role">
+          <option value="admin"      ${u.role==='admin'      ? 'selected':''}>مدير عام</option>
+          <option value="accountant" ${u.role==='accountant' ? 'selected':''}>محاسب</option>
+          <option value="employee"   ${u.role==='employee'   ? 'selected':''}>موظف</option>
+          <option value="client"     ${u.role==='client'     ? 'selected':''}>عميل</option>
+          <option value="recipient"  ${u.role==='recipient'  ? 'selected':''}>زبون</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">كلمة مرور جديدة</label>
+        <input class="form-input" id="eu_pass" type="password" placeholder="اتركه فارغاً للإبقاء على الحالية">
+      </div>
+    </div>
+    <div class="form-group" id="eu_client_wrap">
+      <label class="form-label">ربط بعميل (للدور client)</label>
+      <select class="form-select" id="eu_client_id">
+        <option value="">— بدون ربط —</option>
+        ${clientOpts}
+      </select>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditUser(${u.id})">حفظ التعديلات</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveEditUser(id) {
+  const full_name = document.getElementById('eu_name')?.value?.trim();
+  const role      = document.getElementById('eu_role')?.value;
+  const password  = document.getElementById('eu_pass')?.value || null;
+  const client_id = document.getElementById('eu_client_id')?.value || null;
+
+  if (!full_name) { toast('الاسم مطلوب', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
   try {
-    await API.deleteUser(id);
-    toast('تم حذف المستخدم', 'success');
+    await API.updateUser(id, { full_name, role, password, client_id: client_id ? Number(client_id) : null });
+    toast('تم تحديث بيانات المستخدم ✅', 'success');
+    closeModal();
     navigateTo('users');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ التعديلات'; }
   }
 }
 
@@ -6186,14 +6208,49 @@ async function viewRecipientStatement(name) {
 }
 
 function openRecipientPayment(name, clientId) {
+  const hasClient = name && String(name).trim();
+  const clientOpts = (window._clientsCache || [])
+    .map(c => `<option value="${c.id}" data-name="${escHtml(c.name)}" ${c.id == clientId ? 'selected' : ''}>${escHtml(c.name)}</option>`)
+    .join('');
+
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">💰 تسجيل دفعة — ${escHtml(name)}</div>
+      <div class="modal-title">💰 تسجيل مقبوضة${hasClient ? ' — ' + escHtml(name) : ''}</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-    <div class="form-group">
-      <label class="form-label">المبلغ (د.أ) *</label>
-      <input class="form-input" id="rp_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+
+    ${hasClient ? `
+      <input type="hidden" id="rp_name" value="${escHtml(name)}">
+      <input type="hidden" id="rp_client_id" value="${clientId || ''}">
+    ` : `
+      <div class="form-group">
+        <label class="form-label">العميل *</label>
+        <select class="form-select" id="rp_client_select" onchange="
+          var opt = this.options[this.selectedIndex];
+          document.getElementById('rp_name').value = opt.dataset.name || '';
+          document.getElementById('rp_client_id').value = this.value;
+        ">
+          <option value="">— اختر العميل —</option>
+          ${clientOpts}
+        </select>
+        <input type="hidden" id="rp_name" value="">
+        <input type="hidden" id="rp_client_id" value="">
+      </div>
+    `}
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ (د.أ) *</label>
+        <input class="form-input" id="rp_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">طريقة الدفع</label>
+        <select class="form-select" id="rp_method">
+          <option value="cash">نقداً</option>
+          <option value="check">شيك</option>
+          <option value="transfer">حوالة</option>
+        </select>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">تاريخ الدفع</label>
@@ -6204,45 +6261,43 @@ function openRecipientPayment(name, clientId) {
       <input class="form-input" id="rp_notes" placeholder="اختياري">
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1"
-        onclick="saveRecipientPayment(${jsString(name)}, ${clientId || 'null'})">
-        تسجيل الدفعة
-      </button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveRecipientPayment()">تسجيل المقبوضة</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
-async function saveRecipientPayment(name, clientId) {
+async function saveRecipientPayment() {
+  const name = document.getElementById('rp_name')?.value?.trim() || '';
+  const clientId = document.getElementById('rp_client_id')?.value || null;
   const amount = parseFloat(document.getElementById('rp_amount')?.value);
+
+  if (!name) { toast('اختر العميل أولاً', 'error'); return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
 
   try {
     await API.createRecipientPayment({
       recipient_name: name,
-      client_id: clientId || null,
+      client_id: clientId ? Number(clientId) : null,
       amount,
+      payment_method: document.getElementById('rp_method')?.value || 'cash',
       payment_date: document.getElementById('rp_date')?.value,
       notes: document.getElementById('rp_notes')?.value || null,
     });
-    toast('تم تسجيل الدفعة ✅', 'success');
+    toast('تم تسجيل المقبوضة ✅', 'success');
     closeModal();
-    viewRecipientStatement(name);
+    window._clientsCache = null;
+    navigateTo('payments');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'تسجيل المقبوضة'; }
   }
 }
 
-async function deleteRecipientPayment(id, name) {
-  if (!confirm('حذف هذه الدفعة؟')) return;
-  try {
-    await API.deleteRecipientPayment(id);
-    toast('تم الحذف', 'success');
-    viewRecipientStatement(name);
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-}
+
 
 async function viewSupplierStatement(id, name) {
   openModal(`
@@ -6544,6 +6599,40 @@ async function saveNewSupplier() {
     navigateTo('purchases');
   } catch (e) { toast(e.message, 'error'); }
 }
+
+function openEditSupplierModal(s) {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل مورد — ${escHtml(s.name)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">اسم المورد *</label>
+      <input class="form-input" id="es_name" value="${escHtml(s.name || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">رقم الهاتف</label>
+      <input class="form-input" id="es_phone" value="${escHtml(s.phone || '')}">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditSupplier(${s.id})">حفظ التعديلات</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveEditSupplier(id) {
+  const name = document.getElementById('es_name')?.value?.trim();
+  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  try {
+    await API.updateSupplier(id, { name, phone: document.getElementById('es_phone')?.value || null });
+    toast('تم تحديث المورد ✅', 'success');
+    window._suppliersCache = null;
+    closeModal();
+    navigateTo('purchases');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function renderExpenses(container) {
   let expenses = [], salaries = [], advances = [];
   try {
@@ -6674,6 +6763,7 @@ async function renderExpenses(container) {
     </div>
 
     <!-- السلف -->
+
     <div id="exp-section-advances" class="card" style="padding:0;overflow:hidden;display:none">
       <div class="table-wrap">
         <table>
@@ -6720,81 +6810,296 @@ async function deleteAdvanceFromExpenses(id) {
     navigateTo('expenses');
   } catch (e) { toast(e.message, 'error'); }
 }
-function openExpensePageModal() {
+
+// ── Edit Expense ─────────────────────────────────────────────
+function openEditExpenseModal(e) {
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">📋 إضافة مصروف</div>
+      <div class="modal-title">✏️ تعديل مصروف</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-
     <div class="form-group">
       <label class="form-label">اسم المصروف *</label>
-      <input class="form-input" id="pg_exp_name" placeholder="مثال: كهرباء، أجار، بنزين، توصيل">
+      <input class="form-input" id="ee_name" value="${escHtml(e.name || '')}">
     </div>
-
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">المبلغ *</label>
-        <input class="form-input" id="pg_exp_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
+        <input class="form-input" id="ee_amount" type="number" step="0.001" min="0"
+               value="${Number(e.amount || 0).toFixed(3)}">
       </div>
       <div class="form-group">
         <label class="form-label">التاريخ</label>
-        <input class="form-input" id="pg_exp_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+        <input class="form-input" id="ee_date" type="date"
+               value="${e.expense_date ? String(e.expense_date).split('T')[0] : ''}">
       </div>
     </div>
-
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">نوع المصروف</label>
-        <select class="form-select" id="pg_exp_type">
-          <option value="daily">يومي</option>
-          <option value="monthly">شهري</option>
-          <option value="fixed">ثابت</option>
-          <option value="other">آخر</option>
+        <label class="form-label">النوع</label>
+        <select class="form-select" id="ee_type">
+          <option value="daily"   ${e.expense_type==='daily'   ?'selected':''}>يومي</option>
+          <option value="monthly" ${e.expense_type==='monthly' ?'selected':''}>شهري</option>
+          <option value="fixed"   ${e.expense_type==='fixed'   ?'selected':''}>ثابت</option>
+          <option value="other"   ${e.expense_type==='other'   ?'selected':''}>آخر</option>
         </select>
       </div>
       <div class="form-group">
         <label class="form-label">التصنيف</label>
-        <input class="form-input" id="pg_exp_category" placeholder="تشغيل، نقل، مكتب...">
+        <input class="form-input" id="ee_category" value="${escHtml(e.category || '')}">
       </div>
     </div>
-
     <div class="form-group">
       <label class="form-label">ملاحظات</label>
-      <input class="form-input" id="pg_exp_notes" placeholder="اختياري">
+      <input class="form-input" id="ee_notes" value="${escHtml(e.notes || '')}">
     </div>
-
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="savePageExpense()">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditExpense(${e.id})">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
-async function savePageExpense() {
-  const name = document.getElementById('pg_exp_name')?.value?.trim();
-  const amount = parseFloat(document.getElementById('pg_exp_amount')?.value);
-
-  if (!name) { toast('اسم المصروف مطلوب', 'error'); return; }
+async function saveEditExpense(id) {
+  const name   = document.getElementById('ee_name')?.value?.trim();
+  const amount = parseFloat(document.getElementById('ee_amount')?.value);
+  if (!name)            { toast('الاسم مطلوب', 'error'); return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   try {
-    await API.createExpense({
-      name,
-      amount,
-      expense_type: document.getElementById('pg_exp_type')?.value || 'daily',
-      category: document.getElementById('pg_exp_category')?.value || null,
-      expense_date: document.getElementById('pg_exp_date')?.value,
-      notes: document.getElementById('pg_exp_notes')?.value || null,
-      is_fixed: document.getElementById('pg_exp_type')?.value === 'fixed',
+    await API.updateExpense(id, {
+      name, amount,
+      expense_type: document.getElementById('ee_type')?.value || 'daily',
+      category:     document.getElementById('ee_category')?.value || null,
+      expense_date: document.getElementById('ee_date')?.value,
+      notes:        document.getElementById('ee_notes')?.value || null,
+      is_fixed:     document.getElementById('ee_type')?.value === 'fixed',
     });
-
-    toast('تم حفظ المصروف ✅', 'success');
+    toast('تم تحديث المصروف ✅', 'success');
     closeModal();
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
+}
+
+// ── Edit Salary ──────────────────────────────────────────────
+function openEditSalaryModal(s) {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل راتب — ${escHtml(s.employee_name)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">اسم الموظف *</label>
+      <input class="form-input" id="es_emp" value="${escHtml(s.employee_name || '')}">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">الراتب (د.أ) *</label>
+        <input class="form-input" id="es_amount" type="number" step="0.001" min="0"
+               value="${Number(s.salary_amount || 0).toFixed(3)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">الشهر</label>
+        <input class="form-input" id="es_month" type="date"
+               value="${s.salary_month ? String(s.salary_month).split('T')[0] : ''}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">تاريخ الدفع</label>
+        <input class="form-input" id="es_paid" type="date"
+               value="${s.paid_date ? String(s.paid_date).split('T')[0] : ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">الحالة</label>
+        <select class="form-select" id="es_status">
+          <option value="paid"    ${s.status==='paid'    ?'selected':''}>مدفوع</option>
+          <option value="pending" ${s.status==='pending' ?'selected':''}>معلّق</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditSalary(${s.id})">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveEditSalary(id) {
+  const employee_name   = document.getElementById('es_emp')?.value?.trim();
+  const salary_amount   = parseFloat(document.getElementById('es_amount')?.value);
+  if (!employee_name)         { toast('الاسم مطلوب', 'error'); return; }
+  if (!salary_amount || salary_amount <= 0) { toast('الراتب غير صحيح', 'error'); return; }
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  try {
+    await API.updateSalary(id, {
+      employee_name, salary_amount,
+      salary_month: document.getElementById('es_month')?.value,
+      paid_date:    document.getElementById('es_paid')?.value,
+      status:       document.getElementById('es_status')?.value || 'paid',
+    });
+    toast('تم تحديث الراتب ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
+  }
+}
+
+// ── Edit Advance ─────────────────────────────────────────────
+function openEditAdvanceModal(a) {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل سلفة — ${escHtml(a.employee_name)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">اسم الموظف *</label>
+      <input class="form-input" id="ea_emp" value="${escHtml(a.employee_name || '')}">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ (د.أ) *</label>
+        <input class="form-input" id="ea_amount" type="number" step="0.001" min="0"
+               value="${Number(a.amount || 0).toFixed(3)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="ea_date" type="date"
+               value="${a.advance_date ? String(a.advance_date).split('T')[0] : ''}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="ea_notes" value="${escHtml(a.notes || '')}">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditAdvance(${a.id})">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveEditAdvance(id) {
+  const employee_name = document.getElementById('ea_emp')?.value?.trim();
+  const amount        = parseFloat(document.getElementById('ea_amount')?.value);
+  if (!employee_name)      { toast('الاسم مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  try {
+    await API.updateAdvance(id, {
+      employee_name, amount,
+      advance_date: document.getElementById('ea_date')?.value,
+      notes:        document.getElementById('ea_notes')?.value || null,
+    });
+    toast('تم تحديث السلفة ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
+  }
+}
+
+// ── Print Products ───────────────────────────────────────────
+function printProducts(products) {
+  const rows = (products || []).map(p => `
+    <tr>
+      <td>${escHtml(p.name)}</td>
+      <td>${escHtml(p.category_name || p.category || '—')}</td>
+      <td>${escHtml(p.sku || '—')}</td>
+      <td>${p.current_stock ?? 0} ${escHtml(p.unit || '')}</td>
+      <td>${fmt(p.cost_price || 0)} د.أ</td>
+    </tr>`).join('');
+  const win = window.open('', '_blank');
+  win.document.write(`<html dir="rtl"><head><title>تقرير الأصناف</title>
+  <style>body{font-family:Arial;font-size:12px}table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #ccc;padding:6px 8px;text-align:right}th{background:#f0f0f0;font-weight:bold}</style></head>
+  <body><h2>تقرير الأصناف</h2><table>
+  <thead><tr><th>الصنف</th><th>الفئة</th><th>الكود</th><th>المخزون</th><th>سعر التكلفة</th></tr></thead>
+  <tbody>${rows}</tbody></table></body></html>`);
+  win.document.close();
+  win.print();
+}
+
+// ── Print Suppliers ──────────────────────────────────────────
+function printSuppliers(suppliers) {
+  const rows = (suppliers || []).map(s => `
+    <tr>
+      <td>${escHtml(s.name)}</td>
+      <td>${escHtml(s.phone || '—')}</td>
+      <td>${fmt(s.total_purchased || 0)} د.أ</td>
+      <td>${fmt(s.total_paid || 0)} د.أ</td>
+      <td>${fmt((s.total_purchased||0) - (s.total_paid||0))} د.أ</td>
+    </tr>`).join('');
+  const win = window.open('', '_blank');
+  win.document.write(`<html dir="rtl"><head><title>تقرير الموردين</title>
+  <style>body{font-family:Arial;font-size:12px}table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #ccc;padding:6px 8px;text-align:right}th{background:#f0f0f0}</style></head>
+  <body><h2>تقرير الموردين</h2><table>
+  <thead><tr><th>المورد</th><th>الهاتف</th><th>إجمالي الشراء</th><th>المدفوع</th><th>المتبقي</th></tr></thead>
+  <tbody>${rows}</tbody></table></body></html>`);
+  win.document.close();
+  win.print();
+}
+
+// ── Print Purchases ──────────────────────────────────────────
+function printPurchases(purchases) {
+  const rows = (purchases || []).map(p => `
+    <tr>
+      <td>${escHtml(p.invoice_number || '—')}</td>
+      <td>${escHtml(p.supplier_name || '—')}</td>
+      <td>${fmtDate(p.date)}</td>
+      <td>${fmt(p.total || 0)} د.أ</td>
+      <td>${p.status === 'received' ? 'مستلم' : 'معلّق'}</td>
+    </tr>`).join('');
+  const win = window.open('', '_blank');
+  win.document.write(`<html dir="rtl"><head><title>تقرير المشتريات</title>
+  <style>body{font-family:Arial;font-size:12px}table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid #ccc;padding:6px 8px;text-align:right}th{background:#f0f0f0}</style></head>
+  <body><h2>تقرير المشتريات</h2><table>
+  <thead><tr><th>رقم الفاتورة</th><th>المورد</th><th>التاريخ</th><th>الإجمالي</th><th>الحالة</th></tr></thead>
+  <tbody>${rows}</tbody></table></body></html>`);
+  win.document.close();
+  win.print();
+}
+
+// ── Print Expenses ───────────────────────────────────────────
+function printExpenses(expenses, salaries, advances) {
+  const expRows = (expenses || []).map(e => `
+    <tr><td>${fmtDate(e.expense_date)}</td><td>${escHtml(e.name)}</td>
+    <td>${escHtml(e.expense_type||'—')}</td><td>${fmt(e.amount)} د.أ</td></tr>`).join('');
+  const salRows = (salaries || []).map(s => `
+    <tr><td>${fmtDate(s.salary_month)}</td><td>${escHtml(s.employee_name)}</td>
+    <td>راتب</td><td>${fmt(s.salary_amount)} د.أ</td></tr>`).join('');
+  const advRows = (advances || []).map(a => `
+    <tr><td>${fmtDate(a.advance_date)}</td><td>${escHtml(a.employee_name)}</td>
+    <td>سلفة</td><td>${fmt(a.amount)} د.أ</td></tr>`).join('');
+  const win = window.open('', '_blank');
+  win.document.write(`<html dir="rtl"><head><title>تقرير المصاريف</title>
+  <style>body{font-family:Arial;font-size:12px}table{width:100%;border-collapse:collapse;margin-bottom:20px}
+  th,td{border:1px solid #ccc;padding:6px 8px;text-align:right}th{background:#f0f0f0}h3{margin-top:20px}</style></head>
+  <body>
+  <h2>تقرير المصاريف والرواتب والسلف</h2>
+  <h3>📋 المصاريف</h3><table>
+  <thead><tr><th>التاريخ</th><th>البيان</th><th>النوع</th><th>المبلغ</th></tr></thead>
+  <tbody>${expRows || '<tr><td colspan=4 style=text-align:center>لا توجد</td></tr>'}</tbody></table>
+  <h3>💼 الرواتب</h3><table>
+  <thead><tr><th>الشهر</th><th>الموظف</th><th>النوع</th><th>المبلغ</th></tr></thead>
+  <tbody>${salRows || '<tr><td colspan=4 style=text-align:center>لا توجد</td></tr>'}</tbody></table>
+  <h3>💵 السلف</h3><table>
+  <thead><tr><th>التاريخ</th><th>الموظف</th><th>النوع</th><th>المبلغ</th></tr></thead>
+  <tbody>${advRows || '<tr><td colspan=4 style=text-align:center>لا توجد</td></tr>'}</tbody></table>
+  </body></html>`);
+  win.document.close();
+  win.print();
 }
 
 function openSalaryModal() {
@@ -7019,6 +7324,25 @@ async function saveGeneralAdvance() {
     if (btn) { btn.disabled = false; btn.textContent = 'تسجيل السلفة'; }
   }
 }
+function openAdvanceModal(userId, employeeName) {
+  // Pre-fill the advance modal for a specific employee
+  openGeneralAdvanceModal();
+  // After modal opens, pre-select the employee
+  setTimeout(() => {
+    const sel = document.getElementById('gadv_employee_sel');
+    const nameField = document.getElementById('gadv_employee_name');
+    if (sel) {
+      for (const opt of sel.options) {
+        if (String(opt.value) === String(userId)) {
+          opt.selected = true;
+          break;
+        }
+      }
+    }
+    if (nameField) nameField.value = employeeName || '';
+  }, 50);
+}
+
 async function saveSalary() {
   const employeeName = document.getElementById('sal_employee_name')?.value?.trim();
   const amount = parseFloat(document.getElementById('sal_amount')?.value);
@@ -7604,6 +7928,176 @@ async function deleteSalary(id) {
     toast(e.message, 'error');
   }
 }
+
+async function viewEmployeeStatement(userId, employeeName) {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">📄 كشف حساب موظف — ${escHtml(employeeName)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div id="emp-stmt-content">
+      <div class="loading"><div class="spinner"></div><p>جاري التحميل...</p></div>
+    </div>
+  `, '780px');
+
+  try {
+    const data = await API.getEmployeeStatement(userId);
+    const el = document.getElementById('emp-stmt-content');
+    if (!el) return;
+
+    const salaries  = data.salaries  || [];
+    const advances  = data.advances  || [];
+    const totalSal  = parseFloat(data.total_salary   || 0);
+    const totalAdv  = parseFloat(data.total_advances || 0);
+    const net       = parseFloat(data.net_balance    || 0);
+
+    const salRows = salaries.map(s => `
+      <tr>
+        <td>${fmtDate(s.salary_month)}</td>
+        <td style="color:var(--gr);font-weight:700">+${fmt(s.salary_amount)} د.أ</td>
+        <td><span style="background:${s.status==='paid'?'var(--grl)':'var(--aml)'};
+                         color:${s.status==='paid'?'var(--gr)':'var(--am)'};
+                         padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">
+          ${s.status === 'paid' ? 'مدفوع' : 'معلّق'}
+        </span></td>
+        <td style="font-size:12px;color:var(--tx3)">${fmtDate(s.paid_date)}</td>
+        <td style="font-size:12px;color:var(--tx2)">${escHtml(s.notes || '—')}</td>
+        ${isAdmin() ? `<td>
+          <button class="btn btn-ghost btn-sm" onclick="openEditSalaryModal(${jsString(JSON.stringify(s))})">✏️</button>
+        </td>` : '<td></td>'}
+      </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد رواتب</td></tr>';
+
+    const advRows = advances.map(a => `
+      <tr>
+        <td>${fmtDate(a.advance_date)}</td>
+        <td style="color:var(--rd);font-weight:700">−${fmt(a.amount)} د.أ</td>
+        <td style="font-size:12px;color:var(--tx2)">${escHtml(a.advance_type || 'سلفة')}</td>
+        <td style="font-size:12px;color:var(--tx2)">${escHtml(a.notes || '—')}</td>
+        ${isAdmin() ? `<td>
+          <button class="btn btn-ghost btn-sm" onclick="openEditAdvanceModal(${jsString(JSON.stringify(a))})">✏️</button>
+        </td>` : '<td></td>'}
+      </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد سلف</td></tr>';
+
+    el.innerHTML = `
+      <!-- ملخص -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:18px">
+        <div style="background:var(--grl);border-radius:12px;padding:14px;text-align:center">
+          <div style="font-size:11px;color:var(--gr);font-weight:700;margin-bottom:4px">إجمالي الرواتب</div>
+          <div style="font-size:22px;font-weight:800;color:var(--gr)">${fmt(totalSal)} د.أ</div>
+        </div>
+        <div style="background:var(--rdl,#fff0f0);border-radius:12px;padding:14px;text-align:center">
+          <div style="font-size:11px;color:var(--rd);font-weight:700;margin-bottom:4px">إجمالي السلف</div>
+          <div style="font-size:22px;font-weight:800;color:var(--rd)">${fmt(totalAdv)} د.أ</div>
+        </div>
+        <div style="background:${net>=0?'var(--grl)':'var(--rdl,#fff0f0)'};border-radius:12px;padding:14px;text-align:center">
+          <div style="font-size:11px;color:${net>=0?'var(--gr)':'var(--rd)'};font-weight:700;margin-bottom:4px">الصافي المستحق</div>
+          <div style="font-size:22px;font-weight:800;color:${net>=0?'var(--gr)':'var(--rd)'}">${fmt(Math.abs(net))} د.أ</div>
+        </div>
+      </div>
+
+      <!-- الرواتب -->
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">💰 الرواتب</div>
+      <div style="border:1px solid var(--brd);border-radius:10px;overflow:hidden;margin-bottom:16px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:var(--bg)">
+            <tr>
+              <th style="padding:8px 12px;text-align:right">الشهر</th>
+              <th style="padding:8px 12px;text-align:right">المبلغ</th>
+              <th style="padding:8px 12px;text-align:right">الحالة</th>
+              <th style="padding:8px 12px;text-align:right">تاريخ الدفع</th>
+              <th style="padding:8px 12px;text-align:right">ملاحظات</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody>${salRows}</tbody>
+        </table>
+      </div>
+
+      <!-- السلف -->
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">➖ السلف والخصومات</div>
+      <div style="border:1px solid var(--brd);border-radius:10px;overflow:hidden;margin-bottom:16px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:var(--bg)">
+            <tr>
+              <th style="padding:8px 12px;text-align:right">التاريخ</th>
+              <th style="padding:8px 12px;text-align:right">المبلغ</th>
+              <th style="padding:8px 12px;text-align:right">النوع</th>
+              <th style="padding:8px 12px;text-align:right">ملاحظات</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody>${advRows}</tbody>
+        </table>
+      </div>
+
+      <!-- أزرار -->
+      <div style="display:flex;gap:8px;margin-top:4px">
+        ${isAccountant() ? `
+          <button class="btn btn-primary btn-sm"
+            onclick="closeModal(); openSalaryForEmployee(${userId}, ${jsString(employeeName)})">+ راتب</button>
+          <button class="btn btn-ghost btn-sm"
+            onclick="closeModal(); openAdvanceModal(${userId}, ${jsString(employeeName)})">+ سلفة</button>
+        ` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="printEmployeeStatement(${jsString(employeeName)}, ${jsString(JSON.stringify(data))})">🖨️ طباعة</button>
+        <button class="btn btn-ghost btn-sm" onclick="closeModal()">إغلاق</button>
+      </div>
+    `;
+  } catch (e) {
+    const el = document.getElementById('emp-stmt-content');
+    if (el) el.innerHTML = `<div class="alert alert-danger">${escHtml(e.message)}</div>`;
+  }
+}
+
+function printEmployeeStatement(name, data) {
+  const d = typeof data === 'string' ? JSON.parse(data) : data;
+  const salaries = d.salaries || [];
+  const advances = d.advances || [];
+
+  const salRows = salaries.map(s =>
+    `<tr><td>${s.salary_month ? s.salary_month.split('T')[0] : '—'}</td>
+     <td style="color:green">${Number(s.salary_amount||0).toFixed(3)} د.أ</td>
+     <td>${s.status==='paid'?'مدفوع':'معلّق'}</td>
+     <td>${escHtml(s.notes||'—')}</td></tr>`
+  ).join('') || '<tr><td colspan="4" style="text-align:center">لا توجد رواتب</td></tr>';
+
+  const advRows = advances.map(a =>
+    `<tr><td>${a.advance_date ? a.advance_date.split('T')[0] : '—'}</td>
+     <td style="color:red">− ${Number(a.amount||0).toFixed(3)} د.أ</td>
+     <td>${escHtml(a.advance_type||'سلفة')}</td>
+     <td>${escHtml(a.notes||'—')}</td></tr>`
+  ).join('') || '<tr><td colspan="4" style="text-align:center">لا توجد سلف</td></tr>';
+
+  const win = window.open('', '_blank');
+  win.document.write(`<html dir="rtl"><head><title>كشف حساب — ${escHtml(name)}</title>
+  <style>body{font-family:Arial;font-size:12px}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px}
+  th,td{border:1px solid #ccc;padding:6px 8px;text-align:right}
+  th{background:#f0f0f0;font-weight:bold}
+  .summary{display:flex;gap:12px;margin-bottom:16px}
+  .box{border:1px solid #ccc;border-radius:8px;padding:10px;flex:1;text-align:center}
+  .box .label{font-size:10px;color:#666;margin-bottom:4px}
+  .box .value{font-size:18px;font-weight:bold}</style></head>
+  <body>
+  <h2>كشف حساب موظف — ${escHtml(name)}</h2>
+  <div class="summary">
+    <div class="box"><div class="label">إجمالي الرواتب</div>
+      <div class="value" style="color:green">${Number(d.total_salary||0).toFixed(3)} د.أ</div></div>
+    <div class="box"><div class="label">إجمالي السلف</div>
+      <div class="value" style="color:red">${Number(d.total_advances||0).toFixed(3)} د.أ</div></div>
+    <div class="box"><div class="label">الصافي المستحق</div>
+      <div class="value" style="color:${(d.net_balance||0)>=0?'green':'red'}">${Number(Math.abs(d.net_balance||0)).toFixed(3)} د.أ</div></div>
+  </div>
+  <h3>💰 الرواتب</h3>
+  <table><thead><tr><th>الشهر</th><th>المبلغ</th><th>الحالة</th><th>ملاحظات</th></tr></thead>
+  <tbody>${salRows}</tbody></table>
+  <h3>➖ السلف والخصومات</h3>
+  <table><thead><tr><th>التاريخ</th><th>المبلغ</th><th>النوع</th><th>ملاحظات</th></tr></thead>
+  <tbody>${advRows}</tbody></table>
+  </body></html>`);
+  win.document.close();
+  win.print();
+}
+
 function openExpensePageModal() {
   openModal(`
     <div class="modal-header">

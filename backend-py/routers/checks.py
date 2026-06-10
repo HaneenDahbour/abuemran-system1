@@ -112,7 +112,7 @@ async def create_check(data: CheckRequest, user=Depends(get_current_user)):
             RETURNING *
             """,
             data.client_id,
-            safe_uuid(user.get("id")),
+            user.get("id"),
             data.check_number,
             data.bank_name,
             data.owner_name,
@@ -138,7 +138,7 @@ async def create_check(data: CheckRequest, user=Depends(get_current_user)):
                 INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
                 VALUES ($1,$2,'Ø£Ø¶Ø§Ù Ø´ÙŠÙƒ','check',$3,$4)
                 """,
-                safe_uuid(user.get("id")),
+                user.get("id"),
                 user.get("full_name"),
                 new_check["id"],
                 f"Ø´ÙŠÙƒ #{data.check_number} â€” {data.amount} Ø¯.Ø£",
@@ -181,7 +181,7 @@ async def update_check_status(
             RETURNING *
             """,
             data.status,
-            safe_uuid(user.get("id")),
+            user.get("id"),
             check_id,
         )
 
@@ -212,7 +212,7 @@ async def update_check_status(
                 INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
                 VALUES ($1,$2,$3,'check',$4,$5)
                 """,
-                safe_uuid(user.get("id")),
+                user.get("id"),
                 user.get("full_name"),
                 action,
                 check_id,
@@ -249,7 +249,7 @@ async def delete_check(check_id: int, user=Depends(get_current_user)):
                 INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
                 VALUES ($1,$2,'Ø­Ø°Ù Ø´ÙŠÙƒ','check',$3,$4)
                 """,
-                safe_uuid(user.get("id")),
+                user.get("id"),
                 user.get("full_name"),
                 check_id,
                 f"Ø­Ø°Ù Ø´ÙŠÙƒ #{deleted['check_number']}",

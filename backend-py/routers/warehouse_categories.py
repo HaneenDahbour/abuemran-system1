@@ -46,8 +46,8 @@ async def insert_category_audit(conn, user, action: str, detail: str):
             INSERT INTO audit_log (user_id, user_name, action, detail)
             VALUES ($1, $2, $3, $4)
             """,
-            safe_uuid(user.get("id")),
-            user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
+            user.get("id"),
+            user.get("full_name") or user.get("username") or "مستخدم",
             action,
             detail,
         )

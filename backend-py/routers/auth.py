@@ -205,6 +205,32 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
     result["generated_password"] = password
     return result
 
+@router.put("/users/{user_id}")
+async def update_user(user_id: int, data: CreateUserRequest, user=Depends(get_current_user)):
+    require_role(user, "admin")
+    full_name = str(data.full_name or "").strip()
+    if not full_name:
+        raise HTTPException(status_code=400, detail="الاسم مطلوب")
+    valid_roles = ["admin", "accountant", "employee", "client", "recipient"]
+    if data.role not in valid_roles:
+        raise HTTPException(status_code=400, detail="الصلاحية غير صالحة")
+    pool = await get_pool()
+    updates = ["full_name=$1", "role=$2", "client_id=$3", "recipient_name=$4"]
+    params = [full_name, data.role, data.client_id, data.recipient_name]
+    if data.password:
+        hashed = pwd_context.hash(data.password)
+        updates.append(f"password_hash=${len(params)+1}")
+        params.append(hashed)
+    params.append(user_id)
+    row = await pool.fetchrow(
+        f"UPDATE users SET {', '.join(updates)} WHERE id=${len(params)} RETURNING id, username, full_name, role, client_id, recipient_name",
+        *params
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+    return dict(row)
+
+
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
