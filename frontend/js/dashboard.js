@@ -3124,6 +3124,14 @@ async function saveCheck() {
     toast('تمت إضافة الشيك ✅', 'success');
     closeModal();
 
+    // If the check was added from a client statement, go back to it
+    if (window._checkReturnTo) {
+      const rt = window._checkReturnTo;
+      window._checkReturnTo = null;
+      viewClientStatement(rt.clientId, rt.clientName);
+      return;
+    }
+
     result.client_name = (window._clientsCache || []).find(c => String(c.id) === String(client_id))?.name || '—';
     result.status = result.status || 'pending';
 
@@ -7826,6 +7834,53 @@ async function deleteEmployee(id, name) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+// Print a single invoice WITH its item details, from anywhere
+async function printInvoiceById(invoiceId) {
+  let inv = (window._invoicesCache || []).find(x => String(x.id) === String(invoiceId));
+  if (!inv) {
+    try {
+      const all = await API.getInvoices();
+      window._invoicesCache = all || [];
+      inv = (all || []).find(x => String(x.id) === String(invoiceId));
+    } catch { /* handled below */ }
+  }
+  if (!inv) { toast('تعذر تحميل بيانات الفاتورة للطباعة', 'error'); return; }
+  printInvoice(inv);
+}
+
+// Open the add-check modal pre-locked to a specific client, then return to their statement
+function openCheckModalForClient(clientId, clientName) {
+  window._checkReturnTo = { clientId, clientName };
+  openCheckModal();
+  setTimeout(() => {
+    const sel = document.getElementById('chk_client');
+    if (sel) {
+      sel.value = String(clientId);
+      sel.disabled = true;
+      sel.style.opacity = '.7';
+    }
+  }, 50);
+}
+
+async function updateCheckFromStatement(id, status, clientId, clientName) {
+  const label = status === 'cashed' ? 'تحصيل' : 'إرجاع';
+  if (!confirm(`${label} هذا الشيك؟`)) return;
+  try {
+    await API.updateCheckStatus(id, status);
+    toast(status === 'cashed' ? 'تم تحصيل الشيك ✅' : 'تم تسجيل الشيك كمرتجع ↩️', 'success');
+    viewClientStatement(clientId, clientName);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteCheckFromStatement(id, clientId, clientName) {
+  if (!confirm('حذف هذا الشيك نهائياً؟')) return;
+  try {
+    await API.deleteCheck(id);
+    toast('تم حذف الشيك ✅', 'success');
+    viewClientStatement(clientId, clientName);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 async function viewClientStatement(id, name) {
   openModal(`
     <div class="modal-header">
@@ -7838,7 +7893,11 @@ async function viewClientStatement(id, name) {
   `, '780px');
 
   try {
-    const data = await API.getClientStatement(id);
+    const [data, allChecks] = await Promise.all([
+      API.getClientStatement(id),
+      API.getChecks().catch(() => []),
+    ]);
+    const clientChecks = (allChecks || []).filter(c => String(c.client_id) === String(id));
     const el = document.getElementById('stmt-content');
     if (!el) return;
 
@@ -7961,7 +8020,10 @@ async function viewClientStatement(id, name) {
                 </td>
                 <td style="padding:10px 12px;font-weight:600">
                   ${isInv
-          ? `فاتورة #${escHtml(t.description || t.id)}`
+          ? `فاتورة #${escHtml(t.description || t.id)}
+             <button class="btn btn-ghost btn-sm" title="طباعة الفاتورة بالتفاصيل"
+                     style="font-size:10px;padding:1px 7px;margin-right:4px"
+                     onclick="printInvoiceById(${Number(t.id) || 0})">🖨️</button>`
           : `<span style="color:#057a55">مقبوضة</span>${t.notes
             ? ' — ' + escHtml(
               String(t.notes)
@@ -8016,6 +8078,59 @@ async function viewClientStatement(id, name) {
               </td>
             </tr>
           </tfoot>
+        </table>
+      </div>
+
+      <!-- الشيكات -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px">
+        <div style="font-weight:700;font-size:13px">
+          🏦 شيكات العميل
+          ${clientChecks.length ? `<span style="font-size:11px;color:var(--tx3)">(${clientChecks.length})</span>` : ''}
+        </div>
+        ${isAccountant() ? `
+          <button class="btn btn-primary btn-sm"
+            onclick="openCheckModalForClient(${id}, ${jsString(name)})">+ إضافة شيك</button>` : ''}
+      </div>
+      <div style="border:1px solid var(--brd);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:#f5f3f0">
+            <tr>
+              <th style="padding:8px 12px;text-align:right;font-size:10px;color:#9e9a94">رقم الشيك</th>
+              <th style="padding:8px 12px;text-align:right;font-size:10px;color:#9e9a94">البنك</th>
+              <th style="padding:8px 12px;text-align:right;font-size:10px;color:#9e9a94">المبلغ</th>
+              <th style="padding:8px 12px;text-align:right;font-size:10px;color:#9e9a94">الاستحقاق</th>
+              <th style="padding:8px 12px;text-align:right;font-size:10px;color:#9e9a94">الحالة</th>
+              <th style="padding:8px 12px"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${clientChecks.length ? clientChecks.map(ch => {
+        const today = new Date().toISOString().split('T')[0];
+        const overdue = ch.status === 'pending' && String(ch.due_date || '').split('T')[0] < today;
+        const stBadge = {
+          pending: `<span class="badge badge-amber">${overdue ? '⚠️ متأخر' : '⏳ معلّق'}</span>`,
+          cashed: '<span class="badge badge-green">✅ محصَّل</span>',
+          returned: '<span class="badge badge-red">↩️ مرتجع</span>',
+          cancelled: '<span class="badge badge-gray">ملغى</span>',
+        }[ch.status] || escHtml(ch.status || '—');
+        return `<tr style="border-top:1px solid #f0ede8;${overdue ? 'background:#fff5f5' : ''}">
+              <td style="padding:8px 12px;font-weight:700">#${escHtml(ch.check_number || '—')}</td>
+              <td style="padding:8px 12px;color:var(--tx2)">${escHtml(ch.bank_name || '—')}</td>
+              <td style="padding:8px 12px;font-weight:800">${fmt(ch.amount)} د.أ</td>
+              <td style="padding:8px 12px;color:${overdue ? 'var(--rd)' : 'var(--tx3)'}">${fmtDate(ch.due_date)}</td>
+              <td style="padding:8px 12px">${stBadge}</td>
+              <td style="padding:8px 12px;white-space:nowrap">
+                ${ch.status === 'pending' && isAccountant() ? `
+                  <button class="btn btn-success btn-sm" onclick="updateCheckFromStatement(${ch.id},'cashed',${id},${jsString(name)})">✅</button>
+                  <button class="btn btn-ghost btn-sm" onclick="updateCheckFromStatement(${ch.id},'returned',${id},${jsString(name)})">↩️</button>` : ''}
+                ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCheckFromStatement(${ch.id},${id},${jsString(name)})">🗑️</button>` : ''}
+              </td>
+            </tr>`;
+      }).join('') : `
+            <tr><td colspan="6" style="text-align:center;padding:20px;color:#9e9a94">
+              لا توجد شيكات لهذا العميل${isAccountant() ? ' — أضيفي أول شيك من الزر أعلاه' : ''}
+            </td></tr>`}
+          </tbody>
         </table>
       </div>
 
