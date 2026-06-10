@@ -908,7 +908,7 @@ async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
                     FROM invoices inv
                     LEFT JOIN clients c ON c.id = inv.client_id
                     WHERE inv.id=$1
-                    FOR UPDATE
+                    FOR UPDATE OF inv
                     """,
                     invoice_id,
                 )
