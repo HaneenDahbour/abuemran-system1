@@ -84,7 +84,9 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)    
                 inv_sum.invoice_count,
                 inv_sum.total_invoiced,
                 inv_sum.employee_names,
-                inv_sum.invoice_paid + COALESCE(pay_sum.extra_paid, 0) AS total_paid
+                -- المدفوع = سجلات المقبوضات فقط — الدفعة الأولية للفاتورة تُسجَّل
+                -- تلقائياً كمقبوضة عند الاعتماد، فجمعها مرتين يضخّم المدفوع
+                COALESCE(pay_sum.extra_paid, 0) AS total_paid
             FROM inv_sum
             LEFT JOIN pay_sum
               ON LOWER(TRIM(pay_sum.name)) = LOWER(TRIM(inv_sum.name))
