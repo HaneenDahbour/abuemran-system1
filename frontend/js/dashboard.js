@@ -66,7 +66,7 @@ if (typeof fmtDate !== 'function') {
     if (!value) return '—';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString('ar-JO', {
+    return d.toLocaleDateString('ar-JO-u-nu-latn', {
       year: 'numeric',
       month: 'short',
       day: 'numeric'
@@ -749,7 +749,7 @@ async function renderDashboard(container) {
     <div class="page-header">
       <div>
         <div class="page-title">لوحة التحكم</div>
-        <div class="page-sub">مرحباً ${escHtml(user.full_name || user.name || user.username || 'مستخدم')} — ${new Date().toLocaleDateString('ar-JO', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+        <div class="page-sub">مرحباً ${escHtml(user.full_name || user.name || user.username || 'مستخدم')} — ${new Date().toLocaleDateString('ar-JO-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
       </div>
     </div>
 
@@ -5558,7 +5558,7 @@ function printStatement(name, data) {
     <div class="header">
       <h1>مجموعة أبو عمران التجارية</h1>
       <h2>كشف حساب — ${escHtml(name)}</h2>
-      <p>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-JO')}</p>
+      <p>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-JO-u-nu-latn')}</p>
     </div>
     <p><strong>الرصيد الحالي:</strong> ${fmt(data.balance)} دينار أردني</p><br>
     <table>
@@ -5595,7 +5595,7 @@ function printPayments(payments) {
     </style>
   </head><body>
     <h1>📦 مجموعة أبو عمران — تقرير المقبوضات</h1>
-    <p style="color:#888">${new Date().toLocaleDateString('ar-JO', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+    <p style="color:#888">${new Date().toLocaleDateString('ar-JO-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
     <table>
       <thead><tr><th>#</th><th>العميل</th><th>المبلغ</th><th>التاريخ</th><th>ملاحظات</th></tr></thead>
       <tbody>
@@ -5631,7 +5631,7 @@ function printChecks(checks) {
     </style>
   </head><body>
     <h1>📦 مجموعة أبو عمران — تقرير الشيكات</h1>
-    <p style="color:#888">${new Date().toLocaleDateString('ar-JO', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+    <p style="color:#888">${new Date().toLocaleDateString('ar-JO-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
     <table>
       <thead><tr><th>#</th><th>العميل</th><th>رقم الشيك</th><th>المبلغ</th><th>الاستحقاق</th><th>الحالة</th></tr></thead>
       <tbody>
@@ -5670,7 +5670,7 @@ function printClients(clients) {
     </style>
   </head><body>
     <h1>📦 مجموعة أبو عمران — تقرير العملاء</h1>
-    <p style="color:#888">${new Date().toLocaleDateString('ar-JO', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+    <p style="color:#888">${new Date().toLocaleDateString('ar-JO-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
     <table>
       <thead><tr><th>#</th><th>اسم العميل</th><th>القسم</th><th>الرصيد</th><th>حد الائتمان</th><th>الخطر</th><th>الهاتف</th></tr></thead>
       <tbody>
@@ -5705,7 +5705,7 @@ function printUsers(users) {
     </style>
   </head><body>
     <h1>📦 مجموعة أبو عمران — تقرير المستخدمين</h1>
-    <p style="color:#888">${new Date().toLocaleDateString('ar-JO', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+    <p style="color:#888">${new Date().toLocaleDateString('ar-JO-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
     <table>
       <thead><tr><th>#</th><th>الاسم الكامل</th><th>اسم المستخدم</th><th>الصلاحية</th><th>تاريخ الإنشاء</th></tr></thead>
       <tbody>
@@ -5738,7 +5738,7 @@ function printInvoicesList(invoices) {
     </style>
   </head><body>
     <h1>📦 مجموعة أبو عمران — تقرير الفواتير</h1>
-    <p style="color:#888">${new Date().toLocaleDateString('ar-JO', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+    <p style="color:#888">${new Date().toLocaleDateString('ar-JO-u-nu-latn', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
     <table>
       <thead><tr><th>#</th><th>رقم الفاتورة</th><th>العميل</th><th>صافي</th><th>ضريبة</th><th>الإجمالي</th><th>التاريخ</th></tr></thead>
       <tbody>
@@ -5772,7 +5772,7 @@ async function renderAnalytics(container) {
     <div class="page-header">
       <div>
         <div class="page-title">📊 لوحة التحليلات</div>
-        <div class="page-sub">تحليل مالي ذكي شامل — ${new Date().toLocaleDateString('ar-JO', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+        <div class="page-sub">تحليل مالي ذكي شامل — ${new Date().toLocaleDateString('ar-JO-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
       </div>
       <button class="btn btn-primary" onclick="refreshAnalytics()">🔄 تحديث</button>
     </div>
@@ -5920,7 +5920,7 @@ async function loadSalesChart(period = 'weekly') {
       const x = PAD + i * ((W - PAD * 2) / Math.min(sales.length, 12));
       const pay = payments[i] ? parseFloat(payments[i].total_collected || 0) : 0;
       const ph = (pay / maxVal) * H;
-      const label = new Date(s.period).toLocaleDateString('ar-JO', period === 'monthly' ? { month: 'short' } : { month: 'short', day: 'numeric' });
+      const label = new Date(s.period).toLocaleDateString('ar-JO-u-nu-latn', period === 'monthly' ? { month: 'short' } : { month: 'short', day: 'numeric' });
       return `
         <rect x="${x}" y="${H - h}" width="${barW}" height="${h}" fill="#1a4fd6" rx="3" opacity=".85"></rect>
         <rect x="${x + barW + 2}" y="${H - ph}" width="${barW}" height="${ph}" fill="#0a7650" rx="3" opacity=".85"></rect>
@@ -6852,22 +6852,36 @@ async function renderExpenses(container) {
             </tr>
           </thead>
           <tbody>
-            ${salaries.length ? salaries.map(s => `
+            ${salaries.length ? salaries.map(s => {
+        // سُلف نفس الشهر لنفس الموظف — لعرض المتبقي من الراتب
+        const ym = String(s.salary_month || '').slice(0, 7);
+        const advSum = (advances || [])
+          .filter(a => String(a.user_id) === String(s.employee_user_id)
+                    && String(a.advance_date || '').slice(0, 7) === ym)
+          .reduce((t, x) => t + Number(x.amount || 0), 0);
+        const remaining = Math.max(Number(s.salary_amount || 0) - advSum, 0);
+        return `
               <tr>
                 <td>${fmtDate(s.salary_month)}</td>
                 <td><strong>${escHtml(s.employee_name || '—')}</strong></td>
                 <td style="font-weight:800;color:var(--gr)">${fmt(s.salary_amount)} د.أ</td>
                 <td>${fmtDate(s.paid_date)}</td>
-                <td><span class="badge ${s.status === 'paid' ? 'badge-green' : 'badge-amber'}">
-                  ${s.status === 'paid' ? 'مدفوع' : 'غير مدفوع'}
-                </span></td>
+                <td>
+                  <span class="badge ${s.status === 'paid' ? 'badge-green' : 'badge-amber'}">
+                    ${s.status === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+                  </span>
+                  ${s.status !== 'paid' && advSum > 0 ? `
+                    <div style="font-size:10px;color:#9a4500;margin-top:4px;font-weight:700">
+                      سُلف الشهر: ${fmt(advSum)} — المتبقي: ${fmt(remaining)} د.أ
+                    </div>` : ''}
+                </td>
                 <td>${escHtml(s.notes || '—')}</td>
                 <td><div style="display:flex;gap:6px">
                   ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editSalaryById(${s.id})">✏️</button>` : ''}
                   ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary(${s.id})">🗑️</button>` : ''}
                 </div></td>
-              </tr>
-            `).join('') : emptyRow('لا توجد رواتب', 7)}
+              </tr>`;
+      }).join('') : emptyRow('لا توجد رواتب', 7)}
           </tbody>
         </table>
       </div>

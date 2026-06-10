@@ -59,6 +59,7 @@ async def get_system_context(user: dict, pool) -> dict:
                     (SELECT COUNT(*) FROM checks WHERE status='pending') AS pending_checks,
                     (SELECT COUNT(*) FROM payments WHERE status='pending') AS pending_payments
                 FROM invoices i
+                WHERE COALESCE(i.status, 'approved') = 'approved'
                 """)
             context["stats"] = row_to_dict(stats)
 
@@ -320,6 +321,7 @@ async def ai_analytics(
                 COUNT(*) AS invoice_count
             FROM invoices
             WHERE date >= NOW() - INTERVAL '{interval}'
+              AND COALESCE(status, 'approved') = 'approved'
             GROUP BY 1
             ORDER BY 1 ASC
             """)

@@ -345,20 +345,34 @@ async def settle_advance_against_salary(pool, user_id, employee_name, amount, ad
         return result
 
     try:
-        base_salary = float(
-            await pool.fetchval(
-                "SELECT COALESCE(base_salary, 0) FROM users WHERE id=$1", user_id
-            ) or 0
-        )
-        if base_salary <= 0:
-            return result  # لا راتب أساسي معرّف — لا تسوية
-
         month_start = advance_date.replace(day=1)
         next_month = (
             month_start.replace(year=month_start.year + 1, month=1)
             if month_start.month == 12
             else month_start.replace(month=month_start.month + 1)
         )
+
+        salary_row = await pool.fetchrow(
+            """
+            SELECT id, status, salary_amount FROM employee_salaries
+            WHERE employee_user_id=$1 AND salary_month >= $2 AND salary_month < $3
+            ORDER BY id LIMIT 1
+            """,
+            user_id, month_start, next_month,
+        )
+
+        base_salary = float(
+            await pool.fetchval(
+                "SELECT COALESCE(base_salary, 0) FROM users WHERE id=$1", user_id
+            ) or 0
+        )
+
+        # لا راتب أساسي في ملف الموظف؟ استخدمي راتب الشهر المسجَّل يدوياً كهدف للتسوية
+        if base_salary <= 0 and salary_row:
+            base_salary = float(salary_row["salary_amount"] or 0)
+
+        if base_salary <= 0:
+            return result  # لا راتب أساسي ولا راتب شهري مسجَّل — لا تسوية
 
         month_advances = float(
             await pool.fetchval(
@@ -368,15 +382,6 @@ async def settle_advance_against_salary(pool, user_id, employee_name, amount, ad
                 """,
                 user_id, month_start, next_month,
             ) or 0
-        )
-
-        salary_row = await pool.fetchrow(
-            """
-            SELECT id, status FROM employee_salaries
-            WHERE employee_user_id=$1 AND salary_month >= $2 AND salary_month < $3
-            ORDER BY id LIMIT 1
-            """,
-            user_id, month_start, next_month,
         )
 
         result["base_salary"] = round(base_salary, 3)

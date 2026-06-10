@@ -112,7 +112,7 @@ function renderSearchDropdown(data, q, dd) {
   };
 
   const fmt = (n) =>
-    parseFloat(n || 0).toLocaleString("ar-JO", { minimumFractionDigits: 2 });
+    parseFloat(n || 0).toLocaleString("ar-JO-u-nu-latn", { minimumFractionDigits: 2 });
 
   let html = `<div style="padding:8px 12px; font-size:11px; color:#9e9a94; border-bottom:1px solid #f0ede8">${total} نتيجة</div>`;
 
@@ -168,7 +168,7 @@ function renderSearchDropdown(data, q, dd) {
           <div style="text-align:left;flex-shrink:0">
             <div style="font-size:12px;font-weight:700">${fmt(inv.total_amount)} د.أ</div>
             <div style="font-size:10px;color:#9e9a94">
-              ${inv.date ? new Date(inv.date).toLocaleDateString("ar-JO") : ""}
+              ${inv.date ? new Date(inv.date).toLocaleDateString("ar-JO-u-nu-latn") : ""}
             </div>
           </div>
         </div>`;

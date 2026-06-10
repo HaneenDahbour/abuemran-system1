@@ -1075,7 +1075,7 @@
           let dateLabel = '';
           const dt = new Date(s.period);
           if (!Number.isNaN(dt.getTime())) {
-            dateLabel = dt.toLocaleDateString('ar-JO', {
+            dateLabel = dt.toLocaleDateString('ar-JO-u-nu-latn', {
               month: 'short',
               day: period === 'monthly' ? undefined : 'numeric'
             });

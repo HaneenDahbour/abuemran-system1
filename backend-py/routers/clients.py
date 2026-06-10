@@ -76,6 +76,7 @@ async def get_clients(user=Depends(get_current_user)):
                          SELECT SUM(i.total_amount)
                          FROM invoices i
                          WHERE i.client_id = c.id
+                           AND COALESCE(i.status, 'approved') = 'approved'
                        ), 0)
                        -
                        COALESCE((
@@ -102,6 +103,7 @@ async def get_clients(user=Depends(get_current_user)):
                          SELECT SUM(i.total_amount)
                          FROM invoices i
                          WHERE i.client_id = c.id
+                           AND COALESCE(i.status, 'approved') = 'approved'
                        ), 0)
                        -
                        COALESCE((
@@ -138,6 +140,7 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
                      SELECT SUM(i.total_amount)
                      FROM invoices i
                      WHERE i.client_id = c.id
+                       AND COALESCE(i.status, 'approved') = 'approved'
                    ), 0)
                    -
                    COALESCE((
