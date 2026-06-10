@@ -253,6 +253,15 @@ async def add_payment(data: PaymentIn, user=Depends(get_current_user)):
             date.fromisoformat(data.payment_date) if data.payment_date else date.today()
         )
 
+        # ربط تلقائي بالعميل عبر الاسم إذا لم يُمرَّر client_id —
+        # حتى يتطابق كشف العميل مع كشف زبائن الفواتير دائماً
+        linked_client_id = data.client_id
+        if not linked_client_id:
+            linked_client_id = await pool.fetchval(
+                "SELECT id FROM clients WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) LIMIT 1",
+                data.recipient_name,
+            )
+
         row = await pool.fetchrow(
             """
             INSERT INTO recipient_payments
@@ -261,7 +270,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         """,
             data.recipient_name.strip(),
-            data.client_id,
+            linked_client_id,
             data.invoice_id,
             round(data.amount, 3),
             data.payment_method or "cash",
