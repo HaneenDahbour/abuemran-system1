@@ -2749,7 +2749,13 @@ async function approveInvoice(id) {
 
   } catch (e) {
     if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
-    toast(e.message, 'error');
+    // Stale row (invoice already approved/changed elsewhere) — reload the list
+    if (String(e.message || '').includes('المعلّقة فقط')) {
+      toast('هذه الفاتورة معتمدة مسبقاً — يتم تحديث القائمة...', 'info');
+      navigateTo('invoices');
+    } else {
+      toast(e.message, 'error');
+    }
   }
 }
 
