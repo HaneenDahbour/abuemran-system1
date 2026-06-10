@@ -6696,6 +6696,11 @@ async function renderExpenses(container) {
     ]);
   } catch (e) { expenses = []; salaries = []; advances = []; }
 
+  // Cache for edit-by-id lookups
+  window._expensesCache = expenses || [];
+  window._salariesCache = salaries || [];
+  window._advancesCache = advances || [];
+
   const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
   const totalAdvances = advances.reduce((s, e) => s + Number(e.amount || 0), 0);
@@ -6774,9 +6779,10 @@ async function renderExpenses(container) {
                 <td>${escHtml(e.category || '—')}</td>
                 <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
                 <td>${escHtml(e.notes || '—')}</td>
-                <td>${isAdmin()
-      ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">🗑️</button>`
-      : '—'}</td>
+                <td><div style="display:flex;gap:6px">
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editExpenseById(${e.id})">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">🗑️</button>` : ''}
+                </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد مصاريف', 7)}
           </tbody>
@@ -6805,9 +6811,10 @@ async function renderExpenses(container) {
                   ${s.status === 'paid' ? 'مدفوع' : 'غير مدفوع'}
                 </span></td>
                 <td>${escHtml(s.notes || '—')}</td>
-                <td>${isAdmin()
-          ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary(${s.id})">🗑️</button>`
-          : '—'}</td>
+                <td><div style="display:flex;gap:6px">
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editSalaryById(${s.id})">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary(${s.id})">🗑️</button>` : ''}
+                </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد رواتب', 7)}
           </tbody>
@@ -6834,9 +6841,10 @@ async function renderExpenses(container) {
                 <td style="font-weight:800;color:var(--rd)">${fmt(a.amount)} د.أ</td>
                 <td>${escHtml(a.advance_type || 'advance')}</td>
                 <td>${escHtml(a.notes || '—')}</td>
-                <td>${isAdmin()
-              ? `<button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromExpenses(${a.id})">🗑️</button>`
-              : '—'}</td>
+                <td><div style="display:flex;gap:6px">
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editAdvanceById(${a.id})">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromExpenses(${a.id})">🗑️</button>` : ''}
+                </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد سلف', 6)}
           </tbody>
@@ -6862,6 +6870,23 @@ async function deleteAdvanceFromExpenses(id) {
     toast('تم الحذف ✅', 'success');
     navigateTo('expenses');
   } catch (e) { toast(e.message, 'error'); }
+}
+
+// ── Edit by id (from cached lists) ───────────────────────────
+function editExpenseById(id) {
+  const e = (window._expensesCache || []).find(x => String(x.id) === String(id));
+  if (!e) { toast('لم يتم العثور على المصروف', 'error'); return; }
+  openEditExpenseModal(e);
+}
+function editSalaryById(id) {
+  const s = (window._salariesCache || []).find(x => String(x.id) === String(id));
+  if (!s) { toast('لم يتم العثور على الراتب', 'error'); return; }
+  openEditSalaryModal(s);
+}
+function editAdvanceById(id) {
+  const a = (window._advancesCache || []).find(x => String(x.id) === String(id));
+  if (!a) { toast('لم يتم العثور على السلفة', 'error'); return; }
+  openEditAdvanceModal(a);
 }
 
 // ── Edit Expense ─────────────────────────────────────────────
@@ -6975,6 +7000,10 @@ function openEditSalaryModal(s) {
         </select>
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="es_notes" value="${escHtml(s.notes || '')}">
+    </div>
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-primary" style="flex:1" onclick="saveEditSalary(${s.id})">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
@@ -6989,12 +7018,16 @@ async function saveEditSalary(id) {
   if (!salary_amount || salary_amount <= 0) { toast('الراتب غير صحيح', 'error'); return; }
   const btn = document.querySelector('#global-modal .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  // Preserve the employee link + notes — backend overwrites them with whatever we send
+  const orig = (window._salariesCache || []).find(x => String(x.id) === String(id));
   try {
     await API.updateSalary(id, {
+      employee_user_id: orig?.employee_user_id ?? null,
       employee_name, salary_amount,
       salary_month: document.getElementById('es_month')?.value,
       paid_date:    document.getElementById('es_paid')?.value,
       status:       document.getElementById('es_status')?.value || 'paid',
+      notes:        document.getElementById('es_notes')?.value || null,
     });
     toast('تم تحديث الراتب ✅', 'success');
     closeModal();
@@ -7046,8 +7079,12 @@ async function saveEditAdvance(id) {
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
   const btn = document.querySelector('#global-modal .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  // Preserve the employee link + type — backend overwrites them with whatever we send
+  const orig = (window._advancesCache || []).find(x => String(x.id) === String(id));
   try {
     await API.updateAdvance(id, {
+      user_id:      orig?.user_id ?? null,
+      advance_type: orig?.advance_type || 'advance',
       employee_name, amount,
       advance_date: document.getElementById('ea_date')?.value,
       notes:        document.getElementById('ea_notes')?.value || null,
@@ -7396,30 +7433,7 @@ function openAdvanceModal(userId, employeeName) {
   }, 50);
 }
 
-async function saveSalary() {
-  const employeeName = document.getElementById('sal_employee_name')?.value?.trim();
-  const amount = parseFloat(document.getElementById('sal_amount')?.value);
-
-  if (!employeeName) { toast('اسم الموظف مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('قيمة الراتب غير صحيحة', 'error'); return; }
-
-  try {
-    await API.createSalary({
-      employee_name: employeeName,
-      salary_amount: amount,
-      salary_month: document.getElementById('sal_month')?.value,
-      paid_date: document.getElementById('sal_paid_date')?.value,
-      status: document.getElementById('sal_status')?.value || 'paid',
-      notes: document.getElementById('sal_notes')?.value || null,
-    });
-
-    toast('تم حفظ الراتب ✅', 'success');
-    closeModal();
-    navigateTo('expenses');
-  } catch (e) {
-    toast(e.message, 'error');
-  }
-}
+// (duplicate saveSalary removed — the canonical version above includes employee_user_id)
 
 async function deleteExpense(id) {
   if (!confirm('حذف هذا المصروف؟')) return;
@@ -8151,90 +8165,7 @@ function printEmployeeStatement(name, data) {
   win.print();
 }
 
-function openExpensePageModal() {
-  openModal(`
-    <div class="modal-header">
-      <div class="modal-title">📋 إضافة مصروف</div>
-      <button class="modal-close" onclick="closeModal()">✕</button>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">اسم المصروف *</label>
-      <input class="form-input" id="pg_exp_name" placeholder="مثال: كهرباء، أجار، بنزين">
-    </div>
-
-    <div class="form-row">
-      <div class="form-group">
-        <label class="form-label">المبلغ *</label>
-        <input class="form-input" id="pg_exp_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
-      </div>
-      <div class="form-group">
-        <label class="form-label">التاريخ</label>
-        <input class="form-input" id="pg_exp_date" type="date" value="${new Date().toISOString().split('T')[0]}">
-      </div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">التصنيف</label>
-      <input class="form-input" id="pg_exp_category" placeholder="تشغيل، نقل، مكتب...">
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">ملاحظات</label>
-      <input class="form-input" id="pg_exp_notes" placeholder="اختياري">
-    </div>
-
-    <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="savePageExpense()">حفظ</button>
-      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
-    </div>
-  `);
-}
-
-async function savePageExpense() {
-  const name = document.getElementById('pg_exp_name')?.value?.trim();
-  const amount = parseFloat(document.getElementById('pg_exp_amount')?.value);
-
-  if (!name) {
-    toast('اسم المصروف مطلوب', 'error');
-    return;
-  }
-
-  if (!amount || amount <= 0) {
-    toast('المبلغ غير صحيح', 'error');
-    return;
-  }
-
-  const btn = document.querySelector('#global-modal .btn-primary');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = 'جاري الحفظ...';
-  }
-
-  try {
-    await API.createExpense({
-      name,
-      amount,
-      expense_type: 'daily',
-      category: document.getElementById('pg_exp_category')?.value || null,
-      expense_date: document.getElementById('pg_exp_date')?.value,
-      notes: document.getElementById('pg_exp_notes')?.value || null,
-      is_fixed: false,
-    });
-
-    toast('تم حفظ المصروف ✅', 'success');
-    closeModal();
-    navigateTo('expenses');
-  } catch (e) {
-    toast(e.message, 'error');
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = 'حفظ';
-    }
-  }
-}
-
-// ===== FINAL OVERRIDE: Expense modal with daily/monthly/fixed =====
+// ===== Expense modal with daily/monthly/fixed =====
 function openExpensePageModal() {
   openModal(`
     <div class="modal-header">
