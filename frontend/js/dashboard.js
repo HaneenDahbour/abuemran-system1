@@ -2086,15 +2086,19 @@ function addInvoiceItemRow(item = null) {
   const description = item?.description || item?.product_name || '';
 
   let qty = Number(item?.quantity || 0);
-  const unit = Number(item?.unit_price || 0);
-  const lineTotal = Number(item?.line_total || item?.total || (qty * unit) || 0);
-
-  if ((!qty || qty <= 0) && unit > 0 && lineTotal > 0) {
-    qty = lineTotal / unit;
-  }
-
+  let unit = Number(item?.unit_price || 0);
+  let lineTotal = Number(item?.line_total || item?.total || 0);
   const packQty = Number(item?.package_qty || 12);
-  const packPrice = Number(item?.package_price || (unit > 0 ? unit * packQty : 0));
+  let packPrice = Number(item?.package_price || 0);
+
+  // Reconstruct missing values from whatever IS stored, so old/partial
+  // rows don't open as zeros: any one of (unit, line total, pack price)
+  // is enough to derive the others.
+  if (!unit && lineTotal > 0 && qty > 0) unit = lineTotal / qty;
+  if (!unit && packPrice > 0 && packQty > 0) unit = packPrice / packQty;
+  if ((!qty || qty <= 0) && unit > 0 && lineTotal > 0) qty = lineTotal / unit;
+  if (!lineTotal && qty > 0 && unit > 0) lineTotal = qty * unit;
+  if (!packPrice && unit > 0) packPrice = unit * packQty;
 
   const row = document.createElement('div');
   row.className = 'invoice-item-row';
@@ -2425,6 +2429,7 @@ async function saveInvoice() {
   let total = 0;
   const items = [];
 
+  let skippedRows = 0;
   if (hasItems) {
     document.querySelectorAll('.invoice-item-row').forEach(row => {
       const idx = row.dataset.idx;
@@ -2462,8 +2467,16 @@ async function saveInvoice() {
             package_price: package_price > 0 ? Number(package_price.toFixed(3)) : null
           });
         }
+      } else if (product_id || description || quantity > 0 || unit_price > 0 || line_total > 0) {
+        // Row has SOME data but is incomplete — never drop it silently
+        skippedRows++;
       }
     });
+
+    if (skippedRows > 0) {
+      toast(`⚠️ يوجد ${skippedRows} صف غير مكتمل — اختاري الصنف وأدخلي الكمية، أو احذفي الصف بزر ✕`, 'error');
+      return;
+    }
 
     if (!items.length) {
       toast('أضف صنفاً واحداً على الأقل', 'error');
@@ -2474,6 +2487,16 @@ async function saveInvoice() {
     tax = net * taxRate / 100;
     total = net + tax;
   } else {
+    // Manual mode — if the invoice previously had warehouse items, saving
+    // like this DELETES them. Never let that happen silently.
+    const prevInvoice = invoiceId
+      ? (window._invoicesCache || []).find(x => String(x.id) === String(invoiceId))
+      : null;
+    if (prevInvoice?.items?.length) {
+      if (!confirm(`⚠️ هذه الفاتورة مرتبطة بـ ${prevInvoice.items.length} صنف من المستودع.\nالحفظ بمبلغ يدوي سيحذف هذه الأصناف نهائياً ويرجع كمياتها للمخزون.\nهل أنت متأكدة؟`)) {
+        return;
+      }
+    }
     net = parseFloat(document.getElementById('inv_net')?.value);
     if (!net || net <= 0) {
       toast('المبلغ غير صحيح', 'error');
