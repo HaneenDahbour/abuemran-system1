@@ -938,7 +938,13 @@ function renderClientRow(cl) {
     </td>
     <td><span class="badge badge-blue">${deptLabel}</span></td>
     <td style="color:${balColor}; font-weight:700">
-      ${fmt(balance)} د.أ ${overLimitBadge}
+      ${fmt(Math.abs(balance))} د.أ
+      ${balance > 0
+      ? '<span style="font-size:10px;color:var(--rd);font-weight:800">عليه</span>'
+      : balance < 0
+        ? '<span style="font-size:10px;color:var(--gr);font-weight:800">له (رصيد زائد)</span>'
+        : ''}
+      ${overLimitBadge}
     </td>
     <td>${riskLabel(cl.risk_level)}</td>
     <td>
