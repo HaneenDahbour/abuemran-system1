@@ -1537,11 +1537,11 @@ function openInvoiceModal(invoice = null) {
         <div style="font-weight:700;font-size:13px">📦 الأصناف</div>
         <button class="btn btn-ghost btn-sm" onclick="addInvoiceItemRow()">+ إضافة صنف</button>
       </div>
-      <div style="display:grid;grid-template-columns:.85fr 1.4fr 1.3fr .65fr .8fr .8fr .8fr .9fr auto;
+      <div style="display:grid;grid-template-columns:.85fr 1.3fr 1.2fr .85fr .65fr .9fr .9fr auto;
                   gap:8px;padding:8px 10px;background:#f5f3f0;border-radius:10px;
                   font-size:11px;font-weight:800;color:#777;margin-bottom:8px">
-        <div>الفئة</div><div>الصنف</div><div>البيان</div><div>الكمية</div>
-        <div>عدد الحبات</div><div>سعر 12/دزينة</div><div>سعر الحبة</div><div>المجموع</div><div></div>
+        <div>الفئة</div><div>الصنف</div><div>البيان</div><div>طريقة البيع</div>
+        <div>الكمية</div><div>السعر</div><div>المجموع</div><div></div>
       </div>
       <div id="inv-items-wrap" style="display:flex;flex-direction:column;gap:8px"></div>
     </div>
@@ -2106,13 +2106,21 @@ function addInvoiceItemRow(item = null) {
   if (!lineTotal && qty > 0 && unit > 0) lineTotal = qty * unit;
   if (!packPrice && unit > 0) packPrice = unit * packQty;
 
+  // Selling mode: dozen if the stored row clearly used pack pricing
+  const mode = (packPrice > 0 && packQty > 0 && qty >= packQty
+                && Math.abs(qty % packQty) < 0.001
+                && Math.abs(packPrice - unit * packQty) < 0.01)
+    ? 'dozen' : 'unit';
+  const visQty = mode === 'dozen' ? qty / packQty : qty;       // dozens or units
+  const visPrice = mode === 'dozen' ? packPrice : unit;        // dozen price or unit price
+
   const row = document.createElement('div');
   row.className = 'invoice-item-row';
   row.dataset.idx = idx;
 
   row.style.cssText = `
     display:grid;
-    grid-template-columns:.85fr 1.4fr 1.3fr .65fr .8fr .8fr .8fr .9fr auto;
+    grid-template-columns:.85fr 1.3fr 1.2fr .85fr .65fr .9fr .9fr auto;
     gap:8px;
     align-items:center;
     background:#faf9f7;
@@ -2149,51 +2157,37 @@ function addInvoiceItemRow(item = null) {
       oninput="this.dataset.manual='1'"
     >
 
+    <select
+      class="form-select"
+      id="ii_mode_${idx}"
+      onchange="invItemModeChange(${idx})"
+      style="font-weight:700"
+    >
+      <option value="unit"  ${mode === 'unit' ? 'selected' : ''}>بالحبة</option>
+      <option value="dozen" ${mode === 'dozen' ? 'selected' : ''}>بالدزينة (12)</option>
+    </select>
+
     <input
       class="form-input"
-      id="ii_qty_${idx}"
+      id="ii_qcount_${idx}"
       type="number"
-      value="${qty ? qty.toFixed(3) : ''}"
-      placeholder="الكمية"
+      value="${visQty ? Number(visQty.toFixed(3)).toString() : ''}"
+      placeholder="${mode === 'dozen' ? 'عدد الدزينات' : 'عدد الحبات'}"
       min="0"
       step="0.001"
-      oninput="calcInvoiceLineAuto(${idx})"
+      oninput="invItemRecalc(${idx})"
     >
 
     <input
       class="form-input"
-      id="ii_pack_qty_${idx}"
+      id="ii_pmain_${idx}"
       type="number"
-      value="${packQty ? packQty.toFixed(0) : '12'}"
-      placeholder="12"
-      min="1"
-      step="1"
-      title="عدد الحبات في الدزينة أو الكرتونة"
-      oninput="calcInvoiceLineAuto(${idx})"
-    >
-
-    <input
-      class="form-input"
-      id="ii_pack_price_${idx}"
-      type="number"
-      value="${packPrice ? packPrice.toFixed(3) : ''}"
-      placeholder="سعر 12"
+      value="${visPrice ? visPrice.toFixed(3) : ''}"
+      placeholder="${mode === 'dozen' ? 'سعر الدزينة' : 'سعر الحبة'}"
       min="0"
       step="0.001"
-      title="مثلاً: 12 حبة = 13 دينار"
-      oninput="calcInvoiceLineFromPack(${idx})"
-      style="font-weight:800;color:#9a4500"
-    >
-
-    <input
-      class="form-input"
-      id="ii_price_${idx}"
-      type="number"
-      value="${unit ? unit.toFixed(3) : ''}"
-      placeholder="سعر الحبة"
-      min="0"
-      step="0.001"
-      oninput="calcInvoiceLineFromUnit(${idx})"
+      style="font-weight:700"
+      oninput="invItemRecalc(${idx})"
     >
 
     <input
@@ -2204,7 +2198,7 @@ function addInvoiceItemRow(item = null) {
       placeholder="المجموع"
       min="0"
       step="0.001"
-      oninput="calcInvoiceLineFromTotal(${idx})"
+      oninput="invItemRecalcFromTotal(${idx})"
       style="font-weight:800;color:#1a4fd6"
     >
 
@@ -2215,11 +2209,17 @@ function addInvoiceItemRow(item = null) {
       ✕
     </button>
 
+    <!-- القيم الفعلية المحفوظة (بالحبات) — تُحدَّث تلقائياً -->
+    <input type="hidden" id="ii_qty_${idx}"        value="${qty ? qty.toFixed(3) : ''}">
+    <input type="hidden" id="ii_price_${idx}"      value="${unit ? unit.toFixed(3) : ''}">
+    <input type="hidden" id="ii_pack_qty_${idx}"   value="${packQty ? packQty.toFixed(0) : '12'}">
+    <input type="hidden" id="ii_pack_price_${idx}" value="${packPrice ? packPrice.toFixed(3) : ''}">
+
     <div
       id="ii_hint_${idx}"
       style="grid-column:1 / -1; font-size:11px; color:#777; padding:2px 4px"
     >
-      اختاري الفئة أولاً، ثم سيظهر فقط أصناف هذه الفئة.
+      اختاري الفئة أولاً، ثم الصنف — وحدّدي طريقة البيع: بالحبة أو بالدزينة.
     </div>
   `;
 
@@ -2238,6 +2238,72 @@ function fillInvoiceDescriptionFromProduct(idx) {
 
   const product = (window._productsCache || []).find(p => String(p.id) === String(prodId));
   if (product) descEl.value = product.name || '';
+}
+
+// ── New per-item selling-mode calculations (بالحبة / بالدزينة) ──
+function invItemModeChange(idx) {
+  const mode = document.getElementById(`ii_mode_${idx}`)?.value || 'unit';
+  const q = document.getElementById(`ii_qcount_${idx}`);
+  const p = document.getElementById(`ii_pmain_${idx}`);
+  if (q) q.placeholder = mode === 'dozen' ? 'عدد الدزينات' : 'عدد الحبات';
+  if (p) p.placeholder = mode === 'dozen' ? 'سعر الدزينة' : 'سعر الحبة';
+  invItemRecalc(idx);
+}
+
+function invItemRecalc(idx) {
+  const mode = document.getElementById(`ii_mode_${idx}`)?.value || 'unit';
+  const qc = parseFloat(document.getElementById(`ii_qcount_${idx}`)?.value) || 0;
+  const pm = parseFloat(document.getElementById(`ii_pmain_${idx}`)?.value) || 0;
+  const packQty = parseFloat(document.getElementById(`ii_pack_qty_${idx}`)?.value) || 12;
+
+  let units, unitPrice, packPrice;
+  if (mode === 'dozen') {
+    units = qc * packQty;          // الكمية الفعلية بالحبات (للمخزون)
+    unitPrice = packQty > 0 ? pm / packQty : 0;
+    packPrice = pm;
+  } else {
+    units = qc;
+    unitPrice = pm;
+    packPrice = pm > 0 ? pm * packQty : 0;
+  }
+  const total = qc * pm;
+
+  const set = (id, v) => {
+    const el = document.getElementById(`${id}_${idx}`);
+    if (el) el.value = v;
+  };
+  set('ii_qty', units > 0 ? units.toFixed(3) : '');
+  set('ii_price', unitPrice > 0 ? unitPrice.toFixed(3) : '');
+  set('ii_pack_price', packPrice > 0 ? packPrice.toFixed(3) : '');
+
+  const totalEl = document.getElementById(`ii_total_${idx}`);
+  if (totalEl) totalEl.value = total > 0 ? total.toFixed(3) : '';
+
+  const hintEl = document.getElementById(`ii_hint_${idx}`);
+  if (hintEl) {
+    if (mode === 'dozen' && qc > 0 && pm > 0) {
+      hintEl.innerHTML = `📦 ${qc} دزينة × ${fmt(pm)} = <strong>${fmt(total)} د.أ</strong> — أي ${fmt(units)} حبة (سعر الحبة ${fmt(unitPrice)})`;
+    } else if (mode === 'unit' && qc > 0 && pm > 0) {
+      hintEl.innerHTML = `🔢 ${fmt(qc)} حبة × ${fmt(pm)} = <strong>${fmt(total)} د.أ</strong>`;
+    } else {
+      hintEl.textContent = mode === 'dozen'
+        ? 'أدخلي عدد الدزينات وسعر الدزينة — وسيُحسب كل شيء تلقائياً.'
+        : 'أدخلي عدد الحبات وسعر الحبة — وسيُحسب كل شيء تلقائياً.';
+    }
+  }
+
+  calcInvoiceItemsTotal();
+}
+
+function invItemRecalcFromTotal(idx) {
+  // المستخدم كتب المجموع — نشتق السعر من الكمية
+  const qc = parseFloat(document.getElementById(`ii_qcount_${idx}`)?.value) || 0;
+  const total = parseFloat(document.getElementById(`ii_total_${idx}`)?.value) || 0;
+  const pEl = document.getElementById(`ii_pmain_${idx}`);
+  if (qc > 0 && total > 0 && pEl) {
+    pEl.value = (total / qc).toFixed(3);
+  }
+  invItemRecalc(idx);
 }
 
 function calcInvoiceLineAuto(idx) {
