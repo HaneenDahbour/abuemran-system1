@@ -1278,6 +1278,10 @@ function _invoiceActionButtons(inv) {
         <button class="btn btn-danger btn-sm"  onclick="rejectInvoiceModal(${inv.id})">✗ رفض</button>
 <button class="btn btn-ghost btn-sm" onclick="showInvoiceDetails(${jsString(inv.id)})">📄 تفاصيل</button>      `;
     }
+    // Anyone with accountant+ role or the creator can edit a pending invoice
+    if (isAccountant()) {
+      html += `<button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>`;
+    }
     // Creator or admin can delete pending
     html += `<button class="btn btn-ghost btn-sm" onclick="deleteInvoice(${inv.id})">🗑️</button>`;
 
