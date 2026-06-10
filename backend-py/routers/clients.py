@@ -228,8 +228,29 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
         )
 
         # Ø¥Ø¬Ù…Ø§Ù„ÙŠØ§Øª
+        # المقبوضات المسجّلة من صفحة المقبوضات (جدول payments) — معتمدة فقط
+        legacy_payments = await pool.fetch(
+            """
+            SELECT
+                p.id,
+                p.amount,
+                p.payment_date AS date,
+                p.notes,
+                p.payment_method
+            FROM payments p
+            WHERE p.client_id = $1
+              AND p.status = 'approved'
+            ORDER BY p.payment_date ASC, p.id ASC
+            """,
+            client_id,
+        )
+
+        # الإجماليات تشمل كلا مصدري المقبوضات — لتطابق رصيد صفحة العملاء تماماً
         total_invoiced = sum(float(i["total_amount"] or 0) for i in invoices)
-        total_paid = sum(float(p["amount"] or 0) for p in payments)
+        total_paid = (
+            sum(float(p["amount"] or 0) for p in payments)
+            + sum(float(p["amount"] or 0) for p in legacy_payments)
+        )
         total_remaining = total_invoiced - total_paid
 
         # Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ø°Ù…Ù… (ÙÙˆØ§ØªÙŠØ± Ø¢Ø¬Ù„Ø© ØºÙŠØ± Ù…Ø³Ø¯Ø¯Ø© Ø¨Ø§Ù„ÙƒØ§Ù…Ù„)
@@ -279,9 +300,26 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
                     "paid_amount": 0,
                     "remaining_amount": 0,
                     "date": pay["date"].isoformat() if pay["date"] else None,
-                    "description": pay["notes"] or "Ù…Ù‚Ø¨ÙˆØ¶Ø©",
+                    "description": pay["notes"] or "مقبوضة",
                     "notes": pay["notes"] or "",
                     "is_invoice_payment": pay["is_invoice_payment"],
+                    "payment_method": pay["payment_method"] or "cash",
+                }
+            )
+
+        # مقبوضات صفحة المقبوضات — تظهر في الكشف مثل أي دفعة أخرى
+        for pay in legacy_payments:
+            transactions.append(
+                {
+                    "id": pay["id"],
+                    "type": "payment",
+                    "amount": float(pay["amount"] or 0),
+                    "paid_amount": 0,
+                    "remaining_amount": 0,
+                    "date": pay["date"].isoformat() if pay["date"] else None,
+                    "description": pay["notes"] or "مقبوضة",
+                    "notes": pay["notes"] or "",
+                    "is_invoice_payment": False,
                     "payment_method": pay["payment_method"] or "cash",
                 }
             )
