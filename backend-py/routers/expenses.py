@@ -64,6 +64,35 @@ class AdvanceIn(BaseModel):
     notes: Optional[str] = None
 
 
+class WarehouseRentIn(BaseModel):
+    name: str
+    monthly_amount: float
+    currency: Optional[str] = "JOD"
+    start_month: str
+    notes: Optional[str] = None
+    is_active: Optional[bool] = True
+
+
+class WarehouseRentPaymentIn(BaseModel):
+    month: str               # أي يوم ضمن الشهر المطلوب — يتم تطبيع للشهر
+    status: Optional[str] = "pending"   # paid / pending
+    amount: Optional[float] = None
+    paid_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+def month_start(value: date) -> date:
+    return value.replace(day=1)
+
+
+def next_month(value: date) -> date:
+    return (
+        value.replace(year=value.year + 1, month=1, day=1)
+        if value.month == 12
+        else value.replace(month=value.month + 1, day=1)
+    )
+
+
 # ── Expenses ──────────────────────────────────────────────────
 
 @router.get("")
@@ -475,6 +504,188 @@ async def delete_advance(advance_id: int, user=Depends(get_current_user)):
     if not deleted:
         raise HTTPException(status_code=404, detail="السلفة غير موجودة")
     return {"success": True}
+
+
+# ── Warehouse Rent (إيجار المستودع) ────────────────────────────
+
+@router.get("/warehouse-rents")
+async def list_warehouse_rents(user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT r.*,
+              COALESCE((SELECT COUNT(*) FROM warehouse_rent_payments wp
+                        WHERE wp.rent_id = r.id AND wp.status = 'paid'), 0) AS paid_months_count,
+              COALESCE((SELECT COUNT(*) FROM warehouse_rent_payments wp
+                        WHERE wp.rent_id = r.id AND wp.status = 'pending'), 0) AS pending_months_count
+            FROM warehouse_rents r
+            ORDER BY r.created_at DESC, r.id DESC
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+@router.post("/warehouse-rents")
+async def create_warehouse_rent(data: WarehouseRentIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+
+    name = str(data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم المستودع / الجهة المؤجِّرة مطلوب")
+
+    amount = round(float(data.monthly_amount or 0), 3)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="قيمة الإيجار الشهري يجب أن تكون أكبر من صفر")
+
+    currency = (data.currency or "JOD").strip().upper()
+    if currency not in ("JOD", "USD", "CNY"):
+        raise HTTPException(status_code=400, detail="العملة غير مدعومة")
+
+    start = month_start(parse_date(data.start_month))
+
+    pool = await get_pool()
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO warehouse_rents
+              (name, monthly_amount, currency, start_month, notes, is_active, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7)
+            RETURNING *
+            """,
+            name, amount, currency, start, data.notes,
+            bool(data.is_active if data.is_active is not None else True),
+            user.get("id"),
+        )
+        return row_to_dict(row)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر حفظ سجل الإيجار: {str(e)}")
+
+
+@router.put("/warehouse-rents/{rent_id}")
+async def update_warehouse_rent(rent_id: int, data: WarehouseRentIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+
+    name = str(data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="اسم المستودع / الجهة المؤجِّرة مطلوب")
+
+    amount = round(float(data.monthly_amount or 0), 3)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="قيمة الإيجار الشهري يجب أن تكون أكبر من صفر")
+
+    currency = (data.currency or "JOD").strip().upper()
+    if currency not in ("JOD", "USD", "CNY"):
+        raise HTTPException(status_code=400, detail="العملة غير مدعومة")
+
+    start = month_start(parse_date(data.start_month))
+
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        UPDATE warehouse_rents
+        SET name=$1, monthly_amount=$2, currency=$3, start_month=$4, notes=$5, is_active=$6
+        WHERE id=$7 RETURNING *
+        """,
+        name, amount, currency, start, data.notes,
+        bool(data.is_active if data.is_active is not None else True),
+        rent_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="سجل الإيجار غير موجود")
+    return row_to_dict(row)
+
+
+@router.delete("/warehouse-rents/{rent_id}")
+async def delete_warehouse_rent(rent_id: int, user=Depends(get_current_user)):
+    require_role(user, "admin")
+    pool = await get_pool()
+    deleted = await pool.fetchrow(
+        "DELETE FROM warehouse_rents WHERE id=$1 RETURNING id", rent_id
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="سجل الإيجار غير موجود")
+    return {"success": True}
+
+
+@router.get("/warehouse-rents/{rent_id}/payments")
+async def list_warehouse_rent_payments(rent_id: int, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    pool = await get_pool()
+
+    rent = await pool.fetchrow("SELECT * FROM warehouse_rents WHERE id=$1", rent_id)
+    if not rent:
+        raise HTTPException(status_code=404, detail="سجل الإيجار غير موجود")
+
+    # توليد سجلات الأشهر من شهر البداية حتى الشهر الحالي (إن لم تكن موجودة)
+    cur = month_start(rent["start_month"])
+    today_month = month_start(date.today())
+
+    pool2 = pool
+    async with pool2.acquire() as conn:
+        async with conn.transaction():
+            months = []
+            m = cur
+            while m <= today_month:
+                months.append(m)
+                m = next_month(m)
+
+            for m in months:
+                await conn.execute(
+                    """
+                    INSERT INTO warehouse_rent_payments (rent_id, month, status, amount, created_by)
+                    VALUES ($1, $2, 'pending', $3, $4)
+                    ON CONFLICT (rent_id, month) DO NOTHING
+                    """,
+                    rent_id, m, rent["monthly_amount"], user.get("id"),
+                )
+
+    rows = await pool.fetch(
+        """
+        SELECT * FROM warehouse_rent_payments
+        WHERE rent_id=$1
+        ORDER BY month ASC
+        """,
+        rent_id,
+    )
+
+    return {
+        "rent": row_to_dict(rent),
+        "payments": [row_to_dict(r) for r in rows],
+    }
+
+
+@router.post("/warehouse-rents/{rent_id}/payments/toggle")
+async def toggle_warehouse_rent_payment(rent_id: int, data: WarehouseRentPaymentIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+
+    status = (data.status or "pending").strip().lower()
+    if status not in ("paid", "pending"):
+        raise HTTPException(status_code=400, detail="الحالة غير صحيحة")
+
+    pool = await get_pool()
+
+    rent = await pool.fetchrow("SELECT * FROM warehouse_rents WHERE id=$1", rent_id)
+    if not rent:
+        raise HTTPException(status_code=404, detail="سجل الإيجار غير موجود")
+
+    month = month_start(parse_date(data.month))
+    amount = round(float(data.amount), 3) if data.amount is not None else rent["monthly_amount"]
+    paid_date = parse_date(data.paid_date) if (data.paid_date or status == "paid") else None
+
+    row = await pool.fetchrow(
+        """
+        INSERT INTO warehouse_rent_payments (rent_id, month, status, amount, paid_date, notes, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (rent_id, month) DO UPDATE
+        SET status=$3, amount=$4, paid_date=$5, notes=$6
+        RETURNING *
+        """,
+        rent_id, month, status, amount, paid_date,
+        (data.notes or "").strip() or None, user.get("id"),
+    )
+    return row_to_dict(row)
 
 
 # ── Employee Statement ────────────────────────────────────────

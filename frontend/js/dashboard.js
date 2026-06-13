@@ -7008,7 +7008,7 @@ async function saveEditSupplier(id) {
 }
 
 async function renderExpenses(container) {
-  let expenses = [], salaries = [], advances = [];
+  let expenses = [], salaries = [], advances = [], warehouseRents = [];
   try {
     [expenses, salaries, advances] = await Promise.all([
       API.getExpenses(),
@@ -7017,10 +7017,15 @@ async function renderExpenses(container) {
     ]);
   } catch (e) { expenses = []; salaries = []; advances = []; }
 
+  try {
+    warehouseRents = await API.getWarehouseRents() || [];
+  } catch (e) { warehouseRents = []; }
+
   // Cache for edit-by-id lookups
   window._expensesCache = expenses || [];
   window._salariesCache = salaries || [];
   window._advancesCache = advances || [];
+  window._warehouseRentsCache = warehouseRents || [];
 
   const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
@@ -7078,6 +7083,10 @@ async function renderExpenses(container) {
       <button class="tab-btn" id="exp-tab-advances"
               onclick="switchExpensesTab('advances',this)">
         السلف (${advances.length})
+      </button>
+      <button class="tab-btn" id="exp-tab-warehouse_rent"
+              onclick="switchExpensesTab('warehouse_rent',this)">
+        🏬 إيجار المستودع (${warehouseRents.length})
       </button>
     </div>
 
@@ -7186,11 +7195,47 @@ async function renderExpenses(container) {
         </table>
       </div>
     </div>
+
+    <!-- إيجار المستودع -->
+    <div id="exp-section-warehouse_rent" class="card" style="padding:0;overflow:hidden;display:none">
+      <div style="display:flex; justify-content:flex-end; padding:12px">
+        <button class="btn btn-primary btn-sm" onclick="openWarehouseRentModal()">+ سجل إيجار جديد</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الاسم</th><th>المبلغ الشهري</th><th>العملة</th>
+              <th>تاريخ البدء</th><th>الأشهر المدفوعة</th><th>الأشهر غير المدفوعة</th>
+              <th>ملاحظات</th><th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${warehouseRents.length ? warehouseRents.map(r => `
+              <tr>
+                <td><strong>${escHtml(r.name)}</strong></td>
+                <td style="font-weight:800;color:var(--rd)">${fmt(r.monthly_amount)}</td>
+                <td>${chinaCurrencyLabel(r.currency)}</td>
+                <td>${fmtDate(r.start_month)}</td>
+                <td style="color:var(--gr);font-weight:700">${r.paid_months_count || 0}</td>
+                <td style="color:var(--am);font-weight:700">${r.pending_months_count || 0}</td>
+                <td>${escHtml(r.notes || '—')}</td>
+                <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-ghost btn-sm" onclick="openWarehouseRentPaymentsModal(${r.id})">📅 الأشهر</button>
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openWarehouseRentModal(${r.id})">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteWarehouseRentConfirm(${r.id})">🗑️</button>` : ''}
+                </div></td>
+              </tr>
+            `).join('') : emptyRow('لا توجد سجلات إيجار', 8)}
+          </tbody>
+        </table>
+      </div>
+    </div>
   `;
 }
 
 function switchExpensesTab(tab, btn) {
-  ['expenses', 'salaries', 'advances'].forEach(t => {
+  ['expenses', 'salaries', 'advances', 'warehouse_rent'].forEach(t => {
     const section = document.getElementById(`exp-section-${t}`);
     const tabBtn = document.getElementById(`exp-tab-${t}`);
     if (section) section.style.display = t === tab ? '' : 'none';
@@ -7296,6 +7341,222 @@ async function saveEditExpense(id) {
     toast(e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
+}
+
+// ── إيجار المستودع ────────────────────────────────────────────
+function openWarehouseRentModal(rentId = null) {
+  const rents = window._warehouseRentsCache || [];
+  const r = rentId ? rents.find(x => String(x.id) === String(rentId)) : null;
+  const startMonth = r?.start_month ? String(r.start_month).slice(0, 7) : new Date().toISOString().slice(0, 7);
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${rentId ? '✏️ تعديل سجل إيجار' : '🏬 سجل إيجار جديد'}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">الاسم / الجهة *</label>
+      <input class="form-input" id="wr_name" placeholder="مثال: مستودع الصناعية" value="${escHtml(r?.name || '')}">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ الشهري *</label>
+        <input class="form-input" id="wr_amount" type="number" min="0.001" step="0.001" placeholder="0.000" value="${r?.monthly_amount ?? ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">العملة</label>
+        <select class="form-select" id="wr_currency">
+          ${chinaCurrencyOptions(r?.currency || 'JOD')}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">شهر البدء *</label>
+      <input class="form-input" id="wr_start_month" type="month" value="${startMonth}" ${rentId ? 'disabled' : ''}>
+      ${rentId ? '<div style="font-size:11px;color:var(--tx3);margin-top:4px">لا يمكن تعديل شهر البدء بعد الإنشاء</div>' : ''}
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="wr_notes" placeholder="اختياري" value="${escHtml(r?.notes || '')}">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveWarehouseRent(${rentId ?? 'null'})">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveWarehouseRent(rentId) {
+  const name = document.getElementById('wr_name')?.value?.trim();
+  const monthly_amount = parseFloat(document.getElementById('wr_amount')?.value);
+  const currency = document.getElementById('wr_currency')?.value || 'JOD';
+  const startMonthVal = document.getElementById('wr_start_month')?.value; // YYYY-MM
+  const notes = document.getElementById('wr_notes')?.value?.trim() || null;
+
+  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!monthly_amount || monthly_amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  const payload = { name, monthly_amount, currency, notes };
+  if (!rentId) {
+    if (!startMonthVal) { toast('شهر البدء مطلوب', 'error'); return; }
+    payload.start_month = `${startMonthVal}-01`;
+  }
+
+  try {
+    if (rentId) {
+      await API.updateWarehouseRent(rentId, payload);
+    } else {
+      await API.createWarehouseRent(payload);
+    }
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('expenses');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteWarehouseRentConfirm(rentId) {
+  const rents = window._warehouseRentsCache || [];
+  const r = rents.find(x => String(x.id) === String(rentId));
+
+  confirmDanger('حذف سجل الإيجار', [
+    `السجل: ${r?.name || rentId}`,
+    'سيتم حذف جميع سجلات الدفع الشهرية المرتبطة به بشكل نهائي',
+  ], async () => {
+    try {
+      await API.deleteWarehouseRent(rentId);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      navigateTo('expenses');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+/* ───── الأشهر: مدفوع / غير مدفوع ───── */
+async function openWarehouseRentPaymentsModal(rentId) {
+  try {
+    const data = await API.getWarehouseRentPayments(rentId);
+    window._warehouseRentPayments = { rentId, data };
+
+    const r = data.rent || {};
+    const payments = data.payments || [];
+
+    openModal(`
+      <div class="modal-header">
+        <div class="modal-title">📅 ${escHtml(r.name || '')} — الأشهر</div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+
+      <div style="font-size:13px;color:var(--tx3);margin-bottom:10px">
+        المبلغ الشهري: <strong>${fmt(r.monthly_amount || 0)} ${chinaCurrencyLabel(r.currency)}</strong>
+        — يبدأ من ${fmtDate(r.start_month)}
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:14px">
+        <table>
+          <thead><tr><th>الشهر</th><th>الحالة</th><th>المبلغ</th><th>تاريخ الدفع</th><th></th></tr></thead>
+          <tbody>
+            ${payments.length ? payments.map(p => `
+              <tr>
+                <td>${fmtDate(p.month)}</td>
+                <td>
+                  <span class="badge ${p.status === 'paid' ? 'badge-green' : 'badge-amber'}">
+                    ${p.status === 'paid' ? '✓ مدفوع' : '✗ غير مدفوع'}
+                  </span>
+                </td>
+                <td>${fmt(p.amount || r.monthly_amount || 0)} ${chinaCurrencyLabel(r.currency)}</td>
+                <td style="font-size:12px;color:var(--tx3)">${p.paid_date ? fmtDate(p.paid_date) : '—'}</td>
+                <td>
+                  <button class="btn ${p.status === 'paid' ? 'btn-ghost' : 'btn-primary'} btn-sm"
+                          onclick="toggleWarehouseRentPaymentUI(${rentId}, '${String(p.month).slice(0,10)}', '${p.status === 'paid' ? 'pending' : 'paid'}')">
+                    ${p.status === 'paid' ? 'تحديد كغير مدفوع' : 'تحديد كمدفوع'}
+                  </button>
+                </td>
+              </tr>
+            `).join('') : `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد أشهر مسجّلة</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="printWarehouseRent(${rentId})">🖨️ طباعة</button>
+        <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
+      </div>
+    `, '700px');
+  } catch (e) {
+    toast(e.message || 'تعذّر تحميل بيانات الإيجار', 'error');
+  }
+}
+
+async function toggleWarehouseRentPaymentUI(rentId, month, newStatus) {
+  try {
+    await API.toggleWarehouseRentPayment(rentId, {
+      month,
+      status: newStatus,
+      paid_date: newStatus === 'paid' ? new Date().toISOString().split('T')[0] : null,
+    });
+    toast('تم التحديث ✅', 'success');
+    closeModal();
+    await navigateTo('expenses');
+    openWarehouseRentPaymentsModal(rentId);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function printWarehouseRent(rentId) {
+  const ctx = window._warehouseRentPayments;
+  if (!ctx || String(ctx.rentId) !== String(rentId)) return;
+
+  const r = ctx.data.rent || {};
+  const payments = ctx.data.payments || [];
+
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="utf-8">
+      <title>إيجار المستودع - ${escHtml(r.name || '')}</title>
+      <style>
+        body { font-family: Tahoma, Arial, sans-serif; padding: 20px; }
+        h1 { text-align:center; }
+        table { width:100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #999; padding: 6px 10px; text-align: right; font-size: 13px; }
+        th { background: #f0f0f0; }
+      </style>
+    </head>
+    <body>
+      <h1>إيجار المستودع: ${escHtml(r.name || '')}</h1>
+      <div>المبلغ الشهري: ${fmt(r.monthly_amount || 0)} ${chinaCurrencyLabel(r.currency)}</div>
+      <div>يبدأ من: ${fmtDate(r.start_month)}</div>
+      <table>
+        <thead><tr><th>الشهر</th><th>الحالة</th><th>المبلغ</th><th>تاريخ الدفع</th></tr></thead>
+        <tbody>
+          ${payments.map(p => `
+            <tr>
+              <td>${fmtDate(p.month)}</td>
+              <td>${p.status === 'paid' ? 'مدفوع' : 'غير مدفوع'}</td>
+              <td>${fmt(p.amount || r.monthly_amount || 0)} ${chinaCurrencyLabel(r.currency)}</td>
+              <td>${p.paid_date ? fmtDate(p.paid_date) : '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }
 
 // ── Edit Salary ──────────────────────────────────────────────
@@ -8766,6 +9027,7 @@ async function renderChina(container) {
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px">
       ${chinaTabBtn('overview', '📊 نظرة عامة')}
       ${chinaTabBtn('investors', '🤝 المستثمرون')}
+      ${chinaTabBtn('suppliers', '🏪 الموردون')}
       ${chinaTabBtn('payments', '💸 دفعات الموردين')}
       ${chinaTabBtn('purchases', '📦 المشتريات')}
       ${chinaTabBtn('sales', '🏷️ المبيعات')}
@@ -8779,14 +9041,63 @@ async function renderChina(container) {
   const content = document.getElementById('china-tab-content');
 
   try {
+    // قائمة الموردين متاحة لكل التبويبات (للاختيار في النماذج)
+    window._chinaSuppliersCache = await API.getChinaSuppliers() || [];
+
     if (tab === 'overview') await renderChinaOverview(content);
     else if (tab === 'investors') await renderChinaInvestors(content);
+    else if (tab === 'suppliers') await renderChinaSuppliers(content);
     else if (tab === 'payments') await renderChinaPayments(content);
     else if (tab === 'purchases') await renderChinaPurchases(content);
     else if (tab === 'sales') await renderChinaSales(content);
   } catch (e) {
     content.innerHTML = `<div class="alert alert-danger">${escHtml(e.message || 'حدث خطأ')}</div>`;
   }
+}
+
+/* ───── أدوات مشتركة: العملات والموردون ───── */
+
+const CHINA_CURRENCIES = [
+  { code: 'JOD', label: 'دينار أردني (JOD)' },
+  { code: 'USD', label: 'دولار أمريكي (USD)' },
+  { code: 'CNY', label: 'يوان صيني (CNY)' },
+];
+
+function chinaCurrencyOptions(selected) {
+  const cur = selected || 'JOD';
+  return CHINA_CURRENCIES.map(c =>
+    `<option value="${c.code}" ${c.code === cur ? 'selected' : ''}>${c.label}</option>`
+  ).join('');
+}
+
+function chinaSupplierOptions(selectedId) {
+  const suppliers = window._chinaSuppliersCache || [];
+  const sel = selectedId != null ? String(selectedId) : '';
+  return `<option value="">— بدون مورد محدد —</option>` + suppliers.map(s =>
+    `<option value="${s.id}" ${String(s.id) === sel ? 'selected' : ''}>${escHtml(s.name)}</option>`
+  ).join('');
+}
+
+// يُظهر/يُخفي حقل سعر الصرف بحسب العملة المختارة
+function chinaOnCurrencyChange(currencySelectId, rateGroupId) {
+  const cur = document.getElementById(currencySelectId)?.value;
+  const group = document.getElementById(rateGroupId);
+  if (group) group.style.display = (cur === 'JOD') ? 'none' : '';
+}
+
+function chinaCurrencyLabel(code) {
+  const c = CHINA_CURRENCIES.find(x => x.code === code);
+  return c ? c.code : (code || 'JOD');
+}
+
+// عند اختيار مورد من القائمة — تعبئة اسم المورد تلقائياً (للحقول النصية القديمة)
+function chinaOnSupplierSelect(selectId, nameInputId) {
+  const sel = document.getElementById(selectId);
+  const nameInput = document.getElementById(nameInputId);
+  if (!sel || !nameInput) return;
+  const suppliers = window._chinaSuppliersCache || [];
+  const s = suppliers.find(x => String(x.id) === String(sel.value));
+  if (s) nameInput.value = s.name;
 }
 
 function chinaTabBtn(key, label) {
@@ -9125,9 +9436,307 @@ async function deleteChinaInvestorTransaction(transactionId, investorId) {
   });
 }
 
+/* ───── الموردون (قسم الصين) ───── */
+async function renderChinaSuppliers(container) {
+  const suppliers = window._chinaSuppliersCache || [];
+  window._chinaSuppliersCache = suppliers;
+
+  container.innerHTML = `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="openChinaSupplierModal()">+ مورد جديد</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>الاسم</th>
+            <th>الهاتف</th>
+            <th>إجمالي الدفعات (د.أ)</th>
+            <th>إجمالي المشتريات (د.أ)</th>
+            <th>عدد العمليات</th>
+            <th>ملاحظات</th>
+            <th>الإجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${suppliers.length ? suppliers.map(s => `
+            <tr>
+              <td><strong>${escHtml(s.name)}</strong></td>
+              <td>${escHtml(s.phone || '—')}</td>
+              <td style="color:var(--rd);font-weight:700">${fmt(s.total_paid_jod || 0)}</td>
+              <td style="font-weight:700">${fmt(s.total_purchased_jod || 0)}</td>
+              <td style="font-size:12px;color:var(--tx3)">${(s.payments_count || 0)} دفعة / ${(s.purchases_count || 0)} شراء</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(s.notes || '—')}</td>
+              <td>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaSupplierStatement(${s.id})">📊 التفاصيل</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaSupplierModal(${s.id})">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSupplierConfirm(${s.id})">🗑️</button>` : ''}
+                </div>
+              </td>
+            </tr>
+          `).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا يوجد موردون</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openChinaSupplierModal(supplierId = null) {
+  const suppliers = window._chinaSuppliersCache || [];
+  const s = supplierId ? suppliers.find(x => String(x.id) === String(supplierId)) : null;
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${supplierId ? '✏️ تعديل مورد' : '🏪 مورد جديد'}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">الاسم *</label>
+      <input class="form-input" id="cs_name" value="${escHtml(s?.name || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">رقم الهاتف</label>
+      <input class="form-input" id="cs_phone" value="${escHtml(s?.phone || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="cs_notes" value="${escHtml(s?.notes || '')}">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSupplier(${supplierId ?? 'null'})">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveChinaSupplier(supplierId) {
+  const name = document.getElementById('cs_name')?.value?.trim();
+  const phone = document.getElementById('cs_phone')?.value?.trim() || null;
+  const notes = document.getElementById('cs_notes')?.value?.trim() || null;
+
+  if (!name) { toast('اسم المورد مطلوب', 'error'); return; }
+
+  try {
+    if (supplierId) {
+      await API.updateChinaSupplier(supplierId, { name, phone, notes });
+    } else {
+      await API.createChinaSupplier({ name, phone, notes });
+    }
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    window._chinaSuppliersCache = null;
+    navigateTo('china');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteChinaSupplierConfirm(supplierId) {
+  const suppliers = window._chinaSuppliersCache || [];
+  const s = suppliers.find(x => String(x.id) === String(supplierId));
+
+  confirmDanger('حذف المورد', [
+    `المورد: ${s?.name || supplierId}`,
+    'سيتم إلغاء ربط الدفعات/المشتريات السابقة بهذا المورد (دون حذفها)',
+  ], async () => {
+    try {
+      await API.deleteChinaSupplier(supplierId);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      window._chinaSuppliersCache = null;
+      navigateTo('china');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+/* ───── تفاصيل مورد: كل الدفعات والمشتريات (multi-bid) + الإجماليات ───── */
+async function openChinaSupplierStatement(supplierId) {
+  try {
+    const data = await API.getChinaSupplierStatement(supplierId);
+    window._chinaSupplierStatement = data;
+
+    const s = data.supplier || {};
+    const payments = data.payments || [];
+    const purchases = data.purchases || [];
+    const totalsByCurrency = data.totals_by_currency || {};
+
+    const currencyRows = Object.keys(totalsByCurrency).map(code => {
+      const t = totalsByCurrency[code];
+      return `
+        <tr>
+          <td><strong>${chinaCurrencyLabel(code)}</strong></td>
+          <td style="color:var(--rd);font-weight:700">${fmt(t.payments || 0)}</td>
+          <td style="font-weight:700">${fmt(t.purchases || 0)}</td>
+        </tr>
+      `;
+    }).join('');
+
+    openModal(`
+      <div class="modal-header">
+        <div class="modal-title">📊 ${escHtml(s.name || '')}</div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+
+      <div style="font-size:13px;color:var(--tx3);margin-bottom:10px">
+        ${s.phone ? `📞 ${escHtml(s.phone)}` : ''} ${s.notes ? ` — ${escHtml(s.notes)}` : ''}
+      </div>
+
+      <div class="metrics-grid" style="margin-bottom:14px">
+        <div class="metric-card">
+          <div class="metric-label">إجمالي الدفعات</div>
+          <div class="metric-value" style="color:var(--rd)">${fmt(data.total_paid_jod || 0)} د.أ</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">إجمالي المشتريات</div>
+          <div class="metric-value">${fmt(data.total_purchased_jod || 0)} د.أ</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">الرصيد (مشتريات - دفعات)</div>
+          <div class="metric-value" style="color:${parseFloat(data.balance_jod || 0) >= 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(data.balance_jod || 0)} د.أ</div>
+        </div>
+      </div>
+
+      ${currencyRows ? `
+        <div class="table-wrap" style="margin-bottom:14px">
+          <table>
+            <thead><tr><th>العملة</th><th>الدفعات</th><th>المشتريات</th></tr></thead>
+            <tbody>${currencyRows}</tbody>
+          </table>
+        </div>
+      ` : ''}
+
+      <div style="font-weight:700;margin-bottom:6px">💸 الدفعات (${payments.length})</div>
+      <div class="table-wrap" style="margin-bottom:14px">
+        <table>
+          <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+          <tbody>
+            ${payments.length ? payments.map(p => `
+              <tr>
+                <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
+                <td style="font-weight:700">${fmt(p.amount)}</td>
+                <td>${chinaCurrencyLabel(p.currency)}</td>
+                <td style="color:var(--rd)">${fmt(p.amount_jod || p.amount)}</td>
+                <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="font-weight:700;margin-bottom:6px">📦 المشتريات / العروض (${purchases.length})</div>
+      <div class="table-wrap" style="margin-bottom:14px">
+        <table>
+          <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+          <tbody>
+            ${purchases.length ? purchases.map(p => `
+              <tr>
+                <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.purchase_date)}</td>
+                <td><strong>${escHtml(p.item_name)}</strong></td>
+                <td>${fmt(p.quantity || 0)}</td>
+                <td style="font-weight:700">${fmt(p.amount)}</td>
+                <td>${chinaCurrencyLabel(p.currency)}</td>
+                <td>${fmt(p.amount_jod || p.amount)}</td>
+                <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="printChinaSupplierStatement(${supplierId})">🖨️ طباعة</button>
+        <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
+      </div>
+    `, '800px');
+  } catch (e) {
+    toast(e.message || 'تعذّر تحميل تفاصيل المورد', 'error');
+  }
+}
+
+function printChinaSupplierStatement(supplierId) {
+  const data = window._chinaSupplierStatement;
+  if (!data) return;
+
+  const s = data.supplier || {};
+  const payments = data.payments || [];
+  const purchases = data.purchases || [];
+
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="utf-8">
+      <title>كشف حساب المورد - ${escHtml(s.name || '')}</title>
+      <style>
+        body { font-family: Tahoma, Arial, sans-serif; padding: 20px; }
+        h1 { text-align:center; }
+        table { width:100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #999; padding: 6px 10px; text-align: right; font-size: 13px; }
+        th { background: #f0f0f0; }
+        .totals { margin: 10px 0; font-weight: bold; }
+      </style>
+    </head>
+    <body>
+      <h1>كشف حساب المورد: ${escHtml(s.name || '')}</h1>
+      <div>${s.phone ? `الهاتف: ${escHtml(s.phone)}` : ''}</div>
+      <div class="totals">إجمالي الدفعات: ${fmt(data.total_paid_jod || 0)} د.أ</div>
+      <div class="totals">إجمالي المشتريات: ${fmt(data.total_purchased_jod || 0)} د.أ</div>
+      <div class="totals">الرصيد: ${fmt(data.balance_jod || 0)} د.أ</div>
+
+      <h3>الدفعات</h3>
+      <table>
+        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+        <tbody>
+          ${payments.map(p => `
+            <tr>
+              <td>${fmtDate(p.payment_date)}</td>
+              <td>${fmt(p.amount)}</td>
+              <td>${chinaCurrencyLabel(p.currency)}</td>
+              <td>${fmt(p.amount_jod || p.amount)}</td>
+              <td>${escHtml(p.notes || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+
+      <h3>المشتريات / العروض</h3>
+      <table>
+        <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+        <tbody>
+          ${purchases.map(p => `
+            <tr>
+              <td>${fmtDate(p.purchase_date)}</td>
+              <td>${escHtml(p.item_name)}</td>
+              <td>${fmt(p.quantity || 0)}</td>
+              <td>${fmt(p.amount)}</td>
+              <td>${chinaCurrencyLabel(p.currency)}</td>
+              <td>${fmt(p.amount_jod || p.amount)}</td>
+              <td>${escHtml(p.notes || '—')}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
+}
+
 /* ───── دفعات الموردين ───── */
 async function renderChinaPayments(container) {
   const payments = await API.getChinaPayments() || [];
+  window._chinaPaymentsCache = payments;
 
   container.innerHTML = `
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
@@ -9137,71 +9746,112 @@ async function renderChinaPayments(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>المورد</th><th>المبلغ</th><th>ملاحظات</th><th>أضيف بواسطة</th><th></th></tr>
+          <tr><th>التاريخ</th><th>المورد</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th><th>أضيف بواسطة</th><th></th></tr>
         </thead>
         <tbody>
           ${payments.length ? payments.map(p => `
             <tr>
               <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
               <td><strong>${escHtml(p.supplier_name)}</strong></td>
-              <td style="color:var(--rd);font-weight:700">${fmt(p.amount)} د.أ</td>
+              <td style="color:var(--rd);font-weight:700">${fmt(p.amount)}</td>
+              <td>${chinaCurrencyLabel(p.currency)}</td>
+              <td style="font-size:12px;color:var(--tx3)">${fmt(p.amount_jod || p.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.created_by_name || '—')}</td>
-              <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPaymentConfirm(${p.id})">🗑️</button>` : ''}</td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaPaymentModal(${p.id})">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPaymentConfirm(${p.id})">🗑️</button>` : ''}
+                </div>
+              </td>
             </tr>
-          `).join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+          `).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function openChinaPaymentModal() {
+function openChinaPaymentModal(paymentId = null) {
+  const payments = window._chinaPaymentsCache || [];
+  const p = paymentId ? payments.find(x => String(x.id) === String(paymentId)) : null;
+  const currency = p?.currency || 'JOD';
+
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">💸 دفعة لمورد</div>
+      <div class="modal-title">${paymentId ? '✏️ تعديل دفعة' : '💸 دفعة لمورد'}</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
     <div class="form-group">
+      <label class="form-label">المورد (من السجل)</label>
+      <select class="form-select" id="cp_supplier_id" onchange="chinaOnSupplierSelect('cp_supplier_id','cp_supplier')">
+        ${chinaSupplierOptions(p?.supplier_id)}
+      </select>
+    </div>
+
+    <div class="form-group">
       <label class="form-label">اسم المورد *</label>
-      <input class="form-input" id="cp_supplier" placeholder="اسم المورد">
+      <input class="form-input" id="cp_supplier" placeholder="اسم المورد" value="${escHtml(p?.supplier_name || '')}">
     </div>
 
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">المبلغ (د.أ) *</label>
-        <input class="form-input" id="cp_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="cp_amount" type="number" min="0.001" step="0.001" placeholder="0.000" value="${p?.amount ?? ''}">
       </div>
       <div class="form-group">
-        <label class="form-label">التاريخ</label>
-        <input class="form-input" id="cp_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+        <label class="form-label">العملة</label>
+        <select class="form-select" id="cp_currency" onchange="chinaOnCurrencyChange('cp_currency','cp_rate_group')">
+          ${chinaCurrencyOptions(currency)}
+        </select>
       </div>
+    </div>
+
+    <div class="form-group" id="cp_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
+      <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
+      <input class="form-input" id="cp_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${p?.exchange_rate ?? ''}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">التاريخ</label>
+      <input class="form-input" id="cp_date" type="date" value="${p?.payment_date || new Date().toISOString().split('T')[0]}">
     </div>
 
     <div class="form-group">
       <label class="form-label">ملاحظات</label>
-      <input class="form-input" id="cp_notes" placeholder="اختياري">
+      <input class="form-input" id="cp_notes" placeholder="اختياري" value="${escHtml(p?.notes || '')}">
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment()">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment(${paymentId ?? 'null'})">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
-async function saveChinaPayment() {
+async function saveChinaPayment(paymentId) {
+  const supplier_idRaw = document.getElementById('cp_supplier_id')?.value;
+  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
   const supplier_name = document.getElementById('cp_supplier')?.value?.trim();
   const amount = parseFloat(document.getElementById('cp_amount')?.value);
+  const currency = document.getElementById('cp_currency')?.value || 'JOD';
+  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cp_rate')?.value);
   const payment_date = document.getElementById('cp_date')?.value;
   const notes = document.getElementById('cp_notes')?.value?.trim() || null;
 
   if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+
+  const payload = { supplier_id, supplier_name, amount, currency, exchange_rate, payment_date, notes };
 
   try {
-    await API.createChinaPayment({ supplier_name, amount, payment_date, notes });
+    if (paymentId) {
+      await API.updateChinaPayment(paymentId, payload);
+    } else {
+      await API.createChinaPayment(payload);
+    }
     toast('تم الحفظ ✅', 'success');
     closeModal();
     navigateTo('china');
@@ -9227,6 +9877,7 @@ function deleteChinaPaymentConfirm(id) {
 /* ───── المشتريات ───── */
 async function renderChinaPurchases(container) {
   const purchases = await API.getChinaPurchases() || [];
+  window._chinaPurchasesCache = purchases;
 
   container.innerHTML = `
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
@@ -9236,7 +9887,7 @@ async function renderChinaPurchases(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>المورد</th><th>ملاحظات</th><th></th></tr>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>المورد</th><th>ملاحظات</th><th></th></tr>
         </thead>
         <tbody>
           ${purchases.length ? purchases.map(p => `
@@ -9244,77 +9895,119 @@ async function renderChinaPurchases(container) {
               <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.purchase_date)}</td>
               <td><strong>${escHtml(p.item_name)}</strong></td>
               <td>${fmt(p.quantity || 0)}</td>
-              <td style="font-weight:700">${fmt(p.amount)} د.أ</td>
+              <td style="font-weight:700">${fmt(p.amount)}</td>
+              <td>${chinaCurrencyLabel(p.currency)}</td>
+              <td style="font-size:12px;color:var(--tx3)">${fmt(p.amount_jod || p.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.supplier_name || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
-              <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPurchaseConfirm(${p.id})">🗑️</button>` : ''}</td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaPurchaseModal(${p.id})">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPurchaseConfirm(${p.id})">🗑️</button>` : ''}
+                </div>
+              </td>
             </tr>
-          `).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+          `).join('') : `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function openChinaPurchaseModal() {
+function openChinaPurchaseModal(purchaseId = null) {
+  const purchases = window._chinaPurchasesCache || [];
+  const p = purchaseId ? purchases.find(x => String(x.id) === String(purchaseId)) : null;
+  const currency = p?.currency || 'JOD';
+
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">📦 عملية شراء جديدة</div>
+      <div class="modal-title">${purchaseId ? '✏️ تعديل عملية شراء' : '📦 عملية شراء جديدة'}</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
     <div class="form-group">
       <label class="form-label">اسم البضاعة *</label>
-      <input class="form-input" id="cpu_item" placeholder="مثال: أحذية رياضية">
+      <input class="form-input" id="cpu_item" placeholder="مثال: أحذية رياضية" value="${escHtml(p?.item_name || '')}">
     </div>
 
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">الكمية</label>
-        <input class="form-input" id="cpu_qty" type="number" min="0" step="0.001" value="1">
+        <input class="form-input" id="cpu_qty" type="number" min="0" step="0.001" value="${p?.quantity ?? 1}">
       </div>
       <div class="form-group">
-        <label class="form-label">المبلغ الإجمالي (د.أ) *</label>
-        <input class="form-input" id="cpu_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+        <label class="form-label">المبلغ الإجمالي *</label>
+        <input class="form-input" id="cpu_amount" type="number" min="0.001" step="0.001" placeholder="0.000" value="${p?.amount ?? ''}">
       </div>
     </div>
 
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">المورد</label>
-        <input class="form-input" id="cpu_supplier" placeholder="اختياري">
+        <label class="form-label">العملة</label>
+        <select class="form-select" id="cpu_currency" onchange="chinaOnCurrencyChange('cpu_currency','cpu_rate_group')">
+          ${chinaCurrencyOptions(currency)}
+        </select>
+      </div>
+      <div class="form-group" id="cpu_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
+        <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
+        <input class="form-input" id="cpu_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${p?.exchange_rate ?? ''}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">المورد (من السجل)</label>
+      <select class="form-select" id="cpu_supplier_id" onchange="chinaOnSupplierSelect('cpu_supplier_id','cpu_supplier')">
+        ${chinaSupplierOptions(p?.supplier_id)}
+      </select>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">اسم المورد</label>
+        <input class="form-input" id="cpu_supplier" placeholder="اختياري" value="${escHtml(p?.supplier_name || '')}">
       </div>
       <div class="form-group">
         <label class="form-label">التاريخ</label>
-        <input class="form-input" id="cpu_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+        <input class="form-input" id="cpu_date" type="date" value="${p?.purchase_date || new Date().toISOString().split('T')[0]}">
       </div>
     </div>
 
     <div class="form-group">
       <label class="form-label">ملاحظات</label>
-      <input class="form-input" id="cpu_notes" placeholder="اختياري">
+      <input class="form-input" id="cpu_notes" placeholder="اختياري" value="${escHtml(p?.notes || '')}">
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase()">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase(${purchaseId ?? 'null'})">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
-async function saveChinaPurchase() {
+async function saveChinaPurchase(purchaseId) {
   const item_name = document.getElementById('cpu_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('cpu_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('cpu_amount')?.value);
+  const currency = document.getElementById('cpu_currency')?.value || 'JOD';
+  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cpu_rate')?.value);
+  const supplier_idRaw = document.getElementById('cpu_supplier_id')?.value;
+  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
   const supplier_name = document.getElementById('cpu_supplier')?.value?.trim() || null;
   const purchase_date = document.getElementById('cpu_date')?.value;
   const notes = document.getElementById('cpu_notes')?.value?.trim() || null;
 
   if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+
+  const payload = { item_name, quantity, amount, currency, exchange_rate, supplier_id, supplier_name, purchase_date, notes };
 
   try {
-    await API.createChinaPurchase({ item_name, quantity, amount, supplier_name, purchase_date, notes });
+    if (purchaseId) {
+      await API.updateChinaPurchase(purchaseId, payload);
+    } else {
+      await API.createChinaPurchase(payload);
+    }
     toast('تم الحفظ ✅', 'success');
     closeModal();
     navigateTo('china');
@@ -9340,6 +10033,7 @@ function deleteChinaPurchaseConfirm(id) {
 /* ───── المبيعات ───── */
 async function renderChinaSales(container) {
   const sales = await API.getChinaSales() || [];
+  window._chinaSalesCache = sales;
 
   container.innerHTML = `
     <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
@@ -9349,7 +10043,7 @@ async function renderChinaSales(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>المشتري</th><th>ملاحظات</th><th></th></tr>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>المشتري</th><th>ملاحظات</th><th></th></tr>
         </thead>
         <tbody>
           ${sales.length ? sales.map(s => `
@@ -9357,77 +10051,110 @@ async function renderChinaSales(container) {
               <td style="font-size:12px;color:var(--tx3)">${fmtDate(s.sale_date)}</td>
               <td><strong>${escHtml(s.item_name)}</strong></td>
               <td>${fmt(s.quantity || 0)}</td>
-              <td style="font-weight:700;color:var(--gr)">${fmt(s.amount)} د.أ</td>
+              <td style="font-weight:700;color:var(--gr)">${fmt(s.amount)}</td>
+              <td>${chinaCurrencyLabel(s.currency)}</td>
+              <td style="font-size:12px;color:var(--tx3)">${fmt(s.amount_jod || s.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.buyer_name || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.notes || '—')}</td>
-              <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSaleConfirm(${s.id})">🗑️</button>` : ''}</td>
+              <td>
+                <div style="display:flex;gap:4px">
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaSaleModal(${s.id})">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSaleConfirm(${s.id})">🗑️</button>` : ''}
+                </div>
+              </td>
             </tr>
-          `).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مبيعات</td></tr>`}
+          `).join('') : `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مبيعات</td></tr>`}
         </tbody>
       </table>
     </div>
   `;
 }
 
-function openChinaSaleModal() {
+function openChinaSaleModal(saleId = null) {
+  const sales = window._chinaSalesCache || [];
+  const s = saleId ? sales.find(x => String(x.id) === String(saleId)) : null;
+  const currency = s?.currency || 'JOD';
+
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">🏷️ عملية بيع جديدة</div>
+      <div class="modal-title">${saleId ? '✏️ تعديل عملية بيع' : '🏷️ عملية بيع جديدة'}</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
     <div class="form-group">
       <label class="form-label">اسم البضاعة *</label>
-      <input class="form-input" id="csa_item" placeholder="مثال: أحذية رياضية">
+      <input class="form-input" id="csa_item" placeholder="مثال: أحذية رياضية" value="${escHtml(s?.item_name || '')}">
     </div>
 
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">الكمية</label>
-        <input class="form-input" id="csa_qty" type="number" min="0" step="0.001" value="1">
+        <input class="form-input" id="csa_qty" type="number" min="0" step="0.001" value="${s?.quantity ?? 1}">
       </div>
       <div class="form-group">
-        <label class="form-label">المبلغ الإجمالي (د.أ) *</label>
-        <input class="form-input" id="csa_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+        <label class="form-label">المبلغ الإجمالي *</label>
+        <input class="form-input" id="csa_amount" type="number" min="0.001" step="0.001" placeholder="0.000" value="${s?.amount ?? ''}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">العملة</label>
+        <select class="form-select" id="csa_currency" onchange="chinaOnCurrencyChange('csa_currency','csa_rate_group')">
+          ${chinaCurrencyOptions(currency)}
+        </select>
+      </div>
+      <div class="form-group" id="csa_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
+        <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
+        <input class="form-input" id="csa_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${s?.exchange_rate ?? ''}">
       </div>
     </div>
 
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">المشتري</label>
-        <input class="form-input" id="csa_buyer" placeholder="اختياري">
+        <input class="form-input" id="csa_buyer" placeholder="اختياري" value="${escHtml(s?.buyer_name || '')}">
       </div>
       <div class="form-group">
         <label class="form-label">التاريخ</label>
-        <input class="form-input" id="csa_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+        <input class="form-input" id="csa_date" type="date" value="${s?.sale_date || new Date().toISOString().split('T')[0]}">
       </div>
     </div>
 
     <div class="form-group">
       <label class="form-label">ملاحظات</label>
-      <input class="form-input" id="csa_notes" placeholder="اختياري">
+      <input class="form-input" id="csa_notes" placeholder="اختياري" value="${escHtml(s?.notes || '')}">
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale()">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale(${saleId ?? 'null'})">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
-async function saveChinaSale() {
+async function saveChinaSale(saleId) {
   const item_name = document.getElementById('csa_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('csa_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('csa_amount')?.value);
+  const currency = document.getElementById('csa_currency')?.value || 'JOD';
+  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('csa_rate')?.value);
   const buyer_name = document.getElementById('csa_buyer')?.value?.trim() || null;
   const sale_date = document.getElementById('csa_date')?.value;
   const notes = document.getElementById('csa_notes')?.value?.trim() || null;
 
   if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+
+  const payload = { item_name, quantity, amount, currency, exchange_rate, buyer_name, sale_date, notes };
 
   try {
-    await API.createChinaSale({ item_name, quantity, amount, buyer_name, sale_date, notes });
+    if (saleId) {
+      await API.updateChinaSale(saleId, payload);
+    } else {
+      await API.createChinaSale(payload);
+    }
     toast('تم الحفظ ✅', 'success');
     closeModal();
     navigateTo('china');

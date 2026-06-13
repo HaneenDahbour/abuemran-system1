@@ -327,22 +327,52 @@
     getChinaPayments: () => apiFetch('/china/payments'),
     createChinaPayment: data =>
       apiFetch('/china/payments', { method: 'POST', body: JSON.stringify(data) }),
+    updateChinaPayment: (id, data) =>
+      apiFetch(`/china/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaPayment: id =>
       apiFetch(`/china/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 
     getChinaPurchases: () => apiFetch('/china/purchases'),
     createChinaPurchase: data =>
       apiFetch('/china/purchases', { method: 'POST', body: JSON.stringify(data) }),
+    updateChinaPurchase: (id, data) =>
+      apiFetch(`/china/purchases/${requireId(id, 'معرّف عملية الشراء')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaPurchase: id =>
       apiFetch(`/china/purchases/${requireId(id, 'معرّف عملية الشراء')}`, { method: 'DELETE' }),
 
     getChinaSales: () => apiFetch('/china/sales'),
     createChinaSale: data =>
       apiFetch('/china/sales', { method: 'POST', body: JSON.stringify(data) }),
+    updateChinaSale: (id, data) =>
+      apiFetch(`/china/sales/${requireId(id, 'معرّف عملية البيع')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaSale: id =>
       apiFetch(`/china/sales/${requireId(id, 'معرّف عملية البيع')}`, { method: 'DELETE' }),
 
     getChinaSummary: () => apiFetch('/china/summary'),
+
+    // China suppliers
+    getChinaSuppliers: () => apiFetch('/china/suppliers'),
+    createChinaSupplier: data =>
+      apiFetch('/china/suppliers', { method: 'POST', body: JSON.stringify(data) }),
+    updateChinaSupplier: (id, data) =>
+      apiFetch(`/china/suppliers/${requireId(id, 'معرّف المورد')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteChinaSupplier: id =>
+      apiFetch(`/china/suppliers/${requireId(id, 'معرّف المورد')}`, { method: 'DELETE' }),
+    getChinaSupplierStatement: id =>
+      apiFetch(`/china/suppliers/${requireId(id, 'معرّف المورد')}/statement`),
+
+    // ── Warehouse Rent (إيجار المستودع) ─────────────────────────────
+    getWarehouseRents: () => apiFetch('/expenses/warehouse-rents'),
+    createWarehouseRent: data =>
+      apiFetch('/expenses/warehouse-rents', { method: 'POST', body: JSON.stringify(data) }),
+    updateWarehouseRent: (id, data) =>
+      apiFetch(`/expenses/warehouse-rents/${requireId(id, 'معرّف الإيجار')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteWarehouseRent: id =>
+      apiFetch(`/expenses/warehouse-rents/${requireId(id, 'معرّف الإيجار')}`, { method: 'DELETE' }),
+    getWarehouseRentPayments: id =>
+      apiFetch(`/expenses/warehouse-rents/${requireId(id, 'معرّف الإيجار')}/payments`),
+    toggleWarehouseRentPayment: (id, data) =>
+      apiFetch(`/expenses/warehouse-rents/${requireId(id, 'معرّف الإيجار')}/payments/toggle`, { method: 'POST', body: JSON.stringify(data) }),
   };
 
   window.API_BASE = API_BASE;
