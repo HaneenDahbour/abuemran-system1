@@ -11,6 +11,7 @@ from routers import (
     audit,
     auth,
     checks,
+    china,
     expenses,
     clients,
     invoices,
@@ -114,6 +115,9 @@ app.include_router(
     prefix="/api/warehouse-invoices",
     tags=["Warehouse Invoices"],
 )
+
+# ── China Section ─────────────────────────────────────────────
+app.include_router(china.router, prefix="/api/china", tags=["China"])
 
 # ── Search / AI ───────────────────────────────────────────────
 app.include_router(search.router, prefix="/api/search", tags=["Search"])

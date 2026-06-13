@@ -509,6 +509,7 @@ async function navigateTo(section) {
     checks: renderChecks,
     purchases: renderPurchases,
     warehouse: renderWarehouse,
+    china: renderChina,
     users: renderUsers,
     audit: renderAudit,
     analytics: renderAnalytics,
@@ -613,6 +614,11 @@ function renderSidebar() {
   if (canManageWarehouse()) {
     html += '<div class="nav-section-title">المستودع</div>';
     html += navItem('warehouse', '🏭', 'المستودع');
+  }
+
+  if (isAccountant()) {
+    html += '<div class="nav-section-title">الصين</div>';
+    html += navItem('china', '🇨🇳', 'قسم الصين');
   }
 
   if (isAdmin()) {
@@ -3598,8 +3604,32 @@ async function renderWarehouse(container) {
   }
 
   const totalProducts = categories.reduce((s, c) => s + parseInt(c.product_count || 0), 0);
+  const totalCapital = categories.reduce((s, c) => s + parseFloat(c.total_capital || 0), 0);
+  const totalSoldAll = categories.reduce((s, c) => s + parseFloat(c.total_sold || 0), 0);
+  const totalProfitAll = categories.reduce((s, c) => s + parseFloat(c.total_profit || 0), 0);
 
   container.innerHTML = `
+    <div class="card" style="padding:18px 20px; border:1px solid var(--brd); border-radius:16px; margin-bottom:14px;
+                              display:flex; gap:28px; flex-wrap:wrap; align-items:center;">
+      <div style="font-size:15px; font-weight:800; color:var(--tx); min-width:150px;">📊 ملخص المستودع العام</div>
+      <div>
+        <div style="font-size:11px; color:var(--tx3)">رأس المال الحالي (كل الفئات)</div>
+        <div style="font-size:18px; font-weight:800; color:var(--bl)">${fmt(totalCapital)} د.أ</div>
+      </div>
+      <div>
+        <div style="font-size:11px; color:var(--tx3)">إجمالي المبيعات</div>
+        <div style="font-size:18px; font-weight:800; color:var(--gr)">${fmt(totalSoldAll)} د.أ</div>
+      </div>
+      <div>
+        <div style="font-size:11px; color:var(--tx3)">إجمالي الربح</div>
+        <div style="font-size:18px; font-weight:800; color:${totalProfitAll >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(totalProfitAll)} د.أ</div>
+      </div>
+      <div>
+        <div style="font-size:11px; color:var(--tx3)">عدد الفئات / الأصناف</div>
+        <div style="font-size:18px; font-weight:800">${categories.length} / ${totalProducts}</div>
+      </div>
+    </div>
+  ` + `
     <div class="page-header">
       <div>
         <div class="page-title">🏭 المستودع</div>
@@ -3650,6 +3680,11 @@ async function renderWarehouse(container) {
             </div>
 
             <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
+              <div>
+                <div style="font-size:11px; color:var(--tx3)">رأس المال الحالي</div>
+                <div style="font-size:16px; font-weight:800; color:var(--bl)">${fmt(cat.total_capital || 0)} د.أ</div>
+              </div>
+
               <div>
                 <div style="font-size:11px; color:var(--tx3)">إجمالي الكمية</div>
                 <div style="font-size:16px; font-weight:800">${fmt(cat.total_stock || 0)}</div>
@@ -4142,7 +4177,88 @@ async function openCategoryFolder(catId) {
         </div>
       </div>
     ` : ''}
+
+    <div id="cat-analytics-section" style="margin-top:18px">
+      <div style="text-align:center;color:var(--tx3);font-size:12px;padding:10px">⏳ جارِ تحميل تحليل الفئة...</div>
+    </div>
   `, '980px');
+
+  loadCategoryAnalytics(catId);
+}
+
+async function loadCategoryAnalytics(catId) {
+  const section = document.getElementById('cat-analytics-section');
+  if (!section) return;
+
+  try {
+    const data = await API.getCategoryAnalytics(catId);
+    const summary = data?.summary || {};
+    const products = Array.isArray(data?.products) ? data.products : [];
+
+    const top = summary.top_product;
+
+    section.innerHTML = `
+      <div style="font-size:15px;font-weight:800;color:var(--tx);margin-bottom:10px">📊 تحليل تفصيلي للفئة</div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px">
+        <div class="card" style="padding:12px;border:1px solid var(--brd);border-radius:10px">
+          <div style="font-size:11px;color:var(--tx3)">رأس المال المتبقي</div>
+          <div style="font-size:17px;font-weight:800;color:var(--bl)">${fmt(summary.total_capital || 0)} د.أ</div>
+        </div>
+        <div class="card" style="padding:12px;border:1px solid var(--brd);border-radius:10px">
+          <div style="font-size:11px;color:var(--tx3)">إجمالي المبيعات</div>
+          <div style="font-size:17px;font-weight:800;color:var(--gr)">${fmt(summary.total_sold || 0)} د.أ</div>
+        </div>
+        <div class="card" style="padding:12px;border:1px solid var(--brd);border-radius:10px">
+          <div style="font-size:11px;color:var(--tx3)">إجمالي الربح</div>
+          <div style="font-size:17px;font-weight:800;color:${parseFloat(summary.total_profit || 0) >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(summary.total_profit || 0)} د.أ</div>
+        </div>
+        <div class="card" style="padding:12px;border:1px solid var(--brd);border-radius:10px">
+          <div style="font-size:11px;color:var(--tx3)">الكمية المباعة</div>
+          <div style="font-size:17px;font-weight:800">${fmt(summary.total_qty_sold || 0)}</div>
+        </div>
+        <div class="card" style="padding:12px;border:1px solid var(--brd);border-radius:10px">
+          <div style="font-size:11px;color:var(--tx3)">الأكثر ربحاً</div>
+          <div style="font-size:14px;font-weight:800">${top ? escHtml(top.name || '—') : '—'}</div>
+          ${top ? `<div style="font-size:11px;color:var(--gr);margin-top:2px">${fmt(top.profit || 0)} د.أ ربح</div>` : ''}
+        </div>
+      </div>
+
+      ${products.length ? `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الصنف</th>
+              <th>الكمية الحالية</th>
+              <th>سعر التكلفة</th>
+              <th>رأس المال المتبقي</th>
+              <th>الكمية المباعة</th>
+              <th>الإيراد</th>
+              <th>الربح</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${products.map(p => `
+              <tr>
+                <td>${escHtml(p.name || '—')}</td>
+                <td>${fmt(p.current_stock || 0)}</td>
+                <td>${fmt(p.cost_price || 0)} د.أ</td>
+                <td style="color:var(--bl);font-weight:700">${fmt(p.capital_remaining || 0)} د.أ</td>
+                <td>${fmt(p.qty_sold || 0)}</td>
+                <td style="color:var(--gr)">${fmt(p.revenue || 0)} د.أ</td>
+                <td style="color:${parseFloat(p.profit || 0) >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:700">${fmt(p.profit || 0)} د.أ</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      ` : ''}
+    `;
+  } catch (err) {
+    console.error(err);
+    section.innerHTML = `<div style="text-align:center;color:var(--tx3);font-size:12px;padding:10px">تعذّر تحميل تحليل الفئة</div>`;
+  }
 }
 function filterCategoryProducts(val) {
   const v = (val || '').toLowerCase().trim();
@@ -4810,6 +4926,57 @@ async function openEditProduct(productId, catId = null) {
         ${escHtml(p.unit || '')}
       </div>
 
+      <div style="font-size:13px; font-weight:800; color:var(--tx); margin:14px 0 6px">📋 تفاصيل إضافية</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">النوع</label>
+          <input class="form-input" id="pr_edit_brand_or_type" value="${escHtml(window._editingProductProperties.brand_or_type || '')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">الموديل</label>
+          <input class="form-input" id="pr_edit_model" value="${escHtml(window._editingProductProperties.model || '')}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">اللون</label>
+          <input class="form-input" id="pr_edit_color" value="${escHtml(window._editingProductProperties.color || '')}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">المقاس</label>
+          <input class="form-input" id="pr_edit_size" value="${escHtml(window._editingProductProperties.size || '')}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">التعبئة (عدد الحبات بالكرتونة/الشوال)</label>
+          <input class="form-input" id="pr_edit_pack_size" type="number" min="0" step="0.001" value="${window._editingProductProperties.pack_size ?? ''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">عدد الشوالات / الكراتين</label>
+          <input class="form-input" id="pr_edit_containers_count" type="number" min="0" step="0.001" value="${window._editingProductProperties.containers_count ?? ''}">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">العدد الإفرادي</label>
+          <input class="form-input" id="pr_edit_loose_count" type="number" min="0" step="0.001" value="${window._editingProductProperties.loose_count ?? ''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">المجموع الكلي الأصلي</label>
+          <input class="form-input" id="pr_edit_original_total_qty" type="number" min="0" step="0.001" value="${window._editingProductProperties.original_total_qty ?? ''}">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">ملاحظة</label>
+        <input class="form-input" id="pr_edit_note" value="${escHtml(window._editingProductProperties.import_note || '')}">
+      </div>
+
       <div style="display:flex; gap:10px; margin-top:8px">
         <button class="btn btn-primary" style="flex:1" id="save-edit-product-btn">حفظ التعديل</button>
         <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
@@ -4866,6 +5033,31 @@ async function saveEditProductNew(id) {
 
   try {
     const cost_price = parseFloat(document.getElementById('pr_cost_price')?.value || '0');
+
+    const numOrNull = id => {
+      const v = document.getElementById(id)?.value;
+      const n = parseFloat(v);
+      return v !== '' && !Number.isNaN(n) ? n : null;
+    };
+    const strOrNull = id => {
+      const v = document.getElementById(id)?.value.trim();
+      return v ? v : null;
+    };
+
+    const updatedProperties = {
+      ...(window._editingProductProperties || {}),
+      brand_or_type: strOrNull('pr_edit_brand_or_type'),
+      model: strOrNull('pr_edit_model'),
+      color: strOrNull('pr_edit_color'),
+      size: strOrNull('pr_edit_size'),
+      pack_size: numOrNull('pr_edit_pack_size'),
+      containers_count: numOrNull('pr_edit_containers_count'),
+      loose_count: numOrNull('pr_edit_loose_count'),
+      original_total_qty: numOrNull('pr_edit_original_total_qty'),
+      import_note: strOrNull('pr_edit_note'),
+    };
+    window._editingProductProperties = updatedProperties;
+
     await API.updateProduct(productId, {
       name, sku,
       category_id: (categoryValue && Number(categoryValue) > 0) ? Number(categoryValue) : null,
@@ -4873,7 +5065,7 @@ async function saveEditProductNew(id) {
       min_stock: minStock,
       cost_price,
       final_stock: finalStock,
-      properties: window._editingProductProperties || {},
+      properties: updatedProperties,
     });
 
     toast('تم حفظ التعديل ✅', 'success');
@@ -8552,4 +8744,708 @@ async function savePageExpense() {
       btn.textContent = 'حفظ';
     }
   }
+}
+
+/* ════════════════════════════════════════════════════════════
+   قسم الصين — مستقل تماماً
+   ════════════════════════════════════════════════════════════ */
+
+window._chinaTab = window._chinaTab || 'overview';
+
+async function renderChina(container) {
+  const tab = window._chinaTab || 'overview';
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🇨🇳 قسم الصين</div>
+        <div class="page-sub">تتبع رأس المال، الدفعات، المشتريات، المبيعات والمستثمرين — قسم مستقل تماماً عن باقي النظام</div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px">
+      ${chinaTabBtn('overview', '📊 نظرة عامة')}
+      ${chinaTabBtn('investors', '🤝 المستثمرون')}
+      ${chinaTabBtn('payments', '💸 دفعات الموردين')}
+      ${chinaTabBtn('purchases', '📦 المشتريات')}
+      ${chinaTabBtn('sales', '🏷️ المبيعات')}
+    </div>
+
+    <div id="china-tab-content">
+      <div class="loading"><div class="spinner"></div><p>جاري التحميل...</p></div>
+    </div>
+  `;
+
+  const content = document.getElementById('china-tab-content');
+
+  try {
+    if (tab === 'overview') await renderChinaOverview(content);
+    else if (tab === 'investors') await renderChinaInvestors(content);
+    else if (tab === 'payments') await renderChinaPayments(content);
+    else if (tab === 'purchases') await renderChinaPurchases(content);
+    else if (tab === 'sales') await renderChinaSales(content);
+  } catch (e) {
+    content.innerHTML = `<div class="alert alert-danger">${escHtml(e.message || 'حدث خطأ')}</div>`;
+  }
+}
+
+function chinaTabBtn(key, label) {
+  const active = (window._chinaTab || 'overview') === key;
+  return `<button class="btn ${active ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="switchChinaTab('${key}')">${label}</button>`;
+}
+
+function switchChinaTab(key) {
+  window._chinaTab = key;
+  navigateTo('china');
+}
+
+/* ───── نظرة عامة ───── */
+async function renderChinaOverview(container) {
+  const summary = await API.getChinaSummary() || {};
+
+  container.innerHTML = `
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-icon">💰</div>
+        <div class="metric-label">رأس المال الصافي (من المستثمرين)</div>
+        <div class="metric-value" style="color:var(--bl)">${fmt(summary.net_capital || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon">📥</div>
+        <div class="metric-label">إجمالي مساهمات المستثمرين</div>
+        <div class="metric-value" style="color:var(--gr)">${fmt(summary.total_contributions || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon">📤</div>
+        <div class="metric-label">إجمالي المسترجع للمستثمرين</div>
+        <div class="metric-value" style="color:var(--rd)">${fmt(summary.total_returns || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon">🎁</div>
+        <div class="metric-label">حصص الأرباح الموزّعة</div>
+        <div class="metric-value" style="color:var(--am)">${fmt(summary.total_profit_shares_paid || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon">💸</div>
+        <div class="metric-label">دفعات للموردين</div>
+        <div class="metric-value" style="color:var(--rd)">${fmt(summary.total_payments_to_suppliers || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon">📦</div>
+        <div class="metric-label">إجمالي المشتريات</div>
+        <div class="metric-value">${fmt(summary.total_purchases || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon">🏷️</div>
+        <div class="metric-label">إجمالي المبيعات</div>
+        <div class="metric-value" style="color:var(--gr)">${fmt(summary.total_sales || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+
+      <div class="metric-card" style="background:linear-gradient(135deg,#0a7650,#057a55);color:white">
+        <div class="metric-icon">📈</div>
+        <div class="metric-label" style="color:rgba(255,255,255,.8)">الربح الإجمالي (مبيعات - مشتريات)</div>
+        <div class="metric-value" style="color:white">${fmt(summary.gross_profit || 0)}</div>
+        <div class="metric-sub" style="color:rgba(255,255,255,.7)">دينار أردني</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon">🏦</div>
+        <div class="metric-label">رأس المال المتبقي التقديري</div>
+        <div class="metric-value" style="color:${parseFloat(summary.remaining_capital || 0) >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(summary.remaining_capital || 0)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+    </div>
+
+    <div class="alert alert-info" style="font-size:12px; margin-top:14px">
+      💡 رأس المال المتبقي = (مساهمات المستثمرين - المسترجع - حصص الأرباح الموزّعة) - المشتريات - دفعات الموردين + المبيعات
+    </div>
+  `;
+}
+
+/* ───── المستثمرون ───── */
+async function renderChinaInvestors(container) {
+  const investors = await API.getChinaInvestors() || [];
+  window._chinaInvestorsCache = investors;
+
+  container.innerHTML = `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="openChinaInvestorModal()">+ مستثمر جديد</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>الاسم</th>
+            <th>الهاتف</th>
+            <th>إجمالي المساهمات</th>
+            <th>إجمالي المسترجع</th>
+            <th>حصص الأرباح</th>
+            <th>الصافي له</th>
+            <th>ملاحظات</th>
+            <th>الإجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${investors.length ? investors.map(inv => {
+    const contributed = parseFloat(inv.total_contributed || 0);
+    const returned = parseFloat(inv.total_returned || 0);
+    const profitShare = parseFloat(inv.total_profit_share || 0);
+    const net = contributed - returned - profitShare;
+    return `
+              <tr>
+                <td><strong>${escHtml(inv.name)}</strong></td>
+                <td>${escHtml(inv.phone || '—')}</td>
+                <td style="color:var(--gr);font-weight:700">${fmt(contributed)} د.أ</td>
+                <td style="color:var(--rd);font-weight:700">${fmt(returned)} د.أ</td>
+                <td style="color:var(--am);font-weight:700">${fmt(profitShare)} د.أ</td>
+                <td style="color:var(--bl);font-weight:800">${fmt(net)} د.أ</td>
+                <td style="font-size:12px;color:var(--tx3)">${escHtml(inv.notes || '—')}</td>
+                <td>
+                  <div style="display:flex;gap:4px;flex-wrap:wrap">
+                    <button class="btn btn-ghost btn-sm" onclick="openChinaInvestorDetails(${inv.id})">📊 التفاصيل</button>
+                    <button class="btn btn-ghost btn-sm" onclick="openChinaInvestorModal(${inv.id})">✏️</button>
+                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaInvestorConfirm(${inv.id})">🗑️</button>` : ''}
+                  </div>
+                </td>
+              </tr>
+            `;
+  }).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا يوجد مستثمرون</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openChinaInvestorModal(investorId = null) {
+  const investors = window._chinaInvestorsCache || [];
+  const inv = investorId ? investors.find(i => String(i.id) === String(investorId)) : null;
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${investorId ? '✏️ تعديل مستثمر' : '🤝 مستثمر جديد'}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">الاسم *</label>
+      <input class="form-input" id="ci_name" value="${escHtml(inv?.name || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">رقم الهاتف</label>
+      <input class="form-input" id="ci_phone" value="${escHtml(inv?.phone || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="ci_notes" value="${escHtml(inv?.notes || '')}">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestor(${investorId ?? 'null'})">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveChinaInvestor(investorId) {
+  const name = document.getElementById('ci_name')?.value?.trim();
+  const phone = document.getElementById('ci_phone')?.value?.trim() || null;
+  const notes = document.getElementById('ci_notes')?.value?.trim() || null;
+
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+
+  try {
+    if (investorId) {
+      await API.updateChinaInvestor(investorId, { name, phone, notes });
+    } else {
+      await API.createChinaInvestor({ name, phone, notes });
+    }
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('china');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteChinaInvestorConfirm(investorId) {
+  const investors = window._chinaInvestorsCache || [];
+  const inv = investors.find(i => String(i.id) === String(investorId));
+
+  confirmDanger('حذف المستثمر', [
+    `المستثمر: ${inv?.name || investorId}`,
+    'سيتم حذف جميع حركاته (مساهمات / مسترجع / حصص أرباح) بشكل نهائي',
+  ], async () => {
+    try {
+      await API.deleteChinaInvestor(investorId);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      navigateTo('china');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+/* ───── تفاصيل مستثمر + حركاته ───── */
+async function openChinaInvestorDetails(investorId) {
+  try {
+    const investors = window._chinaInvestorsCache && window._chinaInvestorsCache.length
+      ? window._chinaInvestorsCache
+      : (window._chinaInvestorsCache = await API.getChinaInvestors() || []);
+
+    const inv = investors.find(i => String(i.id) === String(investorId));
+    const transactions = await API.getChinaInvestorTransactions(investorId) || [];
+
+    const typeLabel = { contribution: '📥 مساهمة', return: '📤 استرجاع', profit_share: '🎁 حصة من الربح' };
+    const typeColor = { contribution: 'var(--gr)', return: 'var(--rd)', profit_share: 'var(--am)' };
+
+    openModal(`
+      <div class="modal-header">
+        <div class="modal-title">📊 ${escHtml(inv?.name || '')}</div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; margin-bottom:10px">
+        <button class="btn btn-primary btn-sm" onclick="openChinaInvestorTransactionModal(${investorId})">+ حركة جديدة</button>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>ملاحظات</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${transactions.length ? transactions.map(t => `
+              <tr>
+                <td style="font-size:12px;color:var(--tx3)">${fmtDate(t.trans_date)}</td>
+                <td style="color:${typeColor[t.type] || 'var(--tx)'};font-weight:700">${typeLabel[t.type] || t.type}</td>
+                <td style="font-weight:800">${fmt(t.amount)} د.أ</td>
+                <td style="font-size:12px;color:var(--tx3)">${escHtml(t.notes || '—')}</td>
+                <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaInvestorTransaction(${t.id}, ${investorId})">🗑️</button>` : ''}</td>
+              </tr>
+            `).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد حركات</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    `, '700px');
+  } catch (e) {
+    toast(e.message || 'تعذّر تحميل تفاصيل المستثمر', 'error');
+  }
+}
+
+function openChinaInvestorTransactionModal(investorId) {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">💵 حركة جديدة</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">النوع *</label>
+      <select class="form-select" id="cit_type">
+        <option value="contribution">📥 مساهمة (إعطاء رأس مال)</option>
+        <option value="return">📤 استرجاع (إرجاع مبلغ للمستثمر)</option>
+        <option value="profit_share">🎁 حصة من الربح (إعطاء أرباح)</option>
+      </select>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ (د.أ) *</label>
+        <input class="form-input" id="cit_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="cit_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="cit_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestorTransaction(${investorId})">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveChinaInvestorTransaction(investorId) {
+  const type = document.getElementById('cit_type')?.value;
+  const amount = parseFloat(document.getElementById('cit_amount')?.value);
+  const trans_date = document.getElementById('cit_date')?.value;
+  const notes = document.getElementById('cit_notes')?.value?.trim() || null;
+
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  try {
+    await API.createChinaInvestorTransaction(investorId, { type, amount, trans_date, notes });
+    toast('تم الحفظ ✅', 'success');
+    window._chinaInvestorsCache = null;
+    closeModal();
+    await navigateTo('china');
+    openChinaInvestorDetails(investorId);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function deleteChinaInvestorTransaction(transactionId, investorId) {
+  confirmDanger('حذف الحركة', ['سيتم حذف هذه الحركة بشكل نهائي'], async () => {
+    try {
+      await API.deleteChinaInvestorTransaction(transactionId);
+      toast('تم الحذف ✅', 'success');
+      window._chinaInvestorsCache = null;
+      closeModal();
+      await navigateTo('china');
+      openChinaInvestorDetails(investorId);
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+/* ───── دفعات الموردين ───── */
+async function renderChinaPayments(container) {
+  const payments = await API.getChinaPayments() || [];
+
+  container.innerHTML = `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="openChinaPaymentModal()">+ دفعة جديدة</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>التاريخ</th><th>المورد</th><th>المبلغ</th><th>ملاحظات</th><th>أضيف بواسطة</th><th></th></tr>
+        </thead>
+        <tbody>
+          ${payments.length ? payments.map(p => `
+            <tr>
+              <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
+              <td><strong>${escHtml(p.supplier_name)}</strong></td>
+              <td style="color:var(--rd);font-weight:700">${fmt(p.amount)} د.أ</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(p.created_by_name || '—')}</td>
+              <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPaymentConfirm(${p.id})">🗑️</button>` : ''}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openChinaPaymentModal() {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">💸 دفعة لمورد</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اسم المورد *</label>
+      <input class="form-input" id="cp_supplier" placeholder="اسم المورد">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المبلغ (د.أ) *</label>
+        <input class="form-input" id="cp_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="cp_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="cp_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment()">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveChinaPayment() {
+  const supplier_name = document.getElementById('cp_supplier')?.value?.trim();
+  const amount = parseFloat(document.getElementById('cp_amount')?.value);
+  const payment_date = document.getElementById('cp_date')?.value;
+  const notes = document.getElementById('cp_notes')?.value?.trim() || null;
+
+  if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  try {
+    await API.createChinaPayment({ supplier_name, amount, payment_date, notes });
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('china');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteChinaPaymentConfirm(id) {
+  confirmDanger('حذف الدفعة', ['سيتم حذف هذه الدفعة بشكل نهائي'], async () => {
+    try {
+      await API.deleteChinaPayment(id);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      navigateTo('china');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+/* ───── المشتريات ───── */
+async function renderChinaPurchases(container) {
+  const purchases = await API.getChinaPurchases() || [];
+
+  container.innerHTML = `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="openChinaPurchaseModal()">+ عملية شراء</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>المورد</th><th>ملاحظات</th><th></th></tr>
+        </thead>
+        <tbody>
+          ${purchases.length ? purchases.map(p => `
+            <tr>
+              <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.purchase_date)}</td>
+              <td><strong>${escHtml(p.item_name)}</strong></td>
+              <td>${fmt(p.quantity || 0)}</td>
+              <td style="font-weight:700">${fmt(p.amount)} د.أ</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(p.supplier_name || '—')}</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
+              <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPurchaseConfirm(${p.id})">🗑️</button>` : ''}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openChinaPurchaseModal() {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">📦 عملية شراء جديدة</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اسم البضاعة *</label>
+      <input class="form-input" id="cpu_item" placeholder="مثال: أحذية رياضية">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">الكمية</label>
+        <input class="form-input" id="cpu_qty" type="number" min="0" step="0.001" value="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">المبلغ الإجمالي (د.أ) *</label>
+        <input class="form-input" id="cpu_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المورد</label>
+        <input class="form-input" id="cpu_supplier" placeholder="اختياري">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="cpu_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="cpu_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase()">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveChinaPurchase() {
+  const item_name = document.getElementById('cpu_item')?.value?.trim();
+  const quantity = parseFloat(document.getElementById('cpu_qty')?.value) || 1;
+  const amount = parseFloat(document.getElementById('cpu_amount')?.value);
+  const supplier_name = document.getElementById('cpu_supplier')?.value?.trim() || null;
+  const purchase_date = document.getElementById('cpu_date')?.value;
+  const notes = document.getElementById('cpu_notes')?.value?.trim() || null;
+
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  try {
+    await API.createChinaPurchase({ item_name, quantity, amount, supplier_name, purchase_date, notes });
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('china');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteChinaPurchaseConfirm(id) {
+  confirmDanger('حذف عملية الشراء', ['سيتم حذف هذه العملية بشكل نهائي'], async () => {
+    try {
+      await API.deleteChinaPurchase(id);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      navigateTo('china');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+/* ───── المبيعات ───── */
+async function renderChinaSales(container) {
+  const sales = await API.getChinaSales() || [];
+
+  container.innerHTML = `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="openChinaSaleModal()">+ عملية بيع</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>المشتري</th><th>ملاحظات</th><th></th></tr>
+        </thead>
+        <tbody>
+          ${sales.length ? sales.map(s => `
+            <tr>
+              <td style="font-size:12px;color:var(--tx3)">${fmtDate(s.sale_date)}</td>
+              <td><strong>${escHtml(s.item_name)}</strong></td>
+              <td>${fmt(s.quantity || 0)}</td>
+              <td style="font-weight:700;color:var(--gr)">${fmt(s.amount)} د.أ</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(s.buyer_name || '—')}</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(s.notes || '—')}</td>
+              <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSaleConfirm(${s.id})">🗑️</button>` : ''}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مبيعات</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openChinaSaleModal() {
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">🏷️ عملية بيع جديدة</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">اسم البضاعة *</label>
+      <input class="form-input" id="csa_item" placeholder="مثال: أحذية رياضية">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">الكمية</label>
+        <input class="form-input" id="csa_qty" type="number" min="0" step="0.001" value="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">المبلغ الإجمالي (د.أ) *</label>
+        <input class="form-input" id="csa_amount" type="number" min="0.001" step="0.001" placeholder="0.000">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المشتري</label>
+        <input class="form-input" id="csa_buyer" placeholder="اختياري">
+      </div>
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="csa_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="csa_notes" placeholder="اختياري">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale()">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveChinaSale() {
+  const item_name = document.getElementById('csa_item')?.value?.trim();
+  const quantity = parseFloat(document.getElementById('csa_qty')?.value) || 1;
+  const amount = parseFloat(document.getElementById('csa_amount')?.value);
+  const buyer_name = document.getElementById('csa_buyer')?.value?.trim() || null;
+  const sale_date = document.getElementById('csa_date')?.value;
+  const notes = document.getElementById('csa_notes')?.value?.trim() || null;
+
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  try {
+    await API.createChinaSale({ item_name, quantity, amount, buyer_name, sale_date, notes });
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('china');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteChinaSaleConfirm(id) {
+  confirmDanger('حذف عملية البيع', ['سيتم حذف هذه العملية بشكل نهائي'], async () => {
+    try {
+      await API.deleteChinaSale(id);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      navigateTo('china');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
 }

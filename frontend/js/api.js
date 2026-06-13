@@ -288,6 +288,8 @@
       apiFetch(`/warehouse-categories/${requireId(id, 'معرّف الفئة')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteWarehouseCategory: id =>
       apiFetch(`/warehouse-categories/${requireId(id, 'معرّف الفئة')}`, { method: 'DELETE' }),
+    getCategoryAnalytics: id =>
+      apiFetch(`/warehouse-categories/${requireId(id, 'معرّف الفئة')}/analytics`),
 
     // ── Warehouse Invoices ────────────────────────────────────────
     getWarehouseInvoices: () => apiFetch('/warehouse-invoices'),
@@ -305,6 +307,42 @@
       apiFetch('/recipients/payments', { method: 'POST', body: JSON.stringify(data) }),
     deleteRecipientPayment: id =>
       apiFetch(`/recipients/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
+
+    // ── China Section ─────────────────────────────────────────────
+    getChinaInvestors: () => apiFetch('/china/investors'),
+    createChinaInvestor: data =>
+      apiFetch('/china/investors', { method: 'POST', body: JSON.stringify(data) }),
+    updateChinaInvestor: (id, data) =>
+      apiFetch(`/china/investors/${requireId(id, 'معرّف المستثمر')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteChinaInvestor: id =>
+      apiFetch(`/china/investors/${requireId(id, 'معرّف المستثمر')}`, { method: 'DELETE' }),
+
+    getChinaInvestorTransactions: investorId =>
+      apiFetch(`/china/investors/${requireId(investorId, 'معرّف المستثمر')}/transactions`),
+    createChinaInvestorTransaction: (investorId, data) =>
+      apiFetch(`/china/investors/${requireId(investorId, 'معرّف المستثمر')}/transactions`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteChinaInvestorTransaction: id =>
+      apiFetch(`/china/transactions/${requireId(id, 'معرّف الحركة')}`, { method: 'DELETE' }),
+
+    getChinaPayments: () => apiFetch('/china/payments'),
+    createChinaPayment: data =>
+      apiFetch('/china/payments', { method: 'POST', body: JSON.stringify(data) }),
+    deleteChinaPayment: id =>
+      apiFetch(`/china/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
+
+    getChinaPurchases: () => apiFetch('/china/purchases'),
+    createChinaPurchase: data =>
+      apiFetch('/china/purchases', { method: 'POST', body: JSON.stringify(data) }),
+    deleteChinaPurchase: id =>
+      apiFetch(`/china/purchases/${requireId(id, 'معرّف عملية الشراء')}`, { method: 'DELETE' }),
+
+    getChinaSales: () => apiFetch('/china/sales'),
+    createChinaSale: data =>
+      apiFetch('/china/sales', { method: 'POST', body: JSON.stringify(data) }),
+    deleteChinaSale: id =>
+      apiFetch(`/china/sales/${requireId(id, 'معرّف عملية البيع')}`, { method: 'DELETE' }),
+
+    getChinaSummary: () => apiFetch('/china/summary'),
   };
 
   window.API_BASE = API_BASE;

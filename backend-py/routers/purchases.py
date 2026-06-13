@@ -274,12 +274,25 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
 
                     old_stock = float(product["current_stock"] or 0)
                     new_stock = old_stock + quantity
+                    new_cost_price = float(item["unit_price"] or 0)
 
-                    await conn.execute(
-                        "UPDATE products SET current_stock=$1 WHERE id=$2",
-                        new_stock,
-                        item["product_id"],
-                    )
+                    if new_cost_price > 0:
+                        await conn.execute(
+                            """
+                            UPDATE products
+                            SET current_stock=$1, cost_price=$2, base_price=$2
+                            WHERE id=$3
+                            """,
+                            new_stock,
+                            new_cost_price,
+                            item["product_id"],
+                        )
+                    else:
+                        await conn.execute(
+                            "UPDATE products SET current_stock=$1 WHERE id=$2",
+                            new_stock,
+                            item["product_id"],
+                        )
 
                     await conn.execute(
                         """

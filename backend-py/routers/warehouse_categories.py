@@ -106,6 +106,15 @@ async def get_categories(user=Depends(get_current_user)):
                 FROM product_profit
                 GROUP BY category_id
             ),
+            category_capital AS (
+                SELECT
+                    p.category_id,
+                    COALESCE(SUM(
+                        p.current_stock * COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.base_price, 0), 0)
+                    ), 0) AS total_capital
+                FROM products p
+                GROUP BY p.category_id
+            ),
             sold_legacy AS (
                 SELECT
                     p.category_id,
@@ -152,10 +161,12 @@ async def get_categories(user=Depends(get_current_user)):
                      THEN ROUND(
                          ((COALESCE(MAX(cf.total_sold), 0) - COALESCE(MAX(cf.total_cost), 0))
                           / COALESCE(MAX(cf.total_sold), 1) * 100)::numeric, 1)
-                     ELSE 0 END AS profit_margin_pct
+                     ELSE 0 END AS profit_margin_pct,
+                COALESCE(MAX(cc.total_capital), 0) AS total_capital
             FROM warehouse_categories wc
             LEFT JOIN products           p  ON p.category_id  = wc.id
             LEFT JOIN category_financials cf ON cf.category_id = wc.id
+            LEFT JOIN category_capital    cc ON cc.category_id = wc.id
             GROUP BY wc.id, wc.name, wc.icon
             ORDER BY wc.name ASC
         """)
@@ -207,7 +218,8 @@ async def get_categories(user=Depends(get_current_user)):
                     COALESCE(MAX(sbc.total_sold), 0) AS total_sold,
                     0::numeric AS total_cost,
                     0::numeric AS total_profit,
-                    0::numeric AS profit_margin_pct
+                    0::numeric AS profit_margin_pct,
+                    COALESCE(SUM(p.current_stock * COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.base_price, 0), 0)), 0) AS total_capital
                 FROM warehouse_categories wc
                 LEFT JOIN products          p   ON p.category_id  = wc.id
                 LEFT JOIN sold_by_category  sbc ON sbc.category_id = wc.id
@@ -243,6 +255,106 @@ async def get_category_products(category_id: int, user=Depends(get_current_user)
             status_code=500,
             detail=f"ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ Ø£ØµÙ†Ø§Ù Ø§Ù„ÙØ¦Ø©: {str(e)}",
         )
+
+
+@router.get("/{category_id}/analytics")
+async def get_category_analytics(category_id: int, user=Depends(get_current_user)):
+    pool = await get_pool()
+
+    try:
+        category = await pool.fetchrow(
+            "SELECT id, name, icon FROM warehouse_categories WHERE id=$1", category_id
+        )
+
+        if not category:
+            raise HTTPException(status_code=404, detail="الفئة غير موجودة")
+
+        try:
+            rows = await pool.fetch(
+                """
+                WITH invoice_sales AS (
+                    SELECT
+                        ii.product_id,
+                        COALESCE(SUM(COALESCE(ii.line_total, ii.quantity * ii.unit_price, 0)), 0) AS revenue,
+                        COALESCE(SUM(ii.quantity), 0) AS qty_sold
+                    FROM invoice_items ii
+                    JOIN invoices i ON i.id = ii.invoice_id
+                    WHERE COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
+                    GROUP BY ii.product_id
+                ),
+                warehouse_sales AS (
+                    SELECT
+                        product_id,
+                        COALESCE(SUM(quantity * unit_price), 0) AS revenue,
+                        COALESCE(SUM(quantity), 0)              AS qty_sold
+                    FROM warehouse_invoice_items
+                    GROUP BY product_id
+                )
+                SELECT
+                    p.id, p.name, p.sku, p.unit,
+                    p.current_stock,
+                    COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.base_price, 0), 0) AS cost_price,
+                    (p.current_stock * COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.base_price, 0), 0)) AS capital_remaining,
+                    COALESCE(inv.qty_sold, 0) + COALESCE(wh.qty_sold, 0) AS qty_sold,
+                    COALESCE(inv.revenue, 0)  + COALESCE(wh.revenue, 0)  AS revenue,
+                    (COALESCE(inv.revenue, 0) + COALESCE(wh.revenue, 0))
+                      - (COALESCE(inv.qty_sold, 0) + COALESCE(wh.qty_sold, 0))
+                        * COALESCE(NULLIF(p.cost_price, 0), NULLIF(p.base_price, 0), 0) AS profit
+                FROM products p
+                LEFT JOIN invoice_sales   inv ON inv.product_id = p.id
+                LEFT JOIN warehouse_sales wh  ON wh.product_id  = p.id
+                WHERE p.category_id = $1
+                ORDER BY profit DESC NULLS LAST, p.name ASC
+                """,
+                category_id,
+            )
+        except Exception:
+            rows = await pool.fetch(
+                """
+                SELECT
+                    p.id, p.name, p.sku, p.unit,
+                    p.current_stock,
+                    0::numeric AS cost_price,
+                    0::numeric AS capital_remaining,
+                    0::numeric AS qty_sold,
+                    0::numeric AS revenue,
+                    0::numeric AS profit
+                FROM products p
+                WHERE p.category_id = $1
+                ORDER BY p.name ASC
+                """,
+                category_id,
+            )
+
+        products = [row_to_dict(r) for r in rows]
+
+        total_capital = sum(float(p["capital_remaining"] or 0) for p in products)
+        total_sold = sum(float(p["revenue"] or 0) for p in products)
+        total_profit = sum(float(p["profit"] or 0) for p in products)
+        total_qty_sold = sum(float(p["qty_sold"] or 0) for p in products)
+
+        top_product = None
+        for p in sorted(products, key=lambda x: float(x["profit"] or 0), reverse=True):
+            if float(p["profit"] or 0) > 0:
+                top_product = {"name": p["name"], "profit": p["profit"]}
+                break
+
+        return {
+            "category": row_to_dict(category),
+            "summary": {
+                "total_capital": total_capital,
+                "total_sold": total_sold,
+                "total_profit": total_profit,
+                "total_qty_sold": total_qty_sold,
+                "top_product": top_product,
+            },
+            "products": products,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر تحميل تحليلات الفئة: {str(e)}")
 
 
 @router.post("")
