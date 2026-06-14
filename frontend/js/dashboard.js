@@ -623,6 +623,13 @@ function renderSidebar() {
     html += navItem('china', '🇨🇳', 'قسم الصين');
   }
 
+  if (isAccountant()) {
+    html += '<div class="nav-section-title">المحلات</div>';
+    html += `<a class="nav-item" href="shops.html" target="_blank" rel="noopener">
+      <span class="nav-icon">🏬</span><span class="nav-label">نظام المحلات</span>
+    </a>`;
+  }
+
   if (isAdmin()) {
     html += '<div class="nav-section-title">الإدارة</div>';
     html += navItem('users', '🔐', 'إدارة المستخدمين');
