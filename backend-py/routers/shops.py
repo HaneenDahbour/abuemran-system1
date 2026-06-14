@@ -54,18 +54,23 @@ async def insert_audit(conn, user, action: str, entity_type: str, entity_id, det
 
 
 def check_shop_access(user, shop_id: int):
-    """admin/accountant can access any shop. shop_manager/shop_employee only their own shop."""
+    """admin/accountant can access any shop. شيوزر له shop_id مرتبط (أي صلاحية) يصل لمحله فقط."""
     role = user.get("role")
     if role in ("admin", "accountant"):
         return
-    if role in ("shop_manager", "shop_employee"):
-        if int(user.get("shop_id") or 0) == int(shop_id):
-            return
+    if user.get("shop_id") and int(user.get("shop_id")) == int(shop_id):
+        return
     raise HTTPException(status_code=403, detail="لا تملك صلاحية الوصول لهذا المحل")
 
 
 def require_shop_role(user):
-    require_role(user, "admin", "accountant", "shop_manager", "shop_employee")
+    """admin/accountant/shop_manager/shop_employee دائماً مسموح، وأي مستخدم آخر مرتبط بمحل (shop_id) مسموح أيضاً."""
+    role = user.get("role")
+    if role in ("admin", "accountant", "shop_manager", "shop_employee"):
+        return
+    if user.get("shop_id"):
+        return
+    raise HTTPException(status_code=403, detail="هذه الصفحة لمستخدمي المحلات فقط — ليس لديك صلاحية")
 
 
 async def compute_cash_balance(pool, shop_id: int):

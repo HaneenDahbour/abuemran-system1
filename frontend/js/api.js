@@ -114,6 +114,7 @@
     deleteUser: id =>
       apiFetch(`/auth/users/${requireId(id, 'معرّف المستخدم')}`, { method: 'DELETE' }),
     getEmployeesList: () => apiFetch('/auth/employees-list'),
+    getShops: () => apiFetch('/shops'),
 
     // ── Search ────────────────────────────────────────────────────
     search: q => apiFetch(`/search?q=${encodeURIComponent(q)}`),

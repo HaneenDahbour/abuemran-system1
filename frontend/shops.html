@@ -154,7 +154,7 @@
     function doShopLogout() {
       localStorage.removeItem('shop_token');
       localStorage.removeItem('shop_user');
-      location.reload();
+      location.href = 'portal.html';
     }
 
     async function api(path, options = {}) {
@@ -243,19 +243,15 @@
       const token = getShopToken();
       const user = getShopUser();
       if (token && user) {
-        if (!['shop_manager', 'shop_employee', 'admin', 'accountant'].includes(user.role)) {
+        if (!['shop_manager', 'shop_employee', 'admin', 'accountant'].includes(user.role) && !user.shop_id) {
           toast('هذا الحساب لا يملك صلاحية الوصول لقسم المحلات', 'error');
           doShopLogout();
           return;
         }
         showApp();
       } else {
-        document.getElementById('loginPage').classList.remove('hidden');
+        location.href = 'portal.html';
       }
-
-      document.getElementById('login-btn').addEventListener('click', login);
-      document.getElementById('lp').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
-      document.getElementById('lu').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
     });
 
     async function login() {
@@ -273,7 +269,7 @@
         });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data?.token) throw new Error(data?.detail || 'بيانات الدخول غير صحيحة');
-        if (!['shop_manager', 'shop_employee', 'admin', 'accountant'].includes(data.user.role)) {
+        if (!['shop_manager', 'shop_employee', 'admin', 'accountant'].includes(data.user.role) && !data.user.shop_id) {
           throw new Error('هذا الحساب لا يملك صلاحية الوصول لقسم المحلات');
         }
         localStorage.setItem('shop_token', data.token);
@@ -302,7 +298,7 @@
       document.getElementById('loginPage').classList.add('hidden');
       document.getElementById('app').classList.remove('hidden');
       const user = getShopUser();
-      const roleLabels = { admin: 'مدير عام', accountant: 'محاسب', shop_manager: 'مدير محل', shop_employee: 'موظف محل' };
+      const roleLabels = { admin: 'مدير عام', accountant: 'محاسب', shop_manager: 'مدير محل', shop_employee: 'موظف محل', employee: 'موظف' };
       document.getElementById('who').textContent = `${user.full_name} — ${roleLabels[user.role] || user.role}`;
 
       await loadCategories();

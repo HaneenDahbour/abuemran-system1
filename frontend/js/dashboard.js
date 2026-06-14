@@ -200,7 +200,7 @@ if (typeof doLogout !== 'function') {
   function doLogout() {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    location.reload();
+    location.href = 'portal.html';
   }
 }
 
@@ -446,9 +446,8 @@ document.addEventListener('DOMContentLoaded', function init() {
   if (!loginPage || !appLayout) return;
 
   if (!token || !localStorage.getItem('user')) {
-    loginPage.classList.remove('hidden');
-    appLayout.classList.add('hidden');
-    setupLoginPage();
+    location.href = 'portal.html';
+    return;
   } else {
     loginPage.classList.add('hidden');
     appLayout.classList.remove('hidden');
@@ -5566,7 +5565,7 @@ async function renderUsers(container) {
                     </div>
                   </td>
                   <td style="font-family:monospace; color:var(--tx2)">${escHtml(u.username || '—')}</td>
-                  <td>${roleBadge(u.role)}</td>
+                  <td>${roleBadge(u.role)}${u.shop_id ? ' <span class="badge badge-blue">🏬 محل</span>' : ''}</td>
                   <td style="font-size:12px; color:var(--tx3)">${fmtDate(u.created_at)}</td>
                   <td>
                     <div style="display:flex;gap:6px">
@@ -5614,7 +5613,38 @@ function collectPermissions(prefix) {
   return Array.from(document.querySelectorAll(`.${prefix}_perm:checked`)).map(el => el.value);
 }
 
+/* ───── Shop access (link a user account to a shop — for combined access) ───── */
+async function loadShopsForModal() {
+  if (window._shopsListCache) return window._shopsListCache;
+  try {
+    window._shopsListCache = await API.getShops() || [];
+  } catch (e) {
+    window._shopsListCache = [];
+  }
+  return window._shopsListCache;
+}
+
+function shopAccessHtml(prefix, shops, selectedShopId) {
+  const opts = shops.map(s =>
+    `<option value="${s.id}" ${s.id == selectedShopId ? 'selected' : ''}>${escHtml(s.name)}</option>`
+  ).join('');
+
+  return `
+    <div class="form-group">
+      <label class="form-label">
+        ربط بمحل (اختياري)
+        <span style="font-size:10px;color:var(--tx3);margin-right:4px">يتيح لهذا المستخدم تسجيل الدخول لنظام المحلات لهذا المحل أيضاً — بنفس اسم المستخدم وكلمة المرور</span>
+      </label>
+      <select class="form-select" id="${prefix}_shop_id">
+        <option value="">— بدون ربط بمحل —</option>
+        ${opts}
+      </select>
+    </div>
+  `;
+}
+
 function openUserModal() {
+  loadShopsForModal().then(shops => {
   openModal(`
     <div class="modal-header">
       <div class="modal-title">إضافة مستخدم جديد</div>
@@ -5641,14 +5671,18 @@ function openUserModal() {
         <option value="employee">موظف</option>
         <option value="admin">مدير عام</option>
         <option value="client">عميل</option>
+        <option value="shop_manager">مدير محل</option>
+        <option value="shop_employee">موظف محل</option>
       </select>
     </div>
+    ${shopAccessHtml('nu', shops, null)}
     ${permissionCheckboxesHtml('nu', null)}
     <div style="display:flex; gap:10px; margin-top:8px">
       <button class="btn btn-primary" style="flex:1" onclick="saveUser()">إنشاء الحساب</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
+  });
 }
 
 async function saveUser() {
@@ -5656,14 +5690,24 @@ async function saveUser() {
   const username = document.getElementById('nu_user').value.trim();
   const password = document.getElementById('nu_pass').value;
   const role = document.getElementById('nu_role').value;
+  const shopIdVal = document.getElementById('nu_shop_id')?.value;
 
   if (!name || !username || !password) {
     toast('يرجى ملء جميع الحقول', 'error');
     return;
   }
 
+  if ((role === 'shop_manager' || role === 'shop_employee') && !shopIdVal) {
+    toast('اختر المحل المرتبط بهذا الحساب', 'error');
+    return;
+  }
+
   try {
-    await API.createUser({ full_name: name, username, password, role, permissions: collectPermissions('nu') });
+    await API.createUser({
+      full_name: name, username, password, role,
+      shop_id: shopIdVal ? Number(shopIdVal) : null,
+      permissions: collectPermissions('nu'),
+    });
     toast('تم إنشاء الحساب بنجاح', 'success');
     closeModal();
     navigateTo('users');
@@ -5690,7 +5734,7 @@ async function deleteUser(id, name) {
   });
 }
 
-function openEditUserModal(u) {
+async function openEditUserModal(u) {
   // Accept either an object or a JSON string (passed from onclick attributes)
   if (typeof u === 'string') {
     try { u = JSON.parse(u); }
@@ -5700,6 +5744,7 @@ function openEditUserModal(u) {
   const clientOpts = clients.map(c =>
     `<option value="${c.id}" ${c.id == u.client_id ? 'selected' : ''}>${escHtml(c.name)}</option>`
   ).join('');
+  const shops = await loadShopsForModal();
 
   openModal(`
     <div class="modal-header">
@@ -5719,6 +5764,8 @@ function openEditUserModal(u) {
           <option value="employee"   ${u.role==='employee'   ? 'selected':''}>موظف</option>
           <option value="client"     ${u.role==='client'     ? 'selected':''}>عميل</option>
           <option value="recipient"  ${u.role==='recipient'  ? 'selected':''}>زبون</option>
+          <option value="shop_manager" ${u.role==='shop_manager' ? 'selected':''}>مدير محل</option>
+          <option value="shop_employee" ${u.role==='shop_employee' ? 'selected':''}>موظف محل</option>
         </select>
       </div>
       <div class="form-group">
@@ -5741,6 +5788,7 @@ function openEditUserModal(u) {
         ${clientOpts}
       </select>
     </div>
+    ${shopAccessHtml('eu', shops, u.shop_id)}
     ${permissionCheckboxesHtml('eu', Array.isArray(u.permissions) ? u.permissions : null)}
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-primary" style="flex:1" onclick="saveEditUser(${u.id})">حفظ التعديلات</button>
@@ -5754,8 +5802,14 @@ async function saveEditUser(id) {
   const role      = document.getElementById('eu_role')?.value;
   const password  = document.getElementById('eu_pass')?.value || null;
   const client_id = document.getElementById('eu_client_id')?.value || null;
+  const shopIdVal = document.getElementById('eu_shop_id')?.value;
 
   if (!full_name) { toast('الاسم مطلوب', 'error'); return; }
+
+  if ((role === 'shop_manager' || role === 'shop_employee') && !shopIdVal) {
+    toast('اختر المحل المرتبط بهذا الحساب', 'error');
+    return;
+  }
 
   const btn = document.querySelector('#global-modal .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
@@ -5765,6 +5819,7 @@ async function saveEditUser(id) {
     await API.updateUser(id, {
       full_name, role, password,
       client_id: client_id ? Number(client_id) : null,
+      shop_id: shopIdVal ? Number(shopIdVal) : null,
       base_salary: baseSalaryVal !== '' && baseSalaryVal != null ? parseFloat(baseSalaryVal) || 0 : null,
       permissions: collectPermissions('eu'),
     });
