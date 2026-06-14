@@ -1,4 +1,5 @@
-﻿import os
+﻿import json
+import os
 import random
 import string
 from datetime import datetime, timedelta
@@ -12,7 +13,7 @@ from pydantic import BaseModel
 from config.db import get_pool
 from middleware.auth import get_current_user
 from middleware.roles import require_role
-from typing import Optional
+from typing import List, Optional
 
 load_dotenv()
 
@@ -38,6 +39,19 @@ class CreateUserRequest(BaseModel):
     recipient_name: Optional[str] = None
     base_salary: Optional[float] = None
     shop_id: Optional[int] = None
+    permissions: Optional[List[str]] = None
+
+
+def parse_permissions(raw):
+    if raw is None:
+        return None
+    if isinstance(raw, (list, dict)):
+        return raw
+    try:
+        return json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+
 
 @router.post("/login")
 async def login(data: LoginRequest):
@@ -56,6 +70,8 @@ async def login(data: LoginRequest):
     if not valid:
         raise HTTPException(status_code=401, detail="Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¯Ø®ÙˆÙ„ ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
 
+    permissions = parse_permissions(user["permissions"]) if "permissions" in user.keys() else None
+
     payload = {
         "id": user["id"],
         "username": user["username"],
@@ -64,6 +80,7 @@ async def login(data: LoginRequest):
         "client_id": user["client_id"],
         "recipient_name": user["recipient_name"],
         "shop_id": user["shop_id"] if "shop_id" in user.keys() else None,
+        "permissions": permissions,
         "exp": datetime.utcnow() + timedelta(days=7),
     }
 
@@ -92,6 +109,7 @@ async def login(data: LoginRequest):
             "role": user["role"],
             "client_id": user["client_id"],
             "shop_id": user["shop_id"] if "shop_id" in user.keys() else None,
+            "permissions": permissions,
         },
     }
 
@@ -120,6 +138,7 @@ async def get_users(user=Depends(get_current_user)):
             u.client_id,
             u.recipient_name,
             u.shop_id,
+            u.permissions,
             COALESCE(u.base_salary, 0) AS base_salary,
             u.created_at,
 
@@ -138,12 +157,18 @@ async def get_users(user=Depends(get_current_user)):
             u.client_id,
             u.recipient_name,
             u.shop_id,
+            u.permissions,
             u.base_salary,
             u.created_at
         ORDER BY u.created_at DESC
     """)
 
-    return [dict(row) for row in rows]
+    result = []
+    for row in rows:
+        d = dict(row)
+        d["permissions"] = parse_permissions(d.get("permissions"))
+        result.append(d)
+    return result
 
 @router.post("/users")
 async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
@@ -187,9 +212,9 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
 
     new_user = await pool.fetchrow(
         """
-        INSERT INTO users (username, password_hash, full_name, role, client_id, recipient_name, base_salary, shop_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        RETURNING id, username, full_name, role, client_id, recipient_name, base_salary, shop_id
+        INSERT INTO users (username, password_hash, full_name, role, client_id, recipient_name, base_salary, shop_id, permissions)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        RETURNING id, username, full_name, role, client_id, recipient_name, base_salary, shop_id, permissions
         """,
         username,
         hashed_password,
@@ -199,6 +224,7 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
         data.recipient_name.strip() if data.recipient_name else None,
         round(float(data.base_salary or 0), 3),
         data.shop_id,
+        json.dumps(data.permissions) if data.permissions is not None else None,
     )
 
     try:
@@ -215,6 +241,7 @@ async def create_user(data: CreateUserRequest, user=Depends(get_current_user)):
         pass
 
     result = dict(new_user)
+    result["permissions"] = parse_permissions(result.get("permissions"))
     result["generated_password"] = password
     return result
 
@@ -233,18 +260,22 @@ async def update_user(user_id: int, data: CreateUserRequest, user=Depends(get_cu
     params = [full_name, data.role, data.client_id, data.recipient_name,
               round(float(data.base_salary), 3) if data.base_salary is not None else None,
               data.shop_id]
+    updates.append(f"permissions=${len(params)+1}")
+    params.append(json.dumps(data.permissions) if data.permissions is not None else None)
     if data.password:
         hashed = pwd_context.hash(data.password)
         updates.append(f"password_hash=${len(params)+1}")
         params.append(hashed)
     params.append(user_id)
     row = await pool.fetchrow(
-        f"UPDATE users SET {', '.join(updates)} WHERE id=${len(params)} RETURNING id, username, full_name, role, client_id, recipient_name, base_salary, shop_id",
+        f"UPDATE users SET {', '.join(updates)} WHERE id=${len(params)} RETURNING id, username, full_name, role, client_id, recipient_name, base_salary, shop_id, permissions",
         *params
     )
     if not row:
         raise HTTPException(status_code=404, detail="المستخدم غير موجود")
-    return dict(row)
+    result = dict(row)
+    result["permissions"] = parse_permissions(result.get("permissions"))
+    return result
 
 
 @router.delete("/users/{user_id}")

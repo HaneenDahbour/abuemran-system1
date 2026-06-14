@@ -51,6 +51,36 @@ if (typeof isClient !== 'function') {
   }
 }
 
+/* ───── Per-user permissions ───── */
+const PERMISSION_SECTIONS = [
+  { key: 'clients',    label: 'العملاء' },
+  { key: 'cashbox',    label: 'صندوق خالد' },
+  { key: 'employees',  label: 'الموظفون' },
+  { key: 'expenses',   label: 'المصاريف والرواتب' },
+  { key: 'invoices',   label: 'الفواتير' },
+  { key: 'recipients', label: 'زبائن الفواتير' },
+  { key: 'payments',   label: 'المقبوضات' },
+  { key: 'checks',     label: 'الشيكات' },
+  { key: 'purchases',  label: 'المشتريات' },
+  { key: 'warehouse',  label: 'المستودع' },
+  { key: 'investors',  label: 'المستثمرون' },
+  { key: 'china',      label: 'قسم الصين' },
+  { key: 'shops',      label: 'نظام المحلات' },
+];
+
+// admin: دائماً مسموح. permissions = null/undefined: غير محدود (توافق مع الحسابات القديمة).
+// permissions = مصفوفة: يجب أن تحتوي على المفتاح.
+if (typeof hasPermission !== 'function') {
+  function hasPermission(section) {
+    const user = getUser();
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    const perms = user.permissions;
+    if (perms == null) return true;
+    return Array.isArray(perms) && perms.includes(section);
+  }
+}
+
 if (typeof fmt !== 'function') {
   function fmt(value) {
     const num = Number(value || 0);
@@ -512,6 +542,7 @@ async function navigateTo(section) {
     investors: renderInvestors,
     china: renderChina,
     users: renderUsers,
+    employee_activity: renderEmployeeActivity,
     audit: renderAudit,
     analytics: renderAnalytics,
     my_account: renderMyAccount,
@@ -526,6 +557,19 @@ async function navigateTo(section) {
         <div class="empty-state">
           <div class="empty-icon">⚠️</div>
           <p>القسم غير موجود: ${escHtml(section)}</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  // إن كان القسم له صلاحية محددة في PERMISSION_SECTIONS، تحقق منها
+  if (PERMISSION_SECTIONS.some(p => p.key === section) && !hasPermission(section)) {
+    container.innerHTML = `
+      <div class="card">
+        <div class="empty-state">
+          <div class="empty-icon">🚫</div>
+          <p>ليس لديك صلاحية الوصول إلى هذا القسم</p>
         </div>
       </div>
     `;
@@ -599,31 +643,34 @@ function renderSidebar() {
   html += navItem('dashboard', '📊', 'لوحة التحكم');
 
   if (isAccountant()) {
-    html += '<div class="nav-section-title">إدارة الأعمال</div>';
-    html += navItem('clients', '👥', 'العملاء');
-
-    html += navItem('cashbox', '💼', 'صندوق خالد');
-    html += navItem('employees', '👷', 'الموظفون');
-    html += navItem('expenses', '📋', 'المصاريف والرواتب');
-    html += navItem('invoices', '🧾', 'الفواتير');
-    html += navItem('recipients', '🧑‍🤝‍🧑', 'زبائن الفواتير');
-    html += navItem('payments', '💰', 'المقبوضات');
-    html += navItem('checks', '🏦', 'الشيكات');
-    html += navItem('purchases', '🛒', 'المشتريات');
+    let sec = '';
+    if (hasPermission('clients'))    sec += navItem('clients', '👥', 'العملاء');
+    if (hasPermission('cashbox'))    sec += navItem('cashbox', '💼', 'صندوق خالد');
+    if (hasPermission('employees'))  sec += navItem('employees', '👷', 'الموظفون');
+    if (hasPermission('expenses'))   sec += navItem('expenses', '📋', 'المصاريف والرواتب');
+    if (hasPermission('invoices'))   sec += navItem('invoices', '🧾', 'الفواتير');
+    if (hasPermission('recipients')) sec += navItem('recipients', '🧑‍🤝‍🧑', 'زبائن الفواتير');
+    if (hasPermission('payments'))   sec += navItem('payments', '💰', 'المقبوضات');
+    if (hasPermission('checks'))     sec += navItem('checks', '🏦', 'الشيكات');
+    if (hasPermission('purchases'))  sec += navItem('purchases', '🛒', 'المشتريات');
+    if (sec) {
+      html += '<div class="nav-section-title">إدارة الأعمال</div>';
+      html += sec;
+    }
   }
 
-  if (canManageWarehouse()) {
+  if (canManageWarehouse() && (hasPermission('warehouse') || hasPermission('investors'))) {
     html += '<div class="nav-section-title">المستودع</div>';
-    html += navItem('warehouse', '🏭', 'المستودع');
-    html += navItem('investors', '💹', 'المستثمرون');
+    if (hasPermission('warehouse')) html += navItem('warehouse', '🏭', 'المستودع');
+    if (hasPermission('investors')) html += navItem('investors', '💹', 'المستثمرون');
   }
 
-  if (isAccountant()) {
+  if (isAccountant() && hasPermission('china')) {
     html += '<div class="nav-section-title">الصين</div>';
     html += navItem('china', '🇨🇳', 'قسم الصين');
   }
 
-  if (isAccountant()) {
+  if (isAccountant() && hasPermission('shops')) {
     html += '<div class="nav-section-title">المحلات</div>';
     html += `<a class="nav-item" href="shops.html" target="_blank" rel="noopener">
       <span class="nav-icon">🏬</span><span class="nav-label">نظام المحلات</span>
@@ -633,6 +680,7 @@ function renderSidebar() {
   if (isAdmin()) {
     html += '<div class="nav-section-title">الإدارة</div>';
     html += navItem('users', '🔐', 'إدارة المستخدمين');
+    html += navItem('employee_activity', '🕵️', 'نشاط الموظفين');
     html += navItem('audit', '📋', 'سجل العمليات');
     html += navItem('analytics', '📊', 'لوحة التحليلات');
   }
@@ -5537,6 +5585,35 @@ async function renderUsers(container) {
   `;
 }
 
+/* ───── Permission checkboxes (shared by add/edit user modals) ───── */
+function permissionCheckboxesHtml(prefix, selectedPerms) {
+  const restricted = Array.isArray(selectedPerms);
+  const boxes = PERMISSION_SECTIONS.map(p => `
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;padding:4px 0;cursor:pointer">
+      <input type="checkbox" class="${prefix}_perm" value="${p.key}" ${restricted && selectedPerms.includes(p.key) ? 'checked' : ''}>
+      ${escHtml(p.label)}
+    </label>
+  `).join('');
+
+  return `
+    <div class="form-group">
+      <label class="form-label" style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="${prefix}_restrict" onchange="document.getElementById('${prefix}_permbox').style.display = this.checked ? 'grid' : 'none'" ${restricted ? 'checked' : ''}>
+        تخصيص صلاحيات هذا المستخدم (تحديد الأقسام التي يمكنه رؤيتها واستخدامها)
+      </label>
+      <div id="${prefix}_permbox" style="display:${restricted ? 'grid' : 'none'}; grid-template-columns:1fr 1fr; gap:4px; border:1px solid var(--brd); border-radius:8px; padding:10px; margin-top:8px">
+        ${boxes}
+      </div>
+    </div>
+  `;
+}
+
+function collectPermissions(prefix) {
+  const restrict = document.getElementById(`${prefix}_restrict`);
+  if (!restrict || !restrict.checked) return null;
+  return Array.from(document.querySelectorAll(`.${prefix}_perm:checked`)).map(el => el.value);
+}
+
 function openUserModal() {
   openModal(`
     <div class="modal-header">
@@ -5566,6 +5643,7 @@ function openUserModal() {
         <option value="client">عميل</option>
       </select>
     </div>
+    ${permissionCheckboxesHtml('nu', null)}
     <div style="display:flex; gap:10px; margin-top:8px">
       <button class="btn btn-primary" style="flex:1" onclick="saveUser()">إنشاء الحساب</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
@@ -5585,7 +5663,7 @@ async function saveUser() {
   }
 
   try {
-    await API.createUser({ full_name: name, username, password, role });
+    await API.createUser({ full_name: name, username, password, role, permissions: collectPermissions('nu') });
     toast('تم إنشاء الحساب بنجاح', 'success');
     closeModal();
     navigateTo('users');
@@ -5663,6 +5741,7 @@ function openEditUserModal(u) {
         ${clientOpts}
       </select>
     </div>
+    ${permissionCheckboxesHtml('eu', Array.isArray(u.permissions) ? u.permissions : null)}
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-primary" style="flex:1" onclick="saveEditUser(${u.id})">حفظ التعديلات</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
@@ -5687,6 +5766,7 @@ async function saveEditUser(id) {
       full_name, role, password,
       client_id: client_id ? Number(client_id) : null,
       base_salary: baseSalaryVal !== '' && baseSalaryVal != null ? parseFloat(baseSalaryVal) || 0 : null,
+      permissions: collectPermissions('eu'),
     });
     toast('تم تحديث بيانات المستخدم ✅', 'success');
     closeModal();
@@ -5737,6 +5817,72 @@ async function renderAudit(container) {
       </div>
     </div>
   `;
+}
+
+/* ═══════════════════════════════════════════════════
+   نشاط الموظفين (Employee Activity)
+═══════════════════════════════════════════════════ */
+async function renderEmployeeActivity(container) {
+  if (!isAdmin()) {
+    container.innerHTML = `<div class="alert alert-danger">غير مصرح لك بالوصول</div>`;
+    return;
+  }
+
+  let log = [];
+  try { log = await API.getAuditLog() || []; } catch (e) { log = []; }
+
+  const me = getUser();
+  // استثناء عمليات المدير نفسه — هذه الصفحة لمتابعة الموظفين
+  const employeeLog = log.filter(l => l.user_id !== me?.id);
+
+  const names = [...new Set(employeeLog.map(l => l.user_name || l.username || '—'))];
+
+  window._empActivityLog = employeeLog;
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🕵️ نشاط الموظفين</div>
+        <div class="page-sub">${employeeLog.length} عملية</div>
+      </div>
+      <div>
+        <select class="form-select" id="ea_filter" onchange="filterEmployeeActivity()">
+          <option value="">كل الموظفين</option>
+          ${names.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0; overflow:hidden">
+      <div class="table-wrap" style="max-height:600px; overflow-y:auto">
+        <table>
+          <thead><tr><th>الموظف</th><th>العملية</th><th>التفاصيل</th><th>التاريخ والوقت</th></tr></thead>
+          <tbody id="ea_tbody">
+            ${employeeActivityRows(employeeLog)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function employeeActivityRows(rows) {
+  return rows.length
+    ? rows.map(l => `<tr>
+        <td><strong>${escHtml(l.user_name || l.username || '—')}</strong></td>
+        <td><span class="badge badge-blue">${escHtml(l.action || '—')}</span></td>
+        <td style="font-size:12px; color:var(--tx2); max-width:300px">${escHtml(l.detail || l.details || '—')}</td>
+        <td style="font-size:12px; color:var(--tx3); white-space:nowrap">${fmtDate(l.created_at)}</td>
+      </tr>`).join('')
+    : emptyRow('لا توجد عمليات', 4);
+}
+
+function filterEmployeeActivity() {
+  const val = document.getElementById('ea_filter')?.value || '';
+  const log = window._empActivityLog || [];
+  const filtered = val ? log.filter(l => (l.user_name || l.username) === val) : log;
+  const tbody = document.getElementById('ea_tbody');
+  if (tbody) tbody.innerHTML = employeeActivityRows(filtered);
 }
 
 /* ═══════════════════════════════════════════════════
