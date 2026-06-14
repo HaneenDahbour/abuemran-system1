@@ -253,7 +253,7 @@ async def get_category_products(category_id: int, user=Depends(get_current_user)
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"تعذر ØªØ­Ù…ÙŠÙ„ Ø£ØµÙ†اف Ø§Ù„فئة: {str(e)}",
+            detail=f"ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ Ø£ØµÙ†Ø§Ù Ø§Ù„ÙØ¦Ø©: {str(e)}",
         )
 
 
@@ -365,7 +365,7 @@ async def create_category(data: CategoryRequest, user=Depends(get_current_user))
     icon = (data.icon or "ðŸ“¦").strip() or "ðŸ“¦"
 
     if not name:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ø§Ø³Ù… Ù…Ø·Ù„Ùˆب")
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ø§Ø³Ù… Ù…Ø·Ù„ÙˆØ¨")
 
     pool = await get_pool()
 
@@ -384,7 +384,7 @@ async def create_category(data: CategoryRequest, user=Depends(get_current_user))
 
                 if existing:
                     raise HTTPException(
-                        status_code=409, detail="Ù‡Ø°Ù‡ Ø§Ù„فئة Ù…ÙˆØ¬Ùˆدة Ù…Ø³Ø¨Ù‚Ø§Ù‹"
+                        status_code=409, detail="Ù‡Ø°Ù‡ Ø§Ù„ÙØ¦Ø© Ù…ÙˆØ¬ÙˆØ¯Ø© Ù…Ø³Ø¨Ù‚Ø§Ù‹"
                     )
 
                 row = await conn.fetchrow(
@@ -398,7 +398,7 @@ async def create_category(data: CategoryRequest, user=Depends(get_current_user))
                 )
 
                 await insert_category_audit(
-                    conn, user, "أضاف فئة Ù…Ø³ØªÙˆدع", f"فئة: {name}"
+                    conn, user, "Ø£Ø¶Ø§Ù ÙØ¦Ø© Ù…Ø³ØªÙˆØ¯Ø¹", f"ÙØ¦Ø©: {name}"
                 )
 
                 return row_to_dict(row)
@@ -419,7 +419,7 @@ async def update_category(
     icon = (data.icon or "ðŸ“¦").strip() or "ðŸ“¦"
 
     if not name:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ø§Ø³Ù… Ù…Ø·Ù„Ùˆب")
+        raise HTTPException(status_code=400, detail="Ø§Ù„Ø§Ø³Ù… Ù…Ø·Ù„ÙˆØ¨")
 
     pool = await get_pool()
 
@@ -440,7 +440,7 @@ async def update_category(
 
                 if duplicate:
                     raise HTTPException(
-                        status_code=409, detail="Ø§Ø³Ù… Ø§Ù„فئة Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³Ø¨Ù‚Ø§Ù‹"
+                        status_code=409, detail="Ø§Ø³Ù… Ø§Ù„ÙØ¦Ø© Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³Ø¨Ù‚Ø§Ù‹"
                     )
 
                 row = await conn.fetchrow(
@@ -457,7 +457,7 @@ async def update_category(
                 )
 
                 if not row:
-                    raise HTTPException(status_code=404, detail="Ø§Ù„فئة ØºÙŠر Ù…ÙˆØ¬Ùˆدة")
+                    raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ¦Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
 
                 await conn.execute(
                     """
@@ -470,7 +470,7 @@ async def update_category(
                 )
 
                 await insert_category_audit(
-                    conn, user, "ØªØ¹Ø¯ÙŠÙ„ فئة Ù…Ø³ØªÙˆدع", f"فئة: {name}"
+                    conn, user, "ØªØ¹Ø¯ÙŠÙ„ ÙØ¦Ø© Ù…Ø³ØªÙˆØ¯Ø¹", f"ÙØ¦Ø©: {name}"
                 )
 
                 return row_to_dict(row)
@@ -503,7 +503,7 @@ async def delete_category(category_id: int, user=Depends(get_current_user)):
                 if not category:
                     raise HTTPException(
                         status_code=404,
-                        detail="Ø§Ù„فئة ØºÙŠر Ù…ÙˆØ¬Ùˆدة Ø£Ùˆ ØªÙ… Ø­Ø°ÙÙ‡ا Ù…Ø³Ø¨Ù‚Ø§Ù‹",
+                        detail="Ø§Ù„ÙØ¦Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© Ø£Ùˆ ØªÙ… Ø­Ø°ÙÙ‡Ø§ Ù…Ø³Ø¨Ù‚Ø§Ù‹",
                     )
 
                 unlinked_result = await conn.execute(
@@ -526,18 +526,18 @@ async def delete_category(category_id: int, user=Depends(get_current_user)):
                 )
 
                 if not deleted:
-                    raise HTTPException(status_code=404, detail="Ø§Ù„فئة ØºÙŠر Ù…ÙˆØ¬Ùˆدة")
+                    raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ¦Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
 
                 await insert_category_audit(
                     conn,
                     user,
-                    "حذف فئة Ù…Ø³ØªÙˆدع",
-                    f"حذف فئة: {category['name']} â€” ØªÙ… Ø¥Ù„غاء ربط Ø§Ù„Ø£ØµÙ†اف Ø§Ù„تابعة Ø¨Ù‡ا",
+                    "Ø­Ø°Ù ÙØ¦Ø© Ù…Ø³ØªÙˆØ¯Ø¹",
+                    f"Ø­Ø°Ù ÙØ¦Ø©: {category['name']} â€” ØªÙ… Ø¥Ù„ØºØ§Ø¡ Ø±Ø¨Ø· Ø§Ù„Ø£ØµÙ†Ø§Ù Ø§Ù„ØªØ§Ø¨Ø¹Ø© Ø¨Ù‡Ø§",
                 )
 
         return {
             "success": True,
-            "message": "ØªÙ… حذف Ø§Ù„فئة ÙˆØ¥Ù„غاء ربط Ø§Ù„Ø£ØµÙ†اف Ø§Ù„تابعة Ø¨Ù‡ا",
+            "message": "ØªÙ… Ø­Ø°Ù Ø§Ù„ÙØ¦Ø© ÙˆØ¥Ù„ØºØ§Ø¡ Ø±Ø¨Ø· Ø§Ù„Ø£ØµÙ†Ø§Ù Ø§Ù„ØªØ§Ø¨Ø¹Ø© Ø¨Ù‡Ø§",
             "deleted_category_id": category_id,
             "unlinked_products": int(unlinked_result.split()[-1]),
         }
@@ -545,4 +545,5 @@ async def delete_category(category_id: int, user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, deta
+        raise HTTPException(status_code=500, detail=str(e))
+
