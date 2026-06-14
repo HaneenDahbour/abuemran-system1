@@ -359,7 +359,7 @@ async def get_category_analytics(category_id: int, user=Depends(get_current_user
 
 @router.post("")
 async def create_category(data: CategoryRequest, user=Depends(get_current_user)):
-    require_role(user, "admin", "accountant")
+    require_role(user, "admin", "accountant", "employee")
 
     name = (data.name or "").strip()
     icon = (data.icon or "ðŸ“¦").strip() or "ðŸ“¦"

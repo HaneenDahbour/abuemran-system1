@@ -258,7 +258,8 @@ function jsString(value) {
     .replace(/\n/g, '\\n')
     .replace(/</g, '\\x3C')
     .replace(/>/g, '\\x3E')
-    .replace(/&/g, '\\x26')}'`;
+    .replace(/&/g, '\\x26')
+    .replace(/"/g, '&quot;')}'`;
 }
 
 function encodePayload(data) {
@@ -1285,7 +1286,7 @@ async function renderInvoices(container) {
           <input type="text" placeholder="رقم الفاتورة / الزبون / الموظف..."
                  oninput="filterInvoicesByText(this.value)">
         </div>
-        ${isAccountant() ? `<button class="btn btn-primary" onclick="openInvoiceModal()">+ فاتورة جديدة</button>` : ''}
+        ${(isAccountant() || hasPermission('invoices')) ? `<button class="btn btn-primary" onclick="openInvoiceModal()">+ فاتورة جديدة</button>` : ''}
         <button class="btn btn-ghost btn-sm"
           onclick="printInvoicesListFromEncoded(${jsString(encodePayload((invoices || []).filter(i => (i.status || 'approved') === 'approved')))})">🖨️</button>
       </div>
@@ -3720,7 +3721,7 @@ async function renderWarehouse(container) {
   </button>
 ` : ''}
 
-  ${isAccountant() ? `
+  ${(isAccountant() || hasPermission('warehouse')) ? `
     <button class="btn btn-ghost" onclick="openWarehouseInvoiceModal()">📄 فاتورة جديدة</button>
     <button class="btn btn-primary" onclick="openCategoryModal()">+ فئة جديدة</button>
   ` : ''}
