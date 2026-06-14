@@ -614,7 +614,10 @@
           <td>${typeLabels[t.type] || t.type}</td>
           <td>${fmt(t.amount)}</td>
           <td>${escHtml(t.notes || '—')}</td>
-          <td>${isManager() ? `<button class="icon-btn" onclick="deleteCashTx(${t.id})">🗑️</button>` : ''}</td>
+          <td>
+            ${isManager() ? `<button class="icon-btn" onclick="cashFormModal('${t.type}', ${t.id})">✏️</button>` : ''}
+            ${isManager() ? `<button class="icon-btn" onclick="deleteCashTx(${t.id})">🗑️</button>` : ''}
+          </td>
         </tr>`).join('') || `<tr class="empty-row"><td colspan="5">لا توجد حركات</td></tr>`;
       el.innerHTML = `
         <div class="panel-head">
@@ -632,27 +635,31 @@
       `;
     }
 
-    function cashFormModal(type) {
+    function cashFormModal(type, txId) {
+      const tx = txId ? SHOP_DETAIL.cash_transactions.find(t => t.id === txId) : null;
       const titles = { deposit: '🟢 إضافة إيداع للصندوق', income: '🔵 تسجيل مقبوضات اليوم', expense: '🔴 تسجيل مصروف من الصندوق' };
+      const title = tx ? `✏️ تعديل حركة الصندوق` : titles[type];
       openModal(`
-        <div class="modal-header"><div class="modal-title">${titles[type]}</div><button class="modal-close" onclick="closeModal()">✕</button></div>
-        <div class="form-group"><label class="form-label">المبلغ (د.أ)</label><input class="form-input" id="cs-amount" type="number" step="0.001"></div>
-        <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" id="cs-date" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
-        <div class="form-group"><label class="form-label">ملاحظات</label><textarea class="form-input" id="cs-notes"></textarea></div>
+        <div class="modal-header"><div class="modal-title">${title}</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+        <div class="form-group"><label class="form-label">المبلغ (د.أ)</label><input class="form-input" id="cs-amount" type="number" step="0.001" value="${tx ? tx.amount : ''}"></div>
+        <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" id="cs-date" type="date" value="${tx ? String(tx.trans_date).slice(0,10) : new Date().toISOString().slice(0,10)}"></div>
+        <div class="form-group"><label class="form-label">ملاحظات</label><textarea class="form-input" id="cs-notes">${escHtml(tx?.notes || '')}</textarea></div>
         <button class="btn btn-primary btn-full" id="cs-save">حفظ</button>
       `, '440px');
       document.getElementById('cs-save').onclick = async () => {
         const amount = Number(document.getElementById('cs-amount').value);
         if (!amount || amount <= 0) return toast('المبلغ يجب أن يكون أكبر من صفر', 'error');
         try {
-          await api(`/shops/${CURRENT.shopId}/cash`, {
-            method: 'POST',
-            body: JSON.stringify({
-              type, amount,
-              trans_date: document.getElementById('cs-date').value,
-              notes: document.getElementById('cs-notes').value.trim(),
-            }),
+          const body = JSON.stringify({
+            type: tx ? tx.type : type, amount,
+            trans_date: document.getElementById('cs-date').value,
+            notes: document.getElementById('cs-notes').value.trim(),
           });
+          if (tx) {
+            await api(`/shops/${CURRENT.shopId}/cash/${tx.id}`, { method: 'PUT', body });
+          } else {
+            await api(`/shops/${CURRENT.shopId}/cash`, { method: 'POST', body });
+          }
           closeModal();
           toast('تم الحفظ', 'success');
           await refreshShop();

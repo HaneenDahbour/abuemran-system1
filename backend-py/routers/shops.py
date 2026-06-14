@@ -818,6 +818,43 @@ async def add_shop_cash(shop_id: int, data: ShopCashRequest, user=Depends(get_cu
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.put("/{shop_id}/cash/{trans_id}")
+async def update_shop_cash(shop_id: int, trans_id: int, data: ShopCashRequest, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant", "shop_manager")
+    check_shop_access(user, shop_id)
+    if data.type not in ("deposit", "income", "expense"):
+        raise HTTPException(status_code=400, detail="نوع الحركة غير صالح")
+    if data.amount is None or data.amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                t_date = date.fromisoformat(data.trans_date) if data.trans_date else date.today()
+                row = await conn.fetchrow(
+                    """
+                    UPDATE shop_cash_transactions
+                    SET type=$1, amount=$2, trans_date=$3, notes=$4
+                    WHERE id=$5 AND shop_id=$6
+                    RETURNING *
+                    """,
+                    data.type, round(data.amount, 3), t_date, clean_text(data.notes), trans_id, shop_id,
+                )
+                if not row:
+                    raise HTTPException(status_code=404, detail="السجل غير موجود")
+                labels = {"deposit": "إيداع", "income": "مقبوضات", "expense": "مصروف من الصندوق"}
+                await insert_audit(conn, user, f"تعديل حركة صندوق محل ({labels[data.type]})", "shop_cash", row["id"], f"محل #{shop_id}: {data.amount}")
+                balance = await compute_cash_balance(pool, shop_id)
+                result = row_to_dict(row)
+                result["cash"] = balance
+                return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/{shop_id}/cash/{trans_id}")
 async def delete_shop_cash(shop_id: int, trans_id: int, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant", "shop_manager")
