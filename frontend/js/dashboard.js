@@ -53,6 +53,7 @@ if (typeof isClient !== 'function') {
 
 /* ───── Per-user permissions ───── */
 const PERMISSION_SECTIONS = [
+  { key: 'dashboard',  label: 'لوحة التحكم' },
   { key: 'clients',    label: 'العملاء' },
   { key: 'cashbox',    label: 'صندوق خالد' },
   { key: 'employees',  label: 'الموظفون' },
@@ -614,7 +615,20 @@ function setupApp() {
   }
 
   renderSidebar();
-  navigateTo('dashboard');
+
+  // اختيار الصفحة الافتراضية بعد تسجيل الدخول
+  let defaultSection = 'dashboard';
+  if (!hasPermission('dashboard')) {
+    if (isClient()) {
+      defaultSection = 'my_account';
+    } else if (isRecipient()) {
+      defaultSection = 'recipient_account';
+    } else {
+      const firstAllowed = PERMISSION_SECTIONS.find(p => p.key !== 'dashboard' && hasPermission(p.key));
+      defaultSection = firstAllowed ? firstAllowed.key : 'my_account';
+    }
+  }
+  navigateTo(defaultSection);
 
   const aiIn = document.getElementById('ai-input');
   if (aiIn && !aiIn.dataset.bound) {
@@ -639,9 +653,13 @@ function renderSidebar() {
 
   let html = '';
 
-  html += navItem('dashboard', '📊', 'لوحة التحكم');
+  const sbUser = getUser() || {};
 
-  if (isAccountant()) {
+  if (hasPermission('dashboard')) {
+    html += navItem('dashboard', '📊', 'لوحة التحكم');
+  }
+
+  if (isAccountant() || sbUser.role === 'employee') {
     let sec = '';
     if (hasPermission('clients'))    sec += navItem('clients', '👥', 'العملاء');
     if (hasPermission('cashbox'))    sec += navItem('cashbox', '💼', 'صندوق خالد');
