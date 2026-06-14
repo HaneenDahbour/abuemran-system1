@@ -509,6 +509,7 @@ async function navigateTo(section) {
     checks: renderChecks,
     purchases: renderPurchases,
     warehouse: renderWarehouse,
+    investors: renderInvestors,
     china: renderChina,
     users: renderUsers,
     audit: renderAudit,
@@ -614,6 +615,7 @@ function renderSidebar() {
   if (canManageWarehouse()) {
     html += '<div class="nav-section-title">المستودع</div>';
     html += navItem('warehouse', '🏭', 'المستودع');
+    html += navItem('investors', '💹', 'المستثمرون');
   }
 
   if (isAccountant()) {
@@ -10175,4 +10177,442 @@ function deleteChinaSaleConfirm(id) {
       closeModal();
     }
   });
+}
+
+/* ════════════════════════════════════════════════════════════
+   المستثمرون — مستودع الأصناف
+   - كل فئة مستودع: مستثمرون يساهمون بمبالغ محددة
+   - الربح: 50% للمالك، 50% يُوزَّع على المستثمرين بنسبة مساهمتهم
+   ════════════════════════════════════════════════════════════ */
+
+function investorsTabBtn(key, label) {
+  const active = (window._investorsTab || 'overview') === key;
+  return `<button class="btn ${active ? 'btn-primary' : 'btn-ghost'} btn-sm" onclick="switchInvestorsTab('${key}')">${label}</button>`;
+}
+
+function switchInvestorsTab(key) {
+  window._investorsTab = key;
+  navigateTo('investors');
+}
+
+async function renderInvestors(container) {
+  const tab = window._investorsTab || 'overview';
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">💹 المستثمرون</div>
+        <div class="page-sub">مساهمات المستثمرين في فئات المستودع وتوزيع الأرباح — 50% للمالك و50% يُوزَّع على المستثمرين بنسبة مساهمتهم في كل فئة</div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px">
+      ${investorsTabBtn('overview', '📊 الأرباح حسب الفئة')}
+      ${investorsTabBtn('investors', '🤝 المستثمرون')}
+    </div>
+
+    <div id="investors-tab-content">
+      <div class="loading"><div class="spinner"></div><p>جاري التحميل...</p></div>
+    </div>
+  `;
+
+  const content = document.getElementById('investors-tab-content');
+
+  try {
+    if (tab === 'overview') await renderInvestorsOverview(content);
+    else if (tab === 'investors') await renderInvestorsList(content);
+  } catch (e) {
+    content.innerHTML = `<div class="alert alert-danger">${escHtml(e.message || 'حدث خطأ')}</div>`;
+  }
+}
+
+/* ───── نظرة عامة: الأرباح وتوزيعها حسب الفئة ───── */
+
+async function renderInvestorsOverview(container) {
+  const data = await API.getWarehouseInvestorsSummary();
+  const cats = data.categories || [];
+  const totals = data.totals || {};
+
+  container.innerHTML = `
+    <div class="stats-grid" style="margin-bottom:16px">
+      <div class="stat-card">
+        <div class="stat-label">إجمالي الأرباح (الفئات الرابحة)</div>
+        <div class="stat-value" style="color:var(--gr)">${fmt(totals.total_profit || 0)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">حصة المالك (50%)</div>
+        <div class="stat-value" style="color:var(--bl)">${fmt(totals.owner_share || 0)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">حصة المستثمرين (50%)</div>
+        <div class="stat-value" style="color:var(--am)">${fmt(totals.investors_pool || 0)} د.أ</div>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>الفئة</th>
+            <th>إجمالي الربح</th>
+            <th>إجمالي مساهمات المستثمرين</th>
+            <th>عدد المستثمرين</th>
+            <th>حصة المالك (50%)</th>
+            <th>حصة المستثمرين (50%)</th>
+            <th>الإجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cats.length ? cats.map(c => {
+    const profit = parseFloat(c.total_profit || 0);
+    return `
+              <tr>
+                <td><strong>${c.icon || '📦'} ${escHtml(c.name)}</strong></td>
+                <td style="font-weight:800; color:${profit >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(profit)} د.أ</td>
+                <td>${fmt(c.total_invested || 0)} د.أ</td>
+                <td>${c.investors_count || 0}</td>
+                <td style="color:var(--bl);font-weight:700">${fmt(c.owner_share || 0)} د.أ</td>
+                <td style="color:var(--am);font-weight:700">${fmt(c.investors_pool || 0)} د.أ</td>
+                <td>
+                  <button class="btn btn-ghost btn-sm" onclick="openCategoryInvestmentsModal(${c.id})">📊 التفاصيل والمساهمات</button>
+                </td>
+              </tr>
+            `;
+  }).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد فئات مستودع بعد</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ───── تفاصيل فئة: المساهمون وتوزيع الربح ───── */
+
+async function openCategoryInvestmentsModal(categoryId) {
+  let profitShare, investments;
+  try {
+    [profitShare, investments] = await Promise.all([
+      API.getCategoryProfitShare(categoryId),
+      API.getCategoryInvestments(categoryId),
+    ]);
+  } catch (e) {
+    toast(e.message, 'error');
+    return;
+  }
+
+  window._invCategoryId = categoryId;
+  window._invInvestorsCache = window._invInvestorsCache || (await API.getWarehouseInvestors().catch(() => []));
+
+  const cat = profitShare.category || {};
+  const shares = profitShare.investor_shares || [];
+  const investorsList = window._invInvestorsCache || [];
+  const usedIds = (investments.investments || []).map(i => String(i.investor_id));
+  const availableInvestors = investorsList.filter(i => !usedIds.includes(String(i.id)));
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${cat.icon || '📦'} ${escHtml(cat.name)} — المستثمرون وتوزيع الربح</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="stats-grid" style="margin-bottom:14px">
+      <div class="stat-card">
+        <div class="stat-label">إجمالي الربح</div>
+        <div class="stat-value" style="color:${profitShare.total_profit >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(profitShare.total_profit)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">حصة المالك (${fmt(profitShare.owner_share_pct)}%)</div>
+        <div class="stat-value" style="color:var(--bl)">${fmt(profitShare.owner_share)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">حصة المستثمرين</div>
+        <div class="stat-value" style="color:var(--am)">${fmt(profitShare.investors_pool)} د.أ</div>
+      </div>
+    </div>
+
+    ${profitShare.has_loss ? `<div class="alert alert-warning" style="margin-bottom:12px">⚠️ هذه الفئة في حالة خسارة حالياً — لا يوجد ربح للتوزيع</div>` : ''}
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+      <h4 style="margin:0">مساهمات المستثمرين</h4>
+      ${availableInvestors.length ? `
+        <button class="btn btn-primary btn-sm" onclick="openAddInvestmentForm(${categoryId})">+ إضافة مستثمر للفئة</button>
+      ` : ''}
+    </div>
+    <div id="add-investment-form"></div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>المستثمر</th>
+            <th>المساهمة (د.أ)</th>
+            <th>النسبة %</th>
+            <th>حصته من الربح</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${shares.length ? shares.map(s => {
+    const inv = (investments.investments || []).find(i => String(i.investor_id) === String(s.investor_id));
+    return `
+              <tr>
+                <td><strong>${escHtml(s.investor_name)}</strong></td>
+                <td>
+                  <input class="form-input" style="width:120px;display:inline-block" type="number" step="0.001" min="0"
+                    id="inv_amount_${s.investor_id}" value="${inv ? inv.amount : 0}">
+                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment(${categoryId}, ${s.investor_id})">💾</button>
+                </td>
+                <td>${fmt(s.contribution_pct)}%</td>
+                <td style="color:var(--am);font-weight:700">${fmt(s.profit_share)} د.أ</td>
+                <td>${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm(${categoryId}, ${inv.id}, ${s.investor_id})">🗑️</button>` : ''}</td>
+              </tr>
+            `;
+  }).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا يوجد مستثمرون في هذه الفئة بعد</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:10px">
+      <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
+    </div>
+  `, '760px');
+}
+
+function openAddInvestmentForm(categoryId) {
+  const investorsList = window._invInvestorsCache || [];
+  const usedIds = (window._invLastInvestments || []).map(i => String(i.investor_id));
+  const available = investorsList.filter(i => !usedIds.includes(String(i.id)));
+
+  const target = document.getElementById('add-investment-form');
+  if (!target) return;
+
+  target.innerHTML = `
+    <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:12px; flex-wrap:wrap">
+      <div class="form-group" style="flex:1; min-width:180px; margin-bottom:0">
+        <label class="form-label">المستثمر</label>
+        <select class="form-select" id="new_inv_investor">
+          ${investorsList.length ? investorsList.map(i => `<option value="${i.id}">${escHtml(i.name)}</option>`).join('') : '<option value="">لا يوجد مستثمرون — أضف من تبويب المستثمرين</option>'}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">المبلغ (د.أ)</label>
+        <input class="form-input" style="width:140px" type="number" step="0.001" min="0" id="new_inv_amount" value="0">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment(${categoryId}, null)">إضافة</button>
+    </div>
+  `;
+}
+
+async function saveCategoryInvestment(categoryId, investorId) {
+  let id = investorId;
+  let amount;
+
+  if (id) {
+    amount = parseFloat(document.getElementById(`inv_amount_${id}`)?.value || 0);
+  } else {
+    id = document.getElementById('new_inv_investor')?.value;
+    amount = parseFloat(document.getElementById('new_inv_amount')?.value || 0);
+    if (!id) { toast('اختر مستثمراً', 'error'); return; }
+  }
+
+  if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  try {
+    await API.setCategoryInvestment(categoryId, { investor_id: Number(id), amount });
+    toast('تم الحفظ ✅', 'success');
+    await openCategoryInvestmentsModal(categoryId);
+    if (window._investorsTab === 'overview') {
+      const content = document.getElementById('investors-tab-content');
+      if (content) await renderInvestorsOverview(content);
+    }
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteCategoryInvestmentConfirm(categoryId, investmentId, investorId) {
+  confirmDanger('حذف مساهمة مستثمر', ['سيتم حذف مساهمة هذا المستثمر من هذه الفئة'], async () => {
+    try {
+      await API.deleteCategoryInvestment(categoryId, investmentId);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      await openCategoryInvestmentsModal(categoryId);
+      if (window._investorsTab === 'overview') {
+        const content = document.getElementById('investors-tab-content');
+        if (content) await renderInvestorsOverview(content);
+      }
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+/* ───── قائمة المستثمرين (CRUD) ───── */
+
+async function renderInvestorsList(container) {
+  const investors = await API.getWarehouseInvestors() || [];
+  window._invInvestorsCache = investors;
+
+  container.innerHTML = `
+    <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" onclick="openInvestorModal()">+ مستثمر جديد</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>الاسم</th>
+            <th>الهاتف</th>
+            <th>إجمالي المساهمات (كل الفئات)</th>
+            <th>عدد الفئات</th>
+            <th>ملاحظات</th>
+            <th>الإجراءات</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${investors.length ? investors.map(inv => `
+            <tr>
+              <td><strong>${escHtml(inv.name)}</strong></td>
+              <td>${escHtml(inv.phone || '—')}</td>
+              <td style="color:var(--gr);font-weight:700">${fmt(inv.total_invested || 0)} د.أ</td>
+              <td>${inv.categories_count || 0}</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(inv.notes || '—')}</td>
+              <td>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  <button class="btn btn-ghost btn-sm" onclick="openInvestorDetailsModal(${inv.id})">📊 التفاصيل</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openInvestorModal(${inv.id})">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteInvestorConfirm(${inv.id})">🗑️</button>` : ''}
+                </div>
+              </td>
+            </tr>
+          `).join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--tx3)">لا يوجد مستثمرون</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function openInvestorModal(investorId = null) {
+  const investors = window._invInvestorsCache || [];
+  const inv = investorId ? investors.find(i => String(i.id) === String(investorId)) : null;
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${investorId ? '✏️ تعديل مستثمر' : '💹 مستثمر جديد'}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">الاسم *</label>
+      <input class="form-input" id="wi_name" value="${escHtml(inv?.name || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">رقم الهاتف</label>
+      <input class="form-input" id="wi_phone" value="${escHtml(inv?.phone || '')}">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="wi_notes" value="${escHtml(inv?.notes || '')}">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveInvestor(${investorId ?? 'null'})">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function saveInvestor(investorId) {
+  const name = document.getElementById('wi_name')?.value?.trim();
+  const phone = document.getElementById('wi_phone')?.value?.trim() || null;
+  const notes = document.getElementById('wi_notes')?.value?.trim() || null;
+
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+
+  try {
+    if (investorId) {
+      await API.updateWarehouseInvestor(investorId, { name, phone, notes });
+    } else {
+      await API.createWarehouseInvestor({ name, phone, notes });
+    }
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('investors');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function deleteInvestorConfirm(investorId) {
+  const investors = window._invInvestorsCache || [];
+  const inv = investors.find(i => String(i.id) === String(investorId));
+
+  confirmDanger('حذف مستثمر', [
+    `المستثمر: ${inv?.name || investorId}`,
+    'سيتم حذف جميع مساهماته في كل الفئات بشكل نهائي',
+  ], async () => {
+    try {
+      await API.deleteWarehouseInvestor(investorId);
+      toast('تم الحذف ✅', 'success');
+      closeModal();
+      navigateTo('investors');
+    } catch (e) {
+      toast(e.message, 'error');
+      closeModal();
+    }
+  });
+}
+
+async function openInvestorDetailsModal(investorId) {
+  let data;
+  try {
+    data = await API.getWarehouseInvestor(investorId);
+  } catch (e) {
+    toast(e.message, 'error');
+    return;
+  }
+
+  const inv = data.investor || {};
+  const investments = data.investments || [];
+  const total = investments.reduce((s, i) => s + parseFloat(i.amount || 0), 0);
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">📊 ${escHtml(inv.name)} — تفاصيل المساهمات</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+
+    <div class="stat-card" style="margin-bottom:14px">
+      <div class="stat-label">إجمالي المساهمات في كل الفئات</div>
+      <div class="stat-value" style="color:var(--gr)">${fmt(total)} د.أ</div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>الفئة</th>
+            <th>المساهمة</th>
+            <th>ملاحظات</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${investments.length ? investments.map(i => `
+            <tr>
+              <td>${i.category_icon || '📦'} ${escHtml(i.category_name)}</td>
+              <td style="font-weight:700">${fmt(i.amount)} د.أ</td>
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(i.notes || '—')}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:10px">
+      <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
+    </div>
+  `, '600px');
 }

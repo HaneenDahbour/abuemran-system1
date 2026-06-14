@@ -373,6 +373,26 @@
       apiFetch(`/expenses/warehouse-rents/${requireId(id, 'معرّف الإيجار')}/payments`),
     toggleWarehouseRentPayment: (id, data) =>
       apiFetch(`/expenses/warehouse-rents/${requireId(id, 'معرّف الإيجار')}/payments/toggle`, { method: 'POST', body: JSON.stringify(data) }),
+
+    /* ── Warehouse Investors (مستثمرو المستودع) ── */
+    getWarehouseInvestors: () => apiFetch('/warehouse-investors/investors'),
+    getWarehouseInvestor: id =>
+      apiFetch(`/warehouse-investors/investors/${requireId(id, 'معرّف المستثمر')}`),
+    createWarehouseInvestor: data =>
+      apiFetch('/warehouse-investors/investors', { method: 'POST', body: JSON.stringify(data) }),
+    updateWarehouseInvestor: (id, data) =>
+      apiFetch(`/warehouse-investors/investors/${requireId(id, 'معرّف المستثمر')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deleteWarehouseInvestor: id =>
+      apiFetch(`/warehouse-investors/investors/${requireId(id, 'معرّف المستثمر')}`, { method: 'DELETE' }),
+    getCategoryInvestments: catId =>
+      apiFetch(`/warehouse-investors/categories/${requireId(catId, 'معرّف الفئة')}/investments`),
+    setCategoryInvestment: (catId, data) =>
+      apiFetch(`/warehouse-investors/categories/${requireId(catId, 'معرّف الفئة')}/investments`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteCategoryInvestment: (catId, investmentId) =>
+      apiFetch(`/warehouse-investors/categories/${requireId(catId, 'معرّف الفئة')}/investments/${requireId(investmentId, 'معرّف المساهمة')}`, { method: 'DELETE' }),
+    getCategoryProfitShare: catId =>
+      apiFetch(`/warehouse-investors/categories/${requireId(catId, 'معرّف الفئة')}/profit-share`),
+    getWarehouseInvestorsSummary: () => apiFetch('/warehouse-investors/summary'),
   };
 
   window.API_BASE = API_BASE;

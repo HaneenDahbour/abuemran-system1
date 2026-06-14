@@ -21,8 +21,10 @@ from routers import (
     purchases,
     recipients,
     search,
+    shops,
     suppliers,
     warehouse_categories,
+    warehouse_investors,
     warehouse_invoices,
 )
 
@@ -116,8 +118,17 @@ app.include_router(
     tags=["Warehouse Invoices"],
 )
 
+app.include_router(
+    warehouse_investors.router,
+    prefix="/api/warehouse-investors",
+    tags=["Warehouse Investors"],
+)
+
 # ── China Section ─────────────────────────────────────────────
 app.include_router(china.router, prefix="/api/china", tags=["China"])
+
+# ── Shops Section (محلات) ────────────────────────────────────
+app.include_router(shops.router, prefix="/api/shops", tags=["Shops"])
 
 # ── Search / AI ───────────────────────────────────────────────
 app.include_router(search.router, prefix="/api/search", tags=["Search"])
