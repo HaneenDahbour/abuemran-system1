@@ -3728,6 +3728,7 @@ async function renderWarehouse(container) {
                   <button class="btn btn-primary btn-sm" onclick="openAddProductModal(${cat.id})">+ صنف</button>
                 ` : ''}
               ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryConfirm(${cat.id})">🗑️</button>` : ''}
+              ${canManageWarehouse() ? `<button class="btn btn-ghost btn-sm" onclick="openCategoryInvestmentsModal(${cat.id})">💹 المستثمرون</button>` : ''}
               <button class="btn btn-ghost btn-sm" onclick="openCategoryFolder(${cat.id})">📂 فتح</button>
             </div>
 
