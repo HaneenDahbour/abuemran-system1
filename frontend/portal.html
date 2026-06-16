@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>نظام أبو عمران — البوابة الرئيسية</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+
+  <style>
+    .portal-card {
+      max-width: 560px;
+    }
+
+    .portal-sections {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 8px;
+    }
+
+    .portal-tile {
+      background: rgba(255, 255, 255, .04);
+      border: 1px solid rgba(255, 255, 255, .1);
+      border-radius: 18px;
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: transform .15s, border-color .15s, background .15s;
+      color: white;
+    }
+
+    .portal-tile:hover {
+      transform: translateY(-3px);
+      border-color: rgba(26, 79, 214, .6);
+      background: rgba(255, 255, 255, .07);
+    }
+
+    .portal-tile.active {
+      border-color: var(--bl);
+      background: rgba(26, 79, 214, .12);
+    }
+
+    .portal-tile .ico {
+      font-size: 38px;
+      margin-bottom: 10px;
+    }
+
+    .portal-tile .ttl {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .portal-tile .sub {
+      font-size: 11px;
+      color: rgba(255, 255, 255, .45);
+      margin-top: 4px;
+    }
+
+    #portalLoginBox {
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, .1);
+      display: none;
+    }
+
+    #portalLoginBox.show {
+      display: block;
+    }
+
+    .portal-login-title {
+      text-align: center;
+      font-size: 14px;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 16px;
+    }
+
+    .portal-err {
+      color: #ff8080;
+      font-size: 12px;
+      text-align: center;
+      margin-top: 8px;
+      min-height: 16px;
+    }
+
+    .portal-back {
+      text-align: center;
+      margin-top: 10px;
+    }
+
+    .portal-back a {
+      font-size: 12px;
+      color: rgba(255, 255, 255, .5);
+      text-decoration: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="login-page">
+    <div class="login-card portal-card">
+      <div class="login-logo">📦</div>
+      <h1 class="login-title">نظام أبو عمران</h1>
+      <p class="login-sub">اختر القسم الذي تريد الدخول إليه</p>
+
+      <div class="portal-sections">
+        <div class="portal-tile" id="tile-warehouse" onclick="selectSection('warehouse')">
+          <div class="ico">🏭</div>
+          <div class="ttl">المستودع</div>
+          <div class="sub">النظام الرئيسي — العملاء، الفواتير، المقبوضات...</div>
+        </div>
+        <div class="portal-tile" id="tile-shops" onclick="selectSection('shops')">
+          <div class="ico">🏬</div>
+          <div class="ttl">المحلات</div>
+          <div class="sub">نظام إدارة المحلات والصندوق اليومي</div>
+        </div>
+      </div>
+
+      <div id="portalLoginBox">
+        <div class="portal-login-title" id="portalLoginTitle">تسجيل الدخول</div>
+
+        <div class="form-group">
+          <label class="form-label">اسم المستخدم</label>
+          <input class="form-input" id="pu" type="text" placeholder="اسم المستخدم" autocomplete="username" />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">كلمة المرور</label>
+          <input class="form-input" id="pp" type="password" placeholder="••••••" autocomplete="current-password" />
+        </div>
+
+        <button class="btn btn-primary btn-full btn-lg" id="portal-login-btn" style="margin-top:8px">
+          تسجيل الدخول
+        </button>
+
+        <div class="portal-err" id="portal-err"></div>
+
+        <div class="portal-back">
+          <a onclick="closeSection()">‹ رجوع</a>
+        </div>
+      </div>
+
+      <p style="font-size:11px; color:var(--tx3); text-align:center; margin-top:24px">
+        © 2023 أبو عمران. جميع الحقوق محفوظة.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = (() => {
+      const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      return isLocal ? 'http://localhost:8000/api' : '/api';
+    })();
+
+    let selectedSection = null;
+
+    function selectSection(section) {
+      selectedSection = section;
+      document.getElementById('tile-warehouse').classList.toggle('active', section === 'warehouse');
+      document.getElementById('tile-shops').classList.toggle('active', section === 'shops');
+      document.getElementById('portalLoginTitle').textContent =
+        section === 'warehouse' ? '🏭 تسجيل الدخول — المستودع' : '🏬 تسجيل الدخول — المحلات';
+      document.getElementById('portalLoginBox').classList.add('show');
+      document.getElementById('portal-err').textContent = '';
+      document.getElementById('pu').focus();
+    }
+
+    function closeSection() {
+      selectedSection = null;
+      document.getElementById('tile-warehouse').classList.remove('active');
+      document.getElementById('tile-shops').classList.remove('active');
+      document.getElementById('portalLoginBox').classList.remove('show');
+      document.getElementById('portal-err').textContent = '';
+      document.getElementById('pu').value = '';
+      document.getElementById('pp').value = '';
+    }
+
+    async function portalLogin() {
+      const errEl = document.getElementById('portal-err');
+      errEl.textContent = '';
+
+      if (!selectedSection) return;
+
+      const u = document.getElementById('pu').value.trim();
+      const p = document.getElementById('pp').value;
+      if (!u || !p) { errEl.textContent = 'الرجاء تعبئة جميع الحقول'; return; }
+
+      const btn = document.getElementById('portal-login-btn');
+      btn.disabled = true; btn.textContent = 'جاري التحقق...';
+
+      try {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: u, password: p }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.token) throw new Error(data?.detail || 'بيانات الدخول غير صحيحة');
+
+        const role = data.user.role;
+
+        if (selectedSection === 'shops') {
+          const allowed = ['shop_manager', 'shop_employee', 'admin', 'accountant'].includes(role) || !!data.user.shop_id;
+          if (!allowed) throw new Error('هذا الحساب لا يملك صلاحية الوصول لقسم المحلات');
+          localStorage.setItem('shop_token', data.token);
+          localStorage.setItem('shop_user', JSON.stringify(data.user));
+          location.href = 'shops.html';
+        } else {
+          const allowed = !['shop_manager', 'shop_employee'].includes(role) || !!data.user.shop_id;
+          if (!allowed) throw new Error('هذا الحساب مخصص لقسم المحلات فقط — اختر "المحلات"');
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          location.href = 'index.html';
+        }
+      } catch (e) {
+        errEl.textContent = e.message;
+      } finally {
+        btn.disabled = false; btn.textContent = 'تسجيل الدخول';
+      }
+    }
+
+    document.getElementById('portal-login-btn').addEventListener('click', portalLogin);
+    document.getElementById('pu').addEventListener('keydown', e => { if (e.key === 'Enter') portalLogin(); });
+    document.getElementById('pp').addEventListener('keydown', e => { if (e.key === 'Enter') portalLogin(); });
+  </script>
+</body>
+
+</html>
