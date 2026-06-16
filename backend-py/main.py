@@ -51,6 +51,13 @@ FRONTEND_DIR = PROJECT_ROOT / "frontend"
 @app.on_event("startup")
 async def startup():
     await connect_db()
+    from config.db import get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            ALTER TABLE warehouse_category_investments
+            ADD COLUMN IF NOT EXISTS paid_amount NUMERIC(14,3) DEFAULT 0
+        """)
 
 
 @app.on_event("shutdown")

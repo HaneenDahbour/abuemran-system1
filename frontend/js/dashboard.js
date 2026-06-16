@@ -10573,6 +10573,9 @@ async function openCategoryInvestmentsModal(categoryId) {
   const usedIds = (investments.investments || []).map(i => String(i.investor_id));
   const availableInvestors = investorsList.filter(i => !usedIds.includes(String(i.id)));
 
+  // store for use by add-form
+  window._invLastInvestments = investments.investments || [];
+
   openModal(`
     <div class="modal-header">
       <div class="modal-title">${cat.icon || '📦'} ${escHtml(cat.name)} — المستثمرون وتوزيع الربح</div>
@@ -10585,24 +10588,22 @@ async function openCategoryInvestmentsModal(categoryId) {
         <div class="stat-value" style="color:${profitShare.total_profit >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(profitShare.total_profit)} د.أ</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">حصة المالك (${fmt(profitShare.owner_share_pct)}%)</div>
+        <div class="stat-label">حصة المالك (سيف) 50%</div>
         <div class="stat-value" style="color:var(--bl)">${fmt(profitShare.owner_share)} د.أ</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">حصة المستثمرين</div>
+        <div class="stat-label">حصة المستثمرين 50%</div>
         <div class="stat-value" style="color:var(--am)">${fmt(profitShare.investors_pool)} د.أ</div>
       </div>
     </div>
 
-    ${profitShare.has_loss ? `<div class="alert alert-warning" style="margin-bottom:12px">⚠️ هذه الفئة في حالة خسارة حالياً — لا يوجد ربح للتوزيع</div>` : ''}
+    ${profitShare.has_loss ? `<div class="alert alert-warning" style="margin-bottom:12px">⚠️ هذه الفئة في حالة خسارة — لا يوجد ربح للتوزيع</div>` : ''}
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <h4 style="margin:0">مساهمات المستثمرين</h4>
-      ${availableInvestors.length ? `
-        <button class="btn btn-primary btn-sm" onclick="openAddInvestmentForm(${categoryId})">+ إضافة مستثمر للفئة</button>
-      ` : ''}
+      <button class="btn btn-primary btn-sm" onclick="openAddInvestmentForm(${categoryId})">+ إضافة مستثمر</button>
     </div>
-    <div id="add-investment-form"></div>
+    <div id="add-investment-form" style="margin-bottom:8px"></div>
 
     <div class="table-wrap">
       <table>
@@ -10612,26 +10613,38 @@ async function openCategoryInvestmentsModal(categoryId) {
             <th>المساهمة (د.أ)</th>
             <th>النسبة %</th>
             <th>حصته من الربح</th>
+            <th>المدفوع له</th>
+            <th>المتبقي</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           ${shares.length ? shares.map(s => {
     const inv = (investments.investments || []).find(i => String(i.investor_id) === String(s.investor_id));
+    const paid = parseFloat(inv?.paid_amount || 0);
+    const remaining = Math.max(0, parseFloat(s.profit_share || 0) - paid);
     return `
               <tr>
                 <td><strong>${escHtml(s.investor_name)}</strong></td>
                 <td>
-                  <input class="form-input" style="width:120px;display:inline-block" type="number" step="0.001" min="0"
+                  <input class="form-input" style="width:100px" type="number" step="0.001" min="0"
                     id="inv_amount_${s.investor_id}" value="${inv ? inv.amount : 0}">
-                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment(${categoryId}, ${s.investor_id})">💾</button>
                 </td>
                 <td>${fmt(s.contribution_pct)}%</td>
                 <td style="color:var(--am);font-weight:700">${fmt(s.profit_share)} د.أ</td>
-                <td>${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm(${categoryId}, ${inv.id}, ${s.investor_id})">🗑️</button>` : ''}</td>
-              </tr>
-            `;
-  }).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا يوجد مستثمرون في هذه الفئة بعد</td></tr>`}
+                <td>
+                  <input class="form-input" style="width:100px;border-color:var(--gr)" type="number" step="0.001" min="0"
+                    id="inv_paid_${s.investor_id}" value="${paid}">
+                </td>
+                <td style="font-weight:700;color:${remaining > 0 ? 'var(--rd)' : 'var(--gr)'}">
+                  ${fmt(remaining)} د.أ
+                </td>
+                <td style="display:flex;gap:4px;flex-wrap:wrap;min-width:80px">
+                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment(${categoryId}, ${s.investor_id})" title="حفظ">💾</button>
+                  ${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm(${categoryId}, ${inv.id}, ${s.investor_id})" title="حذف">🗑️</button>` : ''}
+                </td>
+              </tr>`;
+  }).join('') : `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--tx3)">لا يوجد مستثمرون في هذه الفئة بعد</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -10639,50 +10652,55 @@ async function openCategoryInvestmentsModal(categoryId) {
     <div style="margin-top:10px">
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
-  `, '760px');
+  `, '900px');
 }
 
 function openAddInvestmentForm(categoryId) {
   const investorsList = window._invInvestorsCache || [];
-  const usedIds = (window._invLastInvestments || []).map(i => String(i.investor_id));
-  const available = investorsList.filter(i => !usedIds.includes(String(i.id)));
-
   const target = document.getElementById('add-investment-form');
   if (!target) return;
 
   target.innerHTML = `
-    <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:12px; flex-wrap:wrap">
-      <div class="form-group" style="flex:1; min-width:180px; margin-bottom:0">
-        <label class="form-label">المستثمر</label>
-        <select class="form-select" id="new_inv_investor">
-          ${investorsList.length ? investorsList.map(i => `<option value="${i.id}">${escHtml(i.name)}</option>`).join('') : '<option value="">لا يوجد مستثمرون — أضف من تبويب المستثمرين</option>'}
+    <div style="display:grid;grid-template-columns:1fr 130px 130px auto;gap:8px;align-items:flex-end;padding:10px;background:var(--bg2);border-radius:8px;margin-bottom:6px">
+      <div>
+        <label class="form-label" style="font-size:12px">المستثمر</label>
+        <select class="form-select" id="new_inv_investor" style="font-size:13px">
+          ${investorsList.length
+      ? investorsList.map(i => `<option value="${i.id}">${escHtml(i.name)}</option>`).join('')
+      : '<option value="">لا يوجد مستثمرون</option>'}
         </select>
       </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label class="form-label">المبلغ (د.أ)</label>
-        <input class="form-input" style="width:140px" type="number" step="0.001" min="0" id="new_inv_amount" value="0">
+      <div>
+        <label class="form-label" style="font-size:12px">المساهمة (د.أ)</label>
+        <input class="form-input" type="number" step="0.001" min="0" id="new_inv_amount" value="0" style="font-size:13px">
       </div>
-      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment(${categoryId}, null)">إضافة</button>
+      <div>
+        <label class="form-label" style="font-size:12px">المدفوع (د.أ)</label>
+        <input class="form-input" type="number" step="0.001" min="0" id="new_inv_paid" value="0" style="font-size:13px;border-color:var(--gr)">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment(${categoryId}, null)" style="align-self:flex-end">إضافة</button>
     </div>
   `;
 }
 
 async function saveCategoryInvestment(categoryId, investorId) {
   let id = investorId;
-  let amount;
+  let amount, paid_amount;
 
   if (id) {
     amount = parseFloat(document.getElementById(`inv_amount_${id}`)?.value || 0);
+    paid_amount = parseFloat(document.getElementById(`inv_paid_${id}`)?.value || 0);
   } else {
     id = document.getElementById('new_inv_investor')?.value;
     amount = parseFloat(document.getElementById('new_inv_amount')?.value || 0);
+    paid_amount = parseFloat(document.getElementById('new_inv_paid')?.value || 0);
     if (!id) { toast('اختر مستثمراً', 'error'); return; }
   }
 
   if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); return; }
 
   try {
-    await API.setCategoryInvestment(categoryId, { investor_id: Number(id), amount });
+    await API.setCategoryInvestment(categoryId, { investor_id: Number(id), amount, paid_amount });
     toast('تم الحفظ ✅', 'success');
     await openCategoryInvestmentsModal(categoryId);
     if (window._investorsTab === 'overview') {
@@ -10759,7 +10777,6 @@ async function renderInvestorsList(container) {
 }
 
 async function openInvestorModal(investorId = null) {
-  // Load categories and existing investor data in parallel
   let categories = [], existingInvestments = [], inv = null;
   try {
     const [cats, invData] = await Promise.all([
@@ -10776,17 +10793,13 @@ async function openInvestorModal(investorId = null) {
     return;
   }
 
-  // Build initial contributions rows from existing data
+  window._invCategories = categories;
   window._invContribRows = existingInvestments.map(i => ({
     category_id: i.category_id,
     amount: parseFloat(i.amount || 0),
-    notes: i.notes || '',
+    paid_amount: parseFloat(i.paid_amount || 0),
   }));
-  window._invCategories = categories;
-
-  const catOptions = categories.map(c =>
-    `<option value="${c.id}">${escHtml((c.icon || '📦') + ' ' + c.name)}</option>`
-  ).join('');
+  window._invEditId = investorId;
 
   openModal(`
     <div class="modal-header">
@@ -10806,93 +10819,86 @@ async function openInvestorModal(investorId = null) {
     </div>
     <div class="form-group" style="margin-bottom:16px">
       <label class="form-label">ملاحظات</label>
-      <input class="form-input" id="wi_notes" value="${escHtml(inv?.notes || '')}" placeholder="ملاحظات اختيارية">
+      <input class="form-input" id="wi_notes" value="${escHtml(inv?.notes || '')}" placeholder="اختياري">
     </div>
 
-    <div style="border-top:1px solid var(--brd);padding-top:14px;margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <strong style="font-size:14px">💰 مساهماته في فئات المستودع</strong>
-        <button class="btn btn-ghost btn-sm" onclick="addInvContribRow('${catOptions.replace(/'/g, "\\'")}')">+ إضافة فئة</button>
+    <div style="border-top:1px solid var(--brd);padding-top:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>💰 مساهماته في فئات المستودع</strong>
+        <button class="btn btn-ghost btn-sm" onclick="addInvContribRow()">+ إضافة فئة</button>
       </div>
-      <div style="background:var(--bg2);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--tx3);margin-bottom:10px">
-        💡 50% ربح كل فئة للمالك (سيف) — 50% للمستثمرين بنسبة مساهمة كل منهم
+      <div style="background:var(--bg2);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--tx3);margin-bottom:10px">
+        💡 50% ربح كل فئة لسيف (المالك) — 50% للمستثمرين بنسبة مساهمتهم
       </div>
-      <div id="inv_contrib_list">
-        ${window._invContribRows.length
-          ? window._invContribRows.map((r, idx) => _buildContribRow(idx, r, catOptions, categories)).join('')
-          : `<div id="inv_no_contrib" style="text-align:center;padding:16px;color:var(--tx3);font-size:13px">لا توجد مساهمات — اضغط "+ إضافة فئة"</div>`}
+      <div style="display:grid;grid-template-columns:1fr 120px 120px 36px;gap:6px;font-size:12px;font-weight:600;color:var(--tx3);padding:0 4px;margin-bottom:4px">
+        <span>الفئة</span><span>المساهمة (د.أ)</span><span>المدفوع (د.أ)</span><span></span>
       </div>
+      <div id="inv_contrib_list"></div>
     </div>
 
-    <div style="display:flex;gap:10px;margin-top:12px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveInvestorFull(${investorId ?? 'null'})">💾 حفظ الكل</button>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveInvestorFull()">💾 حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `, '680px');
+
+  // render rows after modal DOM is ready
+  _renderInvContribList();
 }
 
-function _buildContribRow(idx, row, catOptions, categories) {
-  const cat = categories.find(c => String(c.id) === String(row.category_id));
-  const selectedOptions = categories.map(c =>
-    `<option value="${c.id}" ${String(c.id) === String(row.category_id) ? 'selected' : ''}>${escHtml((c.icon || '📦') + ' ' + c.name)}</option>`
-  ).join('');
-  return `
-  <div id="inv_row_${idx}" style="display:grid;grid-template-columns:1fr 140px auto;gap:8px;align-items:center;margin-bottom:8px">
-    <select class="form-select" id="inv_cat_${idx}" style="font-size:13px">${selectedOptions}</select>
-    <input class="form-input" id="inv_amt_${idx}" type="number" step="0.001" min="0"
-      value="${row.amount || 0}" placeholder="المبلغ (د.أ)" style="font-size:13px">
-    <button class="btn btn-danger btn-sm" onclick="removeInvContribRow(${idx})" title="حذف">🗑️</button>
-  </div>`;
-}
-
-function addInvContribRow(catOptions) {
-  const rows = window._invContribRows;
-  const categories = window._invCategories || [];
-  const idx = rows.length;
-  rows.push({ category_id: categories[0]?.id || '', amount: 0 });
-
-  const noContrib = document.getElementById('inv_no_contrib');
-  if (noContrib) noContrib.remove();
-
+function _renderInvContribList() {
   const list = document.getElementById('inv_contrib_list');
   if (!list) return;
+  const rows = window._invContribRows || [];
+  const categories = window._invCategories || [];
 
-  const div = document.createElement('div');
-  div.innerHTML = _buildContribRow(idx, rows[idx], catOptions, categories);
-  list.appendChild(div.firstElementChild);
+  if (!rows.length) {
+    list.innerHTML = `<div style="text-align:center;padding:16px;color:var(--tx3);font-size:13px">لا توجد مساهمات — اضغط "+ إضافة فئة"</div>`;
+    return;
+  }
+
+  list.innerHTML = rows.map((r, idx) => {
+    const opts = categories.map(c =>
+      `<option value="${c.id}" ${String(c.id) === String(r.category_id) ? 'selected' : ''}>${escHtml((c.icon || '📦') + ' ' + c.name)}</option>`
+    ).join('');
+    return `
+    <div id="inv_row_${idx}" style="display:grid;grid-template-columns:1fr 120px 120px 36px;gap:6px;align-items:center;margin-bottom:6px">
+      <select class="form-select" id="inv_cat_${idx}" style="font-size:13px">${opts}</select>
+      <input class="form-input" id="inv_amt_${idx}" type="number" step="0.001" min="0" value="${r.amount || 0}" style="font-size:13px">
+      <input class="form-input" id="inv_paid_${idx}" type="number" step="0.001" min="0" value="${r.paid_amount || 0}" style="font-size:13px;border-color:var(--gr)">
+      <button class="btn btn-danger btn-sm" onclick="removeInvContribRow(${idx})" style="padding:4px 8px">🗑️</button>
+    </div>`;
+  }).join('');
+}
+
+function addInvContribRow() {
+  const categories = window._invCategories || [];
+  window._invContribRows.push({ category_id: categories[0]?.id || '', amount: 0, paid_amount: 0 });
+  _renderInvContribList();
 }
 
 function removeInvContribRow(idx) {
-  window._invContribRows[idx] = null; // mark removed
-  const el = document.getElementById(`inv_row_${idx}`);
-  if (el) el.remove();
-  const list = document.getElementById('inv_contrib_list');
-  const remaining = list?.querySelectorAll('[id^="inv_row_"]');
-  if (!remaining?.length) {
-    list.innerHTML = `<div id="inv_no_contrib" style="text-align:center;padding:16px;color:var(--tx3);font-size:13px">لا توجد مساهمات — اضغط "+ إضافة فئة"</div>`;
-  }
+  window._invContribRows.splice(idx, 1);
+  _renderInvContribList();
 }
 
-async function saveInvestorFull(investorId) {
+async function saveInvestorFull() {
+  const investorId = window._invEditId || null;
   const name = document.getElementById('wi_name')?.value?.trim();
   const phone = document.getElementById('wi_phone')?.value?.trim() || null;
   const notes = document.getElementById('wi_notes')?.value?.trim() || null;
-
   if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
 
-  // Collect contribution rows
   const rows = window._invContribRows || [];
   const contributions = [];
   for (let idx = 0; idx < rows.length; idx++) {
-    if (!rows[idx]) continue; // removed
     const catId = document.getElementById(`inv_cat_${idx}`)?.value;
     const amt = parseFloat(document.getElementById(`inv_amt_${idx}`)?.value || 0);
+    const paid = parseFloat(document.getElementById(`inv_paid_${idx}`)?.value || 0);
     if (!catId) continue;
     if (isNaN(amt) || amt < 0) { toast(`مبلغ غير صحيح في السطر ${idx + 1}`, 'error'); return; }
-    contributions.push({ category_id: Number(catId), amount: amt });
+    contributions.push({ category_id: Number(catId), amount: amt, paid_amount: paid });
   }
-
-  // Check for duplicate categories
   const catIds = contributions.map(c => c.category_id);
   if (new Set(catIds).size !== catIds.length) { toast('لا يمكن تكرار نفس الفئة', 'error'); return; }
 
@@ -10904,15 +10910,11 @@ async function saveInvestorFull(investorId) {
       const created = await API.createWarehouseInvestor({ name, phone, notes });
       finalId = created.id;
     }
-
-    // Save all category contributions
-    for (const contrib of contributions) {
-      await API.setCategoryInvestment(contrib.category_id, {
-        investor_id: Number(finalId),
-        amount: contrib.amount,
+    for (const c of contributions) {
+      await API.setCategoryInvestment(c.category_id, {
+        investor_id: Number(finalId), amount: c.amount, paid_amount: c.paid_amount,
       });
     }
-
     toast('تم الحفظ ✅', 'success');
     closeModal();
     window._invInvestorsCache = null;

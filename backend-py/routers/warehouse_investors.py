@@ -119,6 +119,7 @@ class InvestorIn(BaseModel):
 class InvestmentIn(BaseModel):
     investor_id: int
     amount: float
+    paid_amount: Optional[float] = 0.0
     notes: Optional[str] = None
 
 
@@ -307,13 +308,16 @@ async def set_category_investment(category_id: int, data: InvestmentIn, user=Dep
 
             row = await conn.fetchrow(
                 """
-                INSERT INTO warehouse_category_investments (category_id, investor_id, amount, notes, created_by)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO warehouse_category_investments (category_id, investor_id, amount, paid_amount, notes, created_by)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 ON CONFLICT (category_id, investor_id)
-                DO UPDATE SET amount = EXCLUDED.amount, notes = EXCLUDED.notes, updated_at = NOW()
+                DO UPDATE SET amount = EXCLUDED.amount, paid_amount = EXCLUDED.paid_amount,
+                              notes = EXCLUDED.notes, updated_at = NOW()
                 RETURNING *
                 """,
-                category_id, data.investor_id, data.amount, (data.notes or "").strip() or None,
+                category_id, data.investor_id, data.amount,
+                data.paid_amount or 0.0,
+                (data.notes or "").strip() or None,
                 user.get("id"),
             )
 
