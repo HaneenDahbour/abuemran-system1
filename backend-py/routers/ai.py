@@ -154,7 +154,7 @@ async def get_system_context(user: dict, pool) -> dict:
             context["myChecks"] = [row_to_dict(r) for r in my_checks]
 
     except Exception as err:
-        context["error"] = f"Ø¨Ø¹Ø¶ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª ØºÙŠØ± Ù…ØªØ§Ø­Ø©: {str(err)}"
+        context["error"] = f"بعض البيانات غير متاحة: {str(err)}"
 
     return context
 
@@ -164,17 +164,17 @@ def build_system_prompt(user: dict, context: dict) -> str:
     full_name = user.get("full_name", "")
 
     role_instructions = {
-        "admin": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ù…Ø§Ù„ÙŠ Ø°ÙƒÙŠ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ù…Ø¯ÙŠØ± Ø§Ù„Ø¹Ø§Ù… {full_name}.
-Ù„Ø¯ÙŠÙƒ ØµÙ„Ø§Ø­ÙŠØ© Ø§Ù„ÙˆØµÙˆÙ„ Ø§Ù„ÙƒØ§Ù…Ù„ Ù„Ø¬Ù…ÙŠØ¹ Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù†Ø¸Ø§Ù…: Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡ØŒ Ø§Ù„ÙÙˆØ§ØªÙŠØ±ØŒ Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø§ØªØŒ Ø§Ù„Ø´ÙŠÙƒØ§ØªØŒ Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù…ÙŠÙ†ØŒ ÙˆØ³Ø¬Ù„ Ø§Ù„Ø¹Ù…Ù„ÙŠØ§Øª.
-ÙŠÙ…ÙƒÙ†Ùƒ ØªØ­Ù„ÙŠÙ„ Ø§Ù„Ø¯ÙŠÙˆÙ†ØŒ ØªÙ‚ÙŠÙŠÙ… Ø§Ù„Ù…Ø®Ø§Ø·Ø±ØŒ Ø¥Ø¹Ø·Ø§Ø¡ ØªÙˆØµÙŠØ§Øª Ø§Ø³ØªØ±Ø§ØªÙŠØ¬ÙŠØ©ØŒ ÙˆØªÙ„Ø®ÙŠØµ Ø§Ù„ÙˆØ¶Ø¹ Ø§Ù„Ù…Ø§Ù„ÙŠ Ø§Ù„ÙƒØ§Ù…Ù„.""",
-        "accountant": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ù…Ø§Ù„ÙŠ Ø°ÙƒÙŠ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ù…Ø­Ø§Ø³Ø¨ {full_name}.
-Ù„Ø¯ÙŠÙƒ ØµÙ„Ø§Ø­ÙŠØ© Ø§Ù„ÙˆØµÙˆÙ„ Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡ØŒ Ø§Ù„ÙÙˆØ§ØªÙŠØ±ØŒ Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø§ØªØŒ ÙˆØ§Ù„Ø´ÙŠÙƒØ§Øª.
-Ø³Ø§Ø¹Ø¯ ÙÙŠ Ø§Ù„ØªØ­Ù„ÙŠÙ„ Ø§Ù„Ù…Ø§Ù„ÙŠØŒ ØªØªØ¨Ø¹ Ø§Ù„Ø¯ÙŠÙˆÙ†ØŒ ÙˆÙ…ØªØ§Ø¨Ø¹Ø© Ø§Ù„Ø´ÙŠÙƒØ§Øª Ø§Ù„Ù…Ø³ØªØ­Ù‚Ø©.""",
-        "employee": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ø°ÙƒÙŠ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ù…ÙˆØ¸Ù {full_name}.
-ÙŠÙ…ÙƒÙ†Ùƒ Ù…Ø³Ø§Ø¹Ø¯ØªÙ‡ ÙÙŠ Ù…ØªØ§Ø¨Ø¹Ø© Ø§Ù„Ù…Ù‚Ø¨ÙˆØ¶Ø§Øª Ø§Ù„ØªÙŠ Ø³Ø¬Ù‘Ù„Ù‡Ø§ ÙˆØ§Ù„Ø´ÙŠÙƒØ§Øª Ø§Ù„Ù…Ø¹Ù„Ù‘Ù‚Ø©.
-Ù„Ø§ ØªÙƒØ´Ù Ø¨ÙŠØ§Ù†Ø§Øª Ù…Ø§Ù„ÙŠØ© ØªÙØµÙŠÙ„ÙŠØ© Ù„Ø¹Ù…Ù„Ø§Ø¡ Ø¢Ø®Ø±ÙŠÙ†.""",
-        "client": f"""Ø£Ù†Øª Ù…Ø³Ø§Ø¹Ø¯ Ø®Ø¯Ù…Ø© Ø¹Ù…Ù„Ø§Ø¡ Ù„Ù†Ø¸Ø§Ù… Ø£Ø¨Ùˆ Ø¹Ù…Ø±Ø§Ù† Ø§Ù„ØªØ¬Ø§Ø±ÙŠ. ØªØªØ­Ø¯Ø« Ù…Ø¹ Ø§Ù„Ø¹Ù…ÙŠÙ„ {context.get('myName', full_name)}.
-Ø£Ø¬Ø¨ ÙÙ‚Ø· Ø¹Ù† Ø±ØµÙŠØ¯Ù‡ ÙˆÙÙˆØ§ØªÙŠØ±Ù‡ ÙˆØ´ÙŠÙƒØ§ØªÙ‡ Ø§Ù„Ø®Ø§ØµØ©. Ù„Ø§ ØªØ°ÙƒØ± Ø£ÙŠ Ø¨ÙŠØ§Ù†Ø§Øª Ù„Ø¹Ù…Ù„Ø§Ø¡ Ø¢Ø®Ø±ÙŠÙ† Ù…Ø·Ù„Ù‚Ø§Ù‹.""",
+        "admin": f"""أنت مساعد مالي ذكي لنظام أبو عمران التجاري. تتحدث مع المدير العام {full_name}.
+لديك صلاحية الوصول الكامل لجميع بيانات النظام: العملاء، الفواتير، المقبوضات، الشيكات، المستخدمين، وسجل العمليات.
+يمكنك تحليل الديون، تقييم المخاطر، إعطاء توصيات استراتيجية، وتلخيص الوضع المالي الكامل.""",
+        "accountant": f"""أنت مساعد مالي ذكي لنظام أبو عمران التجاري. تتحدث مع المحاسب {full_name}.
+لديك صلاحية الوصول لبيانات العملاء، الفواتير، المقبوضات، والشيكات.
+ساعد في التحليل المالي، تتبع الديون، ومتابعة الشيكات المستحقة.""",
+        "employee": f"""أنت مساعد ذكي لنظام أبو عمران التجاري. تتحدث مع الموظف {full_name}.
+يمكنك مساعدته في متابعة المقبوضات التي سجّلها والشيكات المعلّقة.
+لا تكشف بيانات مالية تفصيلية لعملاء آخرين.""",
+        "client": f"""أنت مساعد خدمة عملاء لنظام أبو عمران التجاري. تتحدث مع العميل {context.get('myName', full_name)}.
+أجب فقط عن رصيده وفواتيره وشيكاته الخاصة. لا تذكر أي بيانات لعملاء آخرين مطلقاً.""",
     }
 
     import json
@@ -183,20 +183,20 @@ def build_system_prompt(user: dict, context: dict) -> str:
 
     return f"""{role_instructions.get(role, role_instructions['employee'])}
 
-Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ù†Ø¸Ø§Ù… Ø§Ù„Ø­Ø§Ù„ÙŠØ©:
+بيانات النظام الحالية:
 {context_str}
 
-Ù‚ÙˆØ§Ø¹Ø¯ Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯:
-- Ø£Ø¬Ø¨ Ø¯Ø§Ø¦Ù…Ø§Ù‹ Ø¨Ø§Ù„Ø¹Ø±Ø¨ÙŠØ© Ø¨Ø£Ø³Ù„ÙˆØ¨ Ù…Ù‡Ù†ÙŠ ÙˆÙ…Ø®ØªØµØ±
-- Ø§Ø³ØªØ®Ø¯Ù… Ø§Ù„Ø£Ø±Ù‚Ø§Ù… Ø§Ù„ÙØ¹Ù„ÙŠØ© Ù…Ù† Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª Ø£Ø¹Ù„Ø§Ù‡ Ø¹Ù†Ø¯ Ø§Ù„Ø¥Ø¬Ø§Ø¨Ø©
-- Ø¥Ø°Ø§ Ø·ÙÙ„Ø¨ ØªÙ‚Ø±ÙŠØ± Ø£Ùˆ ØªØ­Ù„ÙŠÙ„ØŒ Ù‚Ø¯Ù‘Ù…Ù‡ Ø¨Ø´ÙƒÙ„ Ù…Ù†Ø¸Ù‘Ù… Ù…Ø¹ Ø§Ù„Ù†Ù‚Ø§Ø· Ø§Ù„Ø±Ø¦ÙŠØ³ÙŠØ©
-- Ù„Ø§ ØªØ®ØªØ±Ø¹ Ø£Ø±Ù‚Ø§Ù…Ø§Ù‹ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø© ÙÙŠ Ø§Ù„Ø¨ÙŠØ§Ù†Ø§Øª
-- Ø¥Ø°Ø§ Ø³ÙØ¦Ù„Øª Ø¹Ù† Ø´ÙŠØ¡ Ø®Ø§Ø±Ø¬ ØµÙ„Ø§Ø­ÙŠØ§ØªÙƒØŒ Ø£Ø®Ø¨Ø± Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… Ø¨Ø°Ù„Ùƒ Ø¨Ø£Ø¯Ø¨"""
+قواعد المساعد:
+- أجب دائماً بالعربية بأسلوب مهني ومختصر
+- استخدم الأرقام الفعلية من البيانات أعلاه عند الإجابة
+- إذا طُلب تقرير أو تحليل، قدّمه بشكل منظّم مع النقاط الرئيسية
+- لا تخترع أرقاماً غير موجودة في البيانات
+- إذا سُئلت عن شيء خارج صلاحياتك، أخبر المستخدم بذلك بأدب"""
 
 
 async def call_groq(system_prompt: str, messages: list) -> str:
     if not GROQ_API_KEY:
-        raise HTTPException(status_code=500, detail="GROQ_API_KEY Ù…ÙÙ‚ÙˆØ¯ Ù…Ù† .env")
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY مفقود من .env")
 
     groq_messages = [{"role": "system", "content": system_prompt}]
 
@@ -234,14 +234,14 @@ async def call_groq(system_prompt: str, messages: list) -> str:
         return data["choices"][0]["message"]["content"]
 
     except httpx.ConnectError:
-        raise HTTPException(status_code=500, detail="ØªØ¹Ø°Ù‘Ø± Ø§Ù„Ø§ØªØµØ§Ù„ Ø¨Ù€ Groq API")
+        raise HTTPException(status_code=500, detail="تعذّر الاتصال ب�€ Groq API")
 
 
 # POST /api/ai/chat
 @router.post("/chat")
 async def ai_chat(data: ChatRequest, user=Depends(get_current_user)):
     if not data.message:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ø±Ø³Ø§Ù„Ø© Ù…Ø·Ù„ÙˆØ¨Ø©")
+        raise HTTPException(status_code=400, detail="الرسالة مطلوبة")
 
     pool = await get_pool()
 
@@ -264,14 +264,14 @@ async def ai_chat(data: ChatRequest, user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯ Ø§Ù„Ø°ÙƒÙŠ: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في المساعد الذكي: {str(e)}")
 
 
 # POST /api/ai/analyze
 @router.post("/analyze")
 async def ai_analyze(user=Depends(get_current_user)):
     if user.get("role") not in ("admin", "accountant"):
-        raise HTTPException(status_code=403, detail="ØºÙŠØ± Ù…ØµØ±Ø­")
+        raise HTTPException(status_code=403, detail="غير مصرح")
 
     pool = await get_pool()
 
@@ -282,7 +282,7 @@ async def ai_analyze(user=Depends(get_current_user)):
         messages = [
             {
                 "role": "user",
-                "content": "Ø£Ø¹Ø·Ù†ÙŠ Ù…Ù„Ø®ØµØ§Ù‹ Ø³Ø±ÙŠØ¹Ø§Ù‹ ÙÙŠ 3-4 Ù†Ù‚Ø§Ø· Ø¹Ù† Ø§Ù„ÙˆØ¶Ø¹ Ø§Ù„Ù…Ø§Ù„ÙŠ Ø§Ù„Ø­Ø§Ù„ÙŠ Ù…Ø¹ Ø£Ù‡Ù… Ø§Ù„ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ø§Ù„ØªÙŠ ØªØ³ØªÙˆØ¬Ø¨ Ø§Ù„Ø§Ù†ØªØ¨Ø§Ù‡ Ø§Ù„ÙÙˆØ±ÙŠ.",
+                "content": "أعطني ملخصاً سريعاً في 3-4 نقاط عن الوضع المالي الحالي مع أهم التنبيهات التي تستوجب الانتباه الفوري.",
             }
         ]
 
@@ -293,7 +293,7 @@ async def ai_analyze(user=Depends(get_current_user)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„ØªØ­Ù„ÙŠÙ„: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في التحليل: {str(e)}")
 
 
 # GET /api/ai/analytics
@@ -302,7 +302,7 @@ async def ai_analytics(
     period: str = Query(default="weekly"), user=Depends(get_current_user)
 ):
     if user.get("role") not in ("admin", "accountant"):
-        raise HTTPException(status_code=403, detail="ØºÙŠØ± Ù…ØµØ±Ø­")
+        raise HTTPException(status_code=403, detail="غير مصرح")
 
     intervals = {"daily": "30 days", "weekly": "12 weeks", "monthly": "12 months"}
     trunc_map = {"daily": "day", "weekly": "week", "monthly": "month"}
@@ -357,5 +357,5 @@ async def ai_analytics(
         }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في الإحصائيات: {str(e)}")
 

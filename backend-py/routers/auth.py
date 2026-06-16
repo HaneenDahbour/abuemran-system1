@@ -58,17 +58,17 @@ async def login(data: LoginRequest):
     pool = await get_pool()
 
     if not data.username or not data.password:
-        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ÙˆÙƒÙ„Ù…Ø© Ø§Ù„Ù…Ø±ÙˆØ± Ù…Ø·Ù„ÙˆØ¨Ø§Ù†")
+        raise HTTPException(status_code=400, detail="اسم المستخدم وكلمة المرور مطلوبان")
 
     user = await pool.fetchrow("SELECT * FROM users WHERE username = $1", data.username)
 
     if not user:
-        raise HTTPException(status_code=401, detail="Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¯Ø®ÙˆÙ„ ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
+        raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
 
     valid = pwd_context.verify(data.password, user["password_hash"])
 
     if not valid:
-        raise HTTPException(status_code=401, detail="Ø¨ÙŠØ§Ù†Ø§Øª Ø§Ù„Ø¯Ø®ÙˆÙ„ ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
+        raise HTTPException(status_code=401, detail="بيانات الدخول غير صحيحة")
 
     permissions = parse_permissions(user["permissions"]) if "permissions" in user.keys() else None
 
@@ -90,11 +90,11 @@ async def login(data: LoginRequest):
         await pool.execute(
             """
             INSERT INTO audit_log (user_id, user_name, action, detail)
-            VALUES ($1, $2, 'ØªØ³Ø¬ÙŠÙ„ Ø¯Ø®ÙˆÙ„', $3)
+            VALUES ($1, $2, 'تسجيل دخول', $3)
             """,
             user["id"],
             user["full_name"],
-            f"Ø¯Ø®ÙˆÙ„ Ù…Ù† Ù‚ÙØ¨Ù„ {user['full_name']}",
+            f"دخول من قِبل {user['full_name']}",
         )
     except Exception:
         pass
@@ -283,7 +283,7 @@ async def delete_user(user_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
 
     if int(user_id) == int(user["id"]):
-        raise HTTPException(status_code=400, detail="Ù„Ø§ ÙŠÙ…ÙƒÙ†Ùƒ Ø­Ø°Ù Ø­Ø³Ø§Ø¨Ùƒ Ø§Ù„Ø®Ø§Øµ")
+        raise HTTPException(status_code=400, detail="لا يمكنك حذف حسابك الخاص")
 
     pool = await get_pool()
 
@@ -292,17 +292,17 @@ async def delete_user(user_id: int, user=Depends(get_current_user)):
     )
 
     if not deleted:
-        raise HTTPException(status_code=404, detail="Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù… ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
 
     try:
         await pool.execute(
             """
             INSERT INTO audit_log (user_id, user_name, action, detail)
-            VALUES ($1, $2, 'Ø­Ø°Ù Ù…Ø³ØªØ®Ø¯Ù…', $3)
+            VALUES ($1, $2, 'حذف مستخدم', $3)
             """,
             user["id"],
             user["full_name"],
-            f"Ø­Ø°Ù Ù…Ø³ØªØ®Ø¯Ù…: {deleted['username']}",
+            f"حذف مستخدم: {deleted['username']}",
         )
     except Exception:
         pass

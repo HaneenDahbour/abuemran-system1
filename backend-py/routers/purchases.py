@@ -47,7 +47,7 @@ def parse_purchase_date(value: Optional[str]) -> date:
     try:
         return date.fromisoformat(value)
     except ValueError:
-        raise HTTPException(status_code=400, detail="ØªØ§Ø±ÙŠØ® ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ø´Ø±Ø§Ø¡ ØºÙŠØ± ØµØ­ÙŠØ­")
+        raise HTTPException(status_code=400, detail="تاريخ فاتورة الشراء غير صحيح")
 
 
 async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail: str):
@@ -57,7 +57,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
         VALUES ($1, $2, $3, 'purchase', $4, $5)
         """,
         user.get("id"),
-        user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
+        user.get("full_name") or user.get("username") or "مستخدم",
         action,
         entity_id,
         detail,
@@ -121,7 +121,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
     require_role(user, "admin", "accountant")
 
     if not data.items:
-        raise HTTPException(status_code=400, detail="Ø£Ø¶Ù ØµÙ†ÙØ§Ù‹ ÙˆØ§Ø­Ø¯Ø§Ù‹ Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„")
+        raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
 
     invoice_number = (
         clean_text(data.invoice_number)
@@ -142,7 +142,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                     )
 
                     if not supplier_exists:
-                        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…ÙˆØ±Ø¯ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
+                        raise HTTPException(status_code=400, detail="المورد غير موجود")
 
                 total = 0.0
 
@@ -152,12 +152,12 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
 
                     if quantity <= 0:
                         raise HTTPException(
-                            status_code=400, detail="ÙƒÙ…ÙŠØ© Ø§Ù„ØµÙ†Ù ÙŠØ¬Ø¨ Ø£Ù† ØªÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±"
+                            status_code=400, detail="كمية الصنف يجب أن تكون أكبر من صفر"
                         )
 
                     if unit_price < 0:
                         raise HTTPException(
-                            status_code=400, detail="Ø³Ø¹Ø± Ø§Ù„ØµÙ†Ù Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø£Ù† ÙŠÙƒÙˆÙ† Ø³Ø§Ù„Ø¨Ø§Ù‹"
+                            status_code=400, detail="سعر الصنف لا يمكن أن يكون سالباً"
                         )
 
                     product_uuid = safe_uuid(item.product_id)
@@ -170,7 +170,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                     if not product_exists:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Ø§Ù„ØµÙ†Ù Ø±Ù‚Ù… {item.product_id} ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯",
+                            detail=f"الصنف رقم {item.product_id} غير موجود",
                         )
 
                     total += quantity * unit_price
@@ -205,9 +205,9 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                 await insert_audit(
                     conn,
                     user,
-                    "Ø¥Ù†Ø´Ø§Ø¡ ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡",
+                    "إنشاء فاتورة شراء",
                     purchase["id"],
-                    f"ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡ #{invoice_number} â€” {total:.2f} Ø¯.Ø£",
+                    f"فاتورة شراء #{invoice_number} â€” {total:.2f} د.أ",
                 )
 
                 return row_to_dict(purchase)
@@ -234,13 +234,13 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
 
                 if not purchase:
                     raise HTTPException(
-                        status_code=404, detail="ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ø´Ø±Ø§Ø¡ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©"
+                        status_code=404, detail="فاتورة الشراء غير موجودة"
                     )
 
                 if purchase["status"] != "pending":
                     raise HTTPException(
                         status_code=400,
-                        detail="Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø§Ø³ØªÙ„Ø§Ù… Ù‡Ø°Ù‡ Ø§Ù„ÙØ§ØªÙˆØ±Ø© Ù„Ø£Ù†Ù‡Ø§ Ù„ÙŠØ³Øª Ù…Ø¹Ù„Ù‘Ù‚Ø© Ø£Ùˆ ØªÙ… Ø§Ø³ØªÙ„Ø§Ù…Ù‡Ø§ Ù…Ø³Ø¨Ù‚Ø§Ù‹",
+                        detail="لا يمكن استلام هذه الفاتورة لأنها ليست معلّقة أو تم استلامها مسبقاً",
                     )
 
                 items = await conn.fetch(
@@ -250,7 +250,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
 
                 if not items:
                     raise HTTPException(
-                        status_code=400, detail="Ù„Ø§ ØªÙˆØ¬Ø¯ Ø£ØµÙ†Ø§Ù ÙÙŠ ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ø´Ø±Ø§Ø¡"
+                        status_code=400, detail="لا توجد أصناف في فاتورة الشراء"
                     )
 
                 for item in items:
@@ -262,14 +262,14 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                     if not product:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Ø§Ù„ØµÙ†Ù Ø±Ù‚Ù… {item['product_id']} ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯",
+                            detail=f"الصنف رقم {item['product_id']} غير موجود",
                         )
 
                     quantity = float(item["quantity"] or 0)
 
                     if quantity <= 0:
                         raise HTTPException(
-                            status_code=400, detail="ÙƒÙ…ÙŠØ© ØºÙŠØ± ØµØ­ÙŠØ­Ø© Ø¯Ø§Ø®Ù„ ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ø´Ø±Ø§Ø¡"
+                            status_code=400, detail="كمية غير صحيحة داخل فاتورة الشراء"
                         )
 
                     old_stock = float(product["current_stock"] or 0)
@@ -304,7 +304,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                         item["product_id"],
                         quantity,
                         purchase_id,
-                        f"Ø§Ø³ØªÙ„Ø§Ù… Ù…Ø´ØªØ±ÙŠØ§Øª #{purchase['invoice_number']}",
+                        f"استلام مشتريات #{purchase['invoice_number']}",
                         user.get("id"),
                     )
 
@@ -316,9 +316,9 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                 await insert_audit(
                     conn,
                     user,
-                    "Ø§Ø³ØªÙ„Ø§Ù… Ù…Ø´ØªØ±ÙŠØ§Øª",
+                    "استلام مشتريات",
                     purchase_id,
-                    f"Ø§Ø³ØªÙ„Ø§Ù… ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡ #{purchase['invoice_number']}",
+                    f"استلام فاتورة شراء #{purchase['invoice_number']}",
                 )
 
                 return row_to_dict(updated_purchase)
@@ -345,13 +345,13 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
 
                 if not purchase:
                     raise HTTPException(
-                        status_code=404, detail="ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ø´Ø±Ø§Ø¡ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©"
+                        status_code=404, detail="فاتورة الشراء غير موجودة"
                     )
 
                 if purchase["status"] == "received":
                     raise HTTPException(
                         status_code=400,
-                        detail="Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø­Ø°Ù ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡ Ù…Ø³ØªÙ„Ù…Ø© Ù„Ø£Ù†Ù‡Ø§ Ø£Ø«Ø±Øª Ø¹Ù„Ù‰ Ø§Ù„Ù…Ø®Ø²ÙˆÙ†. Ø§Ø­ØªÙØ¸ Ø¨Ù‡Ø§ Ù„Ø£Ù…Ø§Ù† Ø§Ù„Ø³Ø¬Ù„Ø§Øª.",
+                        detail="لا يمكن حذف فاتورة شراء مستلمة لأنها أثرت على المخزون. احتفظ بها لأمان السجلات.",
                     )
 
                 await conn.execute(
@@ -362,9 +362,9 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                 await insert_audit(
                     conn,
                     user,
-                    "Ø­Ø°Ù ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡",
+                    "حذف فاتورة شراء",
                     purchase_id,
-                    f"Ø­Ø°Ù ÙØ§ØªÙˆØ±Ø© Ø´Ø±Ø§Ø¡ #{purchase['invoice_number']}",
+                    f"حذف فاتورة شراء #{purchase['invoice_number']}",
                 )
 
                 return {"success": True}

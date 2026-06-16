@@ -93,14 +93,14 @@ async def get_stats(user=Depends(get_current_user)):
         return row_to_dict(row)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø­Ø³Ø§Ø¨ Ø§Ù„Ø¥Ø­ØµØ§Ø¦ÙŠØ§Øª: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في حساب الإحصائيات: {str(e)}")
 
 
 # GET /api/audit/log
 @router.get("/log")
 async def get_audit_log(user=Depends(get_current_user)):
     if user.get("role") not in ["admin", "accountant"]:
-        raise HTTPException(status_code=403, detail="ØºÙŠØ± Ù…ØµØ±Ø­")
+        raise HTTPException(status_code=403, detail="غير مصرح")
 
     pool = await get_pool()
 
@@ -123,7 +123,7 @@ async def get_cashbox(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
     pool = await get_pool()
     try:
-        # ÙƒÙ„ Ø§Ù„Ù†Ù‚Ø¯ Ø§Ù„ÙˆØ§ØµÙ„ Ù…Ù† Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡ (Ù…Ø¹ØªÙ…Ø¯)
+        # كل النقد الواصل من العملاء (معتمد)
         cash_in_row = await pool.fetchrow("""
             SELECT COALESCE(SUM(p.amount), 0) AS total
             FROM payments p
@@ -136,12 +136,12 @@ async def get_cashbox(user=Depends(get_current_user)):
               )
             """)
 
-        # ÙƒÙ„ Ø§Ù„Ù…Ø¯ÙÙˆØ¹ Ù„Ù„Ù…ÙˆØ±Ø¯ÙŠÙ†
+        # كل المدفوع للموردين
         cash_out_suppliers = await pool.fetchrow(
             "SELECT COALESCE(SUM(amount), 0) AS total FROM supplier_payments"
         )
 
-        # Ø§Ù„Ù…ØµØ§Ø±ÙŠÙ Ø§Ù„ÙŠØ¯ÙˆÙŠØ©
+        # المصاريف اليدوية
         cash_out_expenses = await pool.fetchrow(
             "SELECT COALESCE(SUM(amount), 0) AS total FROM cashbox_expenses"
         )
@@ -151,7 +151,7 @@ async def get_cashbox(user=Depends(get_current_user)):
         total_expenses = float(cash_out_expenses["total"] or 0)
         balance = total_in - total_suppliers - total_expenses
 
-        # Ø¢Ø®Ø± 50 Ø­Ø±ÙƒØ©
+        # آخر 50 حركة
         client_payments = await pool.fetch("""
             SELECT p.id, p.amount, p.payment_date AS date,
                    c.name AS description,
@@ -223,9 +223,9 @@ async def add_cashbox_expense(data: dict, user=Depends(get_current_user)):
     amount = float(data.get("amount") or 0)
     description = str(data.get("description") or "").strip()
     if amount <= 0:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±")
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
     if not description:
-        raise HTTPException(status_code=400, detail="Ø§Ù„ÙˆØµÙ Ù…Ø·Ù„ÙˆØ¨")
+        raise HTTPException(status_code=400, detail="الوصف مطلوب")
     pool = await get_pool()
     try:
         exp_date = (

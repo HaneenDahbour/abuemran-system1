@@ -47,14 +47,14 @@ def parse_invoice_date(value: Optional[str]) -> date:
     try:
         return date.fromisoformat(value)
     except ValueError:
-        raise HTTPException(status_code=400, detail="ØªØ§Ø±ÙŠØ® Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± ØµØ­ÙŠØ­")
+        raise HTTPException(status_code=400, detail="تاريخ الفاتورة غير صحيح")
 
 
 def normalize_payment_method(value: Optional[str]) -> str:
     value = clean_text(value) or "credit"
     allowed = {"cash", "credit", "partial", "check", "transfer"}
     if value not in allowed:
-        raise HTTPException(status_code=400, detail="Ø·Ø±ÙŠÙ‚Ø© Ø§Ù„Ø¯ÙØ¹ ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
+        raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
     return value
 
 
@@ -69,7 +69,7 @@ def calculate_payment(
 
     if raw_paid < 0:
         raise HTTPException(
-            status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº Ø§Ù„Ù…Ø¯ÙÙˆØ¹ Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø£Ù† ÙŠÙƒÙˆÙ† Ø³Ø§Ù„Ø¨Ø§Ù‹"
+            status_code=400, detail="المبلغ المدفوع لا يمكن أن يكون سالباً"
         )
 
     if payment_method == "cash":
@@ -83,7 +83,7 @@ def calculate_payment(
 
     if paid > total:
         raise HTTPException(
-            status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº Ø§Ù„Ù…Ø¯ÙÙˆØ¹ Ø£ÙƒØ¨Ø± Ù…Ù† Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„ÙØ§ØªÙˆØ±Ø©"
+            status_code=400, detail="المبلغ المدفوع أكبر من إجمالي الفاتورة"
         )
 
     remaining = money3(total - paid)
@@ -104,7 +104,7 @@ async def ensure_client_exists(conn, client_id: int):
         client_id,
     )
     if not exists:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ø¹Ù…ÙŠÙ„ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
+        raise HTTPException(status_code=400, detail="العميل غير موجود")
 
 
 async def insert_audit(conn, user, action: str, entity_id: int, detail: str):
@@ -115,7 +115,7 @@ async def insert_audit(conn, user, action: str, entity_id: int, detail: str):
             VALUES ($1, $2, $3, 'invoice', $4, $5)
             """,
             user.get("id"),
-            user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
+            user.get("full_name") or user.get("username") or "مستخدم",
             action,
             entity_id,
             detail,
@@ -192,7 +192,7 @@ def normalize_items(items: List[InvoiceItem]) -> list[dict]:
 
         if quantity <= 0:
             raise HTTPException(
-                status_code=400, detail="ÙƒÙ…ÙŠØ© Ø§Ù„ØµÙ†Ù ÙŠØ¬Ø¨ Ø£Ù† ØªÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±"
+                status_code=400, detail="كمية الصنف يجب أن تكون أكبر من صفر"
             )
 
         line_total = item.line_total
@@ -205,13 +205,13 @@ def normalize_items(items: List[InvoiceItem]) -> list[dict]:
             unit_price = money3(unit_price or 0)
             if unit_price < 0:
                 raise HTTPException(
-                    status_code=400, detail="Ø³Ø¹Ø± Ø§Ù„ØµÙ†Ù Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø£Ù† ÙŠÙƒÙˆÙ† Ø³Ø§Ù„Ø¨Ø§Ù‹"
+                    status_code=400, detail="سعر الصنف لا يمكن أن يكون سالباً"
                 )
             line_total = money3(quantity * unit_price)
 
         if line_total < 0:
             raise HTTPException(
-                status_code=400, detail="Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„ØµÙ†Ù Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø£Ù† ÙŠÙƒÙˆÙ† Ø³Ø§Ù„Ø¨Ø§Ù‹"
+                status_code=400, detail="إجمالي الصنف لا يمكن أن يكون سالباً"
             )
 
         package_qty = money3(item.package_qty or 12)
@@ -310,7 +310,7 @@ async def restore_stock_from_invoice_items(conn, invoice_id: int, user):
                 """,
                 item["product_id"],
                 quantity,
-                "Ø¥Ø±Ø¬Ø§Ø¹ Ù…Ø®Ø²ÙˆÙ† Ø¨Ø³Ø¨Ø¨ ØªØ¹Ø¯ÙŠÙ„/Ø­Ø°Ù ÙØ§ØªÙˆØ±Ø©",
+                "إرجاع مخزون بسبب تعديل/حذف فاتورة",
                 user.get("id"),
             )
 
@@ -431,7 +431,7 @@ async def insert_invoice_items_only(conn, invoice_id: int, items: list[dict]):
         if not product_exists:
             raise HTTPException(
                 status_code=400,
-                detail=f"Ø§Ù„ØµÙ†Ù Ø±Ù‚Ù… {item['product_id']} ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯",
+                detail=f"الصنف رقم {item['product_id']} غير موجود",
             )
         await conn.execute(
             """
@@ -466,7 +466,7 @@ async def deduct_stock_for_approved_invoice(conn, invoice_id: int, invoice_numbe
         if not product:
             raise HTTPException(
                 status_code=400,
-                detail=f"Ø§Ù„ØµÙ†Ù '{item.get('product_name', item['product_id'])}' ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯",
+                detail=f"الصنف '{item.get('product_name', item['product_id'])}' غير موجود",
             )
 
         current = money3(product["current_stock"] or 0)
@@ -476,7 +476,7 @@ async def deduct_stock_for_approved_invoice(conn, invoice_id: int, invoice_numbe
         if new_stock < 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Ø§Ù„Ù…Ø®Ø²ÙˆÙ† ØºÙŠØ± ÙƒØ§ÙÙ Ù„Ù„ØµÙ†Ù '{product['name']}' â€” Ø§Ù„Ù…ØªÙˆÙØ±: {current:.0f}",
+                detail=f"المخزون غير كافٍ للصنف '{product['name']}' â€” المتوفر: {current:.0f}",
             )
 
         await conn.execute(
@@ -490,7 +490,7 @@ async def deduct_stock_for_approved_invoice(conn, invoice_id: int, invoice_numbe
             VALUES ($1,'out',$2,'invoice',$3,$4)
             """,
             item["product_id"], qty,
-            f"Ø®ØµÙ… Ø¨Ø³Ø¨Ø¨ Ø§Ø¹ØªÙ…Ø§Ø¯ ÙØ§ØªÙˆØ±Ø© #{invoice_number}",
+            f"خصم بسبب اعتماد فاتورة #{invoice_number}",
             user.get("id"),
         )
 @router.get("")
@@ -579,11 +579,11 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
     )
 
     if net <= 0:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº Ø§Ù„ØµØ§ÙÙŠ ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±")
+        raise HTTPException(status_code=400, detail="المبلغ الصافي يجب أن يكون أكبر من صفر")
     if tax < 0:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ø¶Ø±ÙŠØ¨Ø© Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø£Ù† ØªÙƒÙˆÙ† Ø³Ø§Ù„Ø¨Ø©")
+        raise HTTPException(status_code=400, detail="الضريبة لا يمكن أن تكون سالبة")
     if total <= 0:
-        raise HTTPException(status_code=400, detail="Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± ØµØ­ÙŠØ­")
+        raise HTTPException(status_code=400, detail="إجمالي الفاتورة غير صحيح")
 
     payment_method = normalize_payment_method(data.payment_method)
     paid, remaining, payment_status = calculate_payment(total, payment_method, data.paid_amount)
@@ -659,14 +659,14 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
                             INSERT INTO notifications (role, message, type)
                             VALUES ('admin', $1, 'pending')
                             """,
-                            f"ðŸ“‹ ÙØ§ØªÙˆØ±Ø© Ø¬Ø¯ÙŠØ¯Ø© Ø¨Ø§Ù†ØªØ¸Ø§Ø± Ù…ÙˆØ§ÙÙ‚ØªÙƒ | #{invoice_number} | {user.get('full_name')} | {total:.3f} Ø¯.Ø£",
+                            f"ðŸ“‹ فاتورة جديدة بانتظار موافقتك | #{invoice_number} | {user.get('full_name')} | {total:.3f} د.أ",
                         )
                     except Exception:
                         pass
 
                 await insert_audit(
-                    conn, user, "Ø£Ø¶Ø§Ù ÙØ§ØªÙˆØ±Ø©", inv["id"],
-                    f"ÙØ§ØªÙˆØ±Ø© #{invoice_number} â€” {total:.3f} â€” Ø§Ù„Ø­Ø§Ù„Ø©: {invoice_status}",
+                    conn, user, "أضاف فاتورة", inv["id"],
+                    f"فاتورة #{invoice_number} â€” {total:.3f} â€” الحالة: {invoice_status}",
                 )
 
                 out = enrich_invoice(row_to_dict(inv))
@@ -1121,7 +1121,7 @@ async def delete_invoice(invoice_id: int, user=Depends(get_current_user)):
                     invoice_id,
                 )
                 if not invoice:
-                    raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
+                    raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
 
                 current_status = invoice.get("status") or "approved"
 
@@ -1134,8 +1134,8 @@ async def delete_invoice(invoice_id: int, user=Depends(get_current_user)):
                 await conn.execute("DELETE FROM invoices WHERE id=$1", invoice_id)
 
                 await insert_audit(
-                    conn, user, "Ø­Ø°Ù ÙØ§ØªÙˆØ±Ø©", invoice_id,
-                    f"Ø­Ø°Ù ÙØ§ØªÙˆØ±Ø© #{invoice['invoice_number']} (ÙƒØ§Ù†Øª: {current_status})",
+                    conn, user, "حذف فاتورة", invoice_id,
+                    f"حذف فاتورة #{invoice['invoice_number']} (كانت: {current_status})",
                 )
 
                 return {"success": True}

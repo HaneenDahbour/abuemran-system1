@@ -245,9 +245,9 @@ async def add_payment(data: PaymentIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     if not data.recipient_name.strip():
-        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ø²Ø¨ÙˆÙ† Ù…Ø·Ù„ÙˆØ¨")
+        raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
     if data.amount <= 0:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±")
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
 
     pool = await get_pool()
     try:

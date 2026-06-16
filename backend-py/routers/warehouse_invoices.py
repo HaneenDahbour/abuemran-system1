@@ -86,7 +86,7 @@ async def get_warehouse_invoices(user=Depends(get_current_user)):
 
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"ØªØ¹Ø°Ø± ØªØ­Ù…ÙŠÙ„ ÙÙˆØ§ØªÙŠØ± Ø§Ù„Ù…Ø³ØªÙˆØ¯Ø¹: {str(e)}"
+            status_code=500, detail=f"تعذر تحميل فواتير المستودع: {str(e)}"
         )
 
 
@@ -97,11 +97,11 @@ async def create_warehouse_invoice(
     require_role(user, "admin", "accountant")
 
     if not data.items:
-        raise HTTPException(status_code=400, detail="Ø£Ø¶Ù ØµÙ†ÙØ§Ù‹ Ø¹Ù„Ù‰ Ø§Ù„Ø£Ù‚Ù„")
+        raise HTTPException(status_code=400, detail="أضف صنفاً على الأقل")
 
     for item in data.items:
         if not item.product_id or item.quantity <= 0 or item.unit_price < 0:
-            raise HTTPException(status_code=400, detail="Ø¨ÙŠØ§Ù†Ø§Øª Ø£Ø­Ø¯ Ø§Ù„Ø£ØµÙ†Ø§Ù ØºÙŠØ± ØµØ­ÙŠØ­Ø©")
+            raise HTTPException(status_code=400, detail="بيانات أحد الأصناف غير صحيحة")
 
     pool = await get_pool()
     conn = await pool.acquire()
@@ -166,7 +166,7 @@ async def create_warehouse_invoice(
                         product_uuid,
                         item.quantity,
                         inv["id"],
-                        f"ÙØ§ØªÙˆØ±Ø© Ù…Ø³ØªÙˆØ¯Ø¹ #{invoice_number}",
+                        f"فاتورة مستودع #{invoice_number}",
                         user.get("id"),
                     )
                 except Exception:
@@ -176,11 +176,11 @@ async def create_warehouse_invoice(
             await pool.execute(
                 """
                 INSERT INTO audit_log (user_id, user_name, action, detail)
-                VALUES ($1, $2, 'Ø£Ø¶Ø§Ù ÙØ§ØªÙˆØ±Ø© Ù…Ø³ØªÙˆØ¯Ø¹', $3)
+                VALUES ($1, $2, 'أضاف فاتورة مستودع', $3)
                 """,
                 user.get("id"),
                 user.get("full_name"),
-                f"ÙØ§ØªÙˆØ±Ø© #{invoice_number} â€” {total:.2f} Ø¯.Ø£",
+                f"فاتورة #{invoice_number} â€” {total:.2f} د.أ",
             )
         except Exception:
             pass
@@ -191,7 +191,7 @@ async def create_warehouse_invoice(
         raise
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"ØªØ¹Ø°Ø± Ø¥Ù†Ø´Ø§Ø¡ ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ù…Ø³ØªÙˆØ¯Ø¹: {str(e)}"
+            status_code=500, detail=f"تعذر إنشاء فاتورة المستودع: {str(e)}"
         )
 
     finally:
@@ -210,12 +210,12 @@ async def delete_warehouse_invoice(invoice_id: int, user=Depends(get_current_use
         )
 
         if not deleted:
-            raise HTTPException(status_code=404, detail="Ø§Ù„ÙØ§ØªÙˆØ±Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
+            raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
 
         return {"success": True}
 
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"ØªØ¹Ø°Ø± Ø­Ø°Ù Ø§Ù„ÙØ§ØªÙˆØ±Ø©: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"تعذر حذف الفاتورة: {str(e)}")
 

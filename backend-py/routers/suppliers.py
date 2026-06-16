@@ -48,7 +48,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
         VALUES ($1, $2, $3, 'supplier', $4, $5)
         """,
         user.get("id"),
-        user.get("full_name") or user.get("username") or "Ù…Ø³ØªØ®Ø¯Ù…",
+        user.get("full_name") or user.get("username") or "مستخدم",
         action,
         entity_id,
         detail,
@@ -89,7 +89,7 @@ async def get_suppliers(user=Depends(get_current_user)):
             result.append(d)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø¬Ù„Ø¨ Ø§Ù„Ù…ÙˆØ±Ø¯ÙŠÙ†: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في جلب الموردين: {str(e)}")
 
 
 @router.get("/{supplier_id}/statement")
@@ -100,7 +100,7 @@ async def get_supplier_statement(supplier_id: str, user=Depends(get_current_user
             "SELECT * FROM suppliers WHERE id=$1", supplier_id
         )
         if not supplier:
-            raise HTTPException(status_code=404, detail="Ø§Ù„Ù…ÙˆØ±Ø¯ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
+            raise HTTPException(status_code=404, detail="المورد غير موجود")
 
         purchases = await pool.fetch(
             """
@@ -171,7 +171,7 @@ async def add_supplier_payment(
     require_role(user, "admin", "accountant")
 
     if data.amount <= 0:
-        raise HTTPException(status_code=400, detail="Ø§Ù„Ù…Ø¨Ù„Øº ÙŠØ¬Ø¨ Ø£Ù† ÙŠÙƒÙˆÙ† Ø£ÙƒØ¨Ø± Ù…Ù† ØµÙØ±")
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
 
     pool = await get_pool()
     try:
@@ -179,7 +179,7 @@ async def add_supplier_payment(
             "SELECT * FROM suppliers WHERE id=$1", supplier_id
         )
         if not supplier:
-            raise HTTPException(status_code=404, detail="Ø§Ù„Ù…ÙˆØ±Ø¯ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
+            raise HTTPException(status_code=404, detail="المورد غير موجود")
 
         pay_date = (
             date.fromisoformat(data.payment_date) if data.payment_date else date.today()
@@ -204,10 +204,10 @@ async def add_supplier_payment(
             from utils.telegram import notify_admin
 
             await notify_admin(
-                f"ðŸ’¸ <b>Ø¯ÙØ¹Ø© Ø¬Ø¯ÙŠØ¯Ø© Ù„Ù„Ù…ÙˆØ±Ø¯</b>\n\n"
-                f"ðŸª Ø§Ù„Ù…ÙˆØ±Ø¯: {supplier['name']}\n"
-                f"ðŸ’µ Ø§Ù„Ù…Ø¨Ù„Øº: {data.amount:.3f} Ø¯.Ø£\n"
-                f"ðŸ‘¨â€ðŸ’¼ Ø¯ÙØ¹Ù‡Ø§: {user.get('full_name', '')}"
+                f"ðŸ’¸ <b>دفعة جديدة للمورد</b>\n\n"
+                f"ðŸª المورد: {supplier['name']}\n"
+                f"ðŸ’µ المبلغ: {data.amount:.3f} د.أ\n"
+                f"ðŸ‘¨â€ðŸ’¼ دفعها: {user.get('full_name', '')}"
             )
         except Exception:
             pass
@@ -228,7 +228,7 @@ async def delete_supplier_payment(payment_id: str, user=Depends(get_current_user
             "DELETE FROM supplier_payments WHERE id=$1 RETURNING id", payment_id
         )
         if not deleted:
-            raise HTTPException(status_code=404, detail="Ø§Ù„Ø¯ÙØ¹Ø© ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯Ø©")
+            raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
         return {"success": True}
     except HTTPException:
         raise
@@ -242,7 +242,7 @@ async def create_supplier(data: SupplierRequest, user=Depends(get_current_user))
     name = clean_text(data.name)
     phone = clean_text(data.phone)
     if not name:
-        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ù…ÙˆØ±Ø¯ Ù…Ø·Ù„ÙˆØ¨")
+        raise HTTPException(status_code=400, detail="اسم المورد مطلوب")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -254,7 +254,7 @@ async def create_supplier(data: SupplierRequest, user=Depends(get_current_user))
                 if duplicate:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Ø§Ù„Ù…ÙˆØ±Ø¯ Ù…ÙˆØ¬ÙˆØ¯ Ù…Ø³Ø¨Ù‚Ø§Ù‹: {duplicate['name']}",
+                        detail=f"المورد موجود مسبقاً: {duplicate['name']}",
                     )
                 row = await conn.fetchrow(
                     "INSERT INTO suppliers (name, phone) VALUES ($1, $2) RETURNING *",
@@ -262,7 +262,7 @@ async def create_supplier(data: SupplierRequest, user=Depends(get_current_user))
                     phone,
                 )
                 await insert_audit(
-                    conn, user, "Ø£Ø¶Ø§Ù Ù…ÙˆØ±Ø¯", row["id"], f"Ø¥Ø¶Ø§ÙØ© Ù…ÙˆØ±Ø¯: {name}"
+                    conn, user, "أضاف مورد", row["id"], f"إضافة مورد: {name}"
                 )
                 return row_to_dict(row)
     except HTTPException:
@@ -279,7 +279,7 @@ async def update_supplier(
     name = clean_text(data.name)
     phone = clean_text(data.phone)
     if not name:
-        raise HTTPException(status_code=400, detail="Ø§Ø³Ù… Ø§Ù„Ù…ÙˆØ±Ø¯ Ù…Ø·Ù„ÙˆØ¨")
+        raise HTTPException(status_code=400, detail="اسم المورد مطلوب")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
@@ -288,14 +288,14 @@ async def update_supplier(
                     "SELECT id, name FROM suppliers WHERE id=$1 FOR UPDATE", supplier_id
                 )
                 if not existing:
-                    raise HTTPException(status_code=404, detail="Ø§Ù„Ù…ÙˆØ±Ø¯ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
+                    raise HTTPException(status_code=404, detail="المورد غير موجود")
                 duplicate = await conn.fetchrow(
                     "SELECT id FROM suppliers WHERE LOWER(name) = LOWER($1) AND id <> $2 LIMIT 1",
                     name,
                     supplier_id,
                 )
                 if duplicate:
-                    raise HTTPException(status_code=400, detail="Ø§Ù„Ø§Ø³Ù… Ù…Ø³ØªØ®Ø¯Ù… Ù…Ø³Ø¨Ù‚Ø§Ù‹")
+                    raise HTTPException(status_code=400, detail="الاسم مستخدم مسبقاً")
                 row = await conn.fetchrow(
                     "UPDATE suppliers SET name=$1, phone=$2, updated_at=NOW() WHERE id=$3 RETURNING *",
                     name,
@@ -303,7 +303,7 @@ async def update_supplier(
                     supplier_id,
                 )
                 await insert_audit(
-                    conn, user, "ØªØ¹Ø¯ÙŠÙ„ Ù…ÙˆØ±Ø¯", supplier_id, f"ØªØ¹Ø¯ÙŠÙ„: {name}"
+                    conn, user, "تعديل مورد", supplier_id, f"تعديل: {name}"
                 )
                 return row_to_dict(row)
     except HTTPException:
@@ -323,7 +323,7 @@ async def delete_supplier(supplier_id: str, user=Depends(get_current_user)):
                     "SELECT id, name FROM suppliers WHERE id=$1 FOR UPDATE", supplier_id
                 )
                 if not supplier:
-                    raise HTTPException(status_code=404, detail="Ø§Ù„Ù…ÙˆØ±Ø¯ ØºÙŠØ± Ù…ÙˆØ¬ÙˆØ¯")
+                    raise HTTPException(status_code=404, detail="المورد غير موجود")
                 linked = await conn.fetchval(
                     "SELECT EXISTS(SELECT 1 FROM purchases WHERE supplier_id=$1)",
                     supplier_id,
@@ -331,11 +331,11 @@ async def delete_supplier(supplier_id: str, user=Depends(get_current_user)):
                 if linked:
                     raise HTTPException(
                         status_code=400,
-                        detail="Ù„Ø§ ÙŠÙ…ÙƒÙ† Ø­Ø°Ù Ø§Ù„Ù…ÙˆØ±Ø¯ Ù„Ø£Ù†Ù‡ Ù…Ø±ØªØ¨Ø· Ø¨ÙÙˆØ§ØªÙŠØ± Ø´Ø±Ø§Ø¡",
+                        detail="لا يمكن حذف المورد لأنه مرتبط بفواتير شراء",
                     )
                 await conn.execute("DELETE FROM suppliers WHERE id=$1", supplier_id)
                 await insert_audit(
-                    conn, user, "Ø­Ø°Ù Ù…ÙˆØ±Ø¯", supplier_id, f"Ø­Ø°Ù: {supplier['name']}"
+                    conn, user, "حذف مورد", supplier_id, f"حذف: {supplier['name']}"
                 )
                 return {"success": True}
     except HTTPException:

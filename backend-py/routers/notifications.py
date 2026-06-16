@@ -42,7 +42,7 @@ async def get_notifications(user=Depends(get_current_user)):
         return [row_to_dict(row) for row in rows]
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في السيرفر: {str(e)}")
 
 
 # PUT /api/notifications/read
@@ -61,8 +61,8 @@ async def mark_notifications_read(user=Depends(get_current_user)):
             user.get("role"),
         )
 
-        return {"message": "ØªÙ… ØªØ¹Ù„ÙŠÙ… Ø§Ù„ÙƒÙ„ Ù…Ù‚Ø±ÙˆØ¡Ø§Ù‹"}
+        return {"message": "تم تعليم الكل مقروءاً"}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ø®Ø·Ø£ ÙÙŠ Ø§Ù„Ø³ÙŠØ±ÙØ±: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"خطأ في السيرفر: {str(e)}")
 
