@@ -215,11 +215,30 @@ function escHtml(s) {
 }
 
 // Fix Arabic mojibake: UTF-8 bytes misread as Latin-1 (Ø§ → ا)
+// Fix Arabic text that was stored as UTF-8 but read as Windows-1252 (CP1252).
+// CP1252 differs from Latin-1 in the 0x80–0x9F range (e.g. 0x88 → ˆ instead of <control>).
+const _cp1252map = {
+  0x20AC:0x80,0x201A:0x82,0x0192:0x83,0x201E:0x84,0x2026:0x85,
+  0x2020:0x86,0x2021:0x87,0x02C6:0x88,0x2030:0x89,0x0160:0x8A,
+  0x2039:0x8B,0x0152:0x8C,0x017D:0x8E,0x2018:0x91,0x2019:0x92,
+  0x201C:0x93,0x201D:0x94,0x2022:0x95,0x2013:0x96,0x2014:0x97,
+  0x02DC:0x98,0x2122:0x99,0x0161:0x9A,0x203A:0x9B,0x0153:0x9C,
+  0x017E:0x9E,0x0178:0x9F,
+};
 function fixMojibake(str) {
   if (!str || typeof str !== 'string') return str;
-  if (str.includes('Ø') || str.includes('Ù') || str.includes('Û')) {
-    try { return decodeURIComponent(escape(str)); } catch (e) {}
-  }
+  // Only attempt fix if Arabic mojibake markers are present
+  if (!str.includes('Ø') && !str.includes('Ù') && !str.includes('Û') && !str.includes('ˆ')) return str;
+  try {
+    const bytes = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) {
+      const code = str.charCodeAt(i);
+      bytes[i] = _cp1252map[code] ?? (code <= 0xFF ? code : 63);
+    }
+    const decoded = new TextDecoder('utf-8').decode(bytes);
+    // Only return decoded if it looks like valid Arabic (contains Arabic Unicode range)
+    if (/[؀-ۿ]/.test(decoded)) return decoded;
+  } catch (e) {}
   return str;
 }
 
