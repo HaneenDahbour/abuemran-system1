@@ -78,8 +78,6 @@ if (typeof hasPermission !== 'function') {
     if (user.role === 'admin') return true;
     const perms = user.permissions;
     if (perms == null) return true;
-    // الموظفون والمصاريف دائماً ظاهرة للمحاسب بغض النظر عن الصلاحيات المخصصة
-    if (user.role === 'accountant' && (section === 'employees' || section === 'expenses')) return true;
     return Array.isArray(perms) && perms.includes(section);
   }
 }
@@ -214,15 +212,6 @@ function escHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-// Fix Arabic mojibake: UTF-8 bytes misread as Latin-1 (e.g. Ø§ → ا)
-function fixMojibake(str) {
-  if (!str || typeof str !== 'string') return str;
-  if (str.includes('Ø') || str.includes('Ù') || str.includes('Û')) {
-    try { return decodeURIComponent(escape(str)); } catch (e) {}
-  }
-  return str;
 }
 
 /**
@@ -5681,6 +5670,15 @@ function openUserModal() {
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="form-group">
+      <label class="form-label">اختر من الموظفين الحاليين (اختياري)</label>
+      <select class="form-select" id="nu_existing_emp" onchange="
+        const v=this.value;
+        if(v){document.getElementById('nu_name').value=v;}
+      ">
+        <option value="">— أو اكتب اسماً جديداً —</option>
+      </select>
+    </div>
+    <div class="form-group">
       <label class="form-label">الاسم الكامل *</label>
       <input class="form-input" id="nu_name" placeholder="مثال: أحمد محمد">
     </div>
@@ -5712,6 +5710,18 @@ function openUserModal() {
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
+
+  // تحميل أسماء الموظفين غير المرتبطين في القائمة المنسدلة
+  API.getUnlinkedEmployeeNames().then(names => {
+    const sel = document.getElementById('nu_existing_emp');
+    if (!sel || !names?.length) return;
+    names.forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n; opt.textContent = n;
+      sel.appendChild(opt);
+    });
+  }).catch(() => {});
+
   });
 }
 
@@ -5955,8 +5965,8 @@ function employeeActivityRows(rows) {
   return rows.length
     ? rows.map(l => `<tr>
         <td><strong>${escHtml(l.user_name || l.username || '—')}</strong></td>
-        <td><span class="badge badge-blue">${escHtml(fixMojibake(l.action || '—'))}</span></td>
-        <td style="font-size:12px; color:var(--tx2); max-width:300px">${escHtml(fixMojibake(l.detail || l.details || '—'))}</td>
+        <td><span class="badge badge-blue">${escHtml(l.action || '—')}</span></td>
+        <td style="font-size:12px; color:var(--tx2); max-width:300px">${escHtml(l.detail || l.details || '—')}</td>
         <td style="font-size:12px; color:var(--tx3); white-space:nowrap">${fmtDate(l.created_at)}</td>
       </tr>`).join('')
     : emptyRow('لا توجد عمليات', 4);
@@ -8452,9 +8462,13 @@ async function renderEmployees(container) {
     const monthAdvances = empAdv
       .filter(a => String(a.advance_date || '').slice(0, 7) === ym)
       .reduce((s, x) => s + parseFloat(x.amount || 0), 0);
-    const monthSalaryPaid = empSal.some(s =>
-      String(s.salary_month || '').slice(0, 7) === ym && s.status === 'paid');
-    const monthRemaining = monthSalaryPaid ? 0 : Math.max(baseSalary - monthAdvances, 0);
+    const thisMonthSalRec = empSal.find(s =>
+      String(s.salary_month || '').slice(0, 7) === ym);
+    const monthSalaryPaid    = thisMonthSalRec?.status === 'paid';
+    const monthSalaryPending = !!thisMonthSalRec && !monthSalaryPaid;
+    const monthRemaining = (monthSalaryPaid || monthSalaryPending)
+      ? 0
+      : Math.max(baseSalary - monthAdvances, 0);
 
     return {
       ...emp,
@@ -8464,6 +8478,7 @@ async function renderEmployees(container) {
       baseSalary,
       monthAdvances,
       monthSalaryPaid,
+      monthSalaryPending,
       monthRemaining,
 
       invoiceCount: Number(emp.invoice_count || 0),
@@ -8503,16 +8518,18 @@ async function renderEmployees(container) {
           </div>
           ${emp.baseSalary > 0 ? `
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;
-                      background:${emp.monthSalaryPaid ? 'var(--grl)' : '#fffbeb'};
+                      background:${emp.monthSalaryPaid ? 'var(--grl)' : emp.monthSalaryPending ? '#fff8e1' : '#fffbeb'};
                       border-radius:8px;padding:8px 12px;margin-bottom:12px">
             <div style="font-size:11px;font-weight:700;color:var(--tx2)">
               💵 الراتب: <strong>${fmt(emp.baseSalary)}</strong> د.أ
             </div>
             <div style="font-size:11px;font-weight:800;
-                        color:${emp.monthSalaryPaid ? 'var(--gr)' : '#9a4500'}">
+                        color:${emp.monthSalaryPaid ? 'var(--gr)' : emp.monthSalaryPending ? 'var(--am)' : '#9a4500'}">
               ${emp.monthSalaryPaid
               ? '✅ راتب الشهر مدفوع'
-              : `المتبقي هذا الشهر: ${fmt(emp.monthRemaining)} د.أ`}
+              : emp.monthSalaryPending
+                ? '🕐 راتب الشهر غير مدفوع بعد'
+                : `المتبقي هذا الشهر: ${fmt(emp.monthRemaining)} د.أ`}
             </div>
           </div>` : ''}
 
@@ -10697,17 +10714,13 @@ async function renderInvestorsList(container) {
       <button class="btn btn-primary btn-sm" onclick="openInvestorModal()">+ مستثمر جديد</button>
     </div>
 
-    <div class="alert" style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--tx2)">
-      💡 نظام توزيع الأرباح: <strong>50% للمالك (سيف)</strong> — <strong>50% للمستثمرين</strong> بنسبة مساهمة كل منهم في كل فئة. اضغط <strong>📊 التفاصيل</strong> لأي مستثمر لرؤية حصته الكاملة.
-    </div>
-
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>الاسم</th>
             <th>الهاتف</th>
-            <th>إجمالي المساهمات</th>
+            <th>إجمالي المساهمات (كل الفئات)</th>
             <th>عدد الفئات</th>
             <th>ملاحظات</th>
             <th>الإجراءات</th>
@@ -10718,12 +10731,12 @@ async function renderInvestorsList(container) {
             <tr>
               <td><strong>${escHtml(inv.name)}</strong></td>
               <td>${escHtml(inv.phone || '—')}</td>
-              <td style="color:var(--bl);font-weight:700">${fmt(inv.total_invested || 0)} د.أ</td>
+              <td style="color:var(--gr);font-weight:700">${fmt(inv.total_invested || 0)} د.أ</td>
               <td>${inv.categories_count || 0}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(inv.notes || '—')}</td>
               <td>
                 <div style="display:flex;gap:4px;flex-wrap:wrap">
-                  <button class="btn btn-ghost btn-sm" onclick="openInvestorDetailsModal(${inv.id})">📊 الأرباح</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openInvestorDetailsModal(${inv.id})">📊 التفاصيل</button>
                   <button class="btn btn-ghost btn-sm" onclick="openInvestorModal(${inv.id})">✏️</button>
                   ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteInvestorConfirm(${inv.id})">🗑️</button>` : ''}
                 </div>
@@ -10745,14 +10758,6 @@ function openInvestorModal(investorId = null) {
       <div class="modal-title">${investorId ? '✏️ تعديل مستثمر' : '💹 مستثمر جديد'}</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-
-    ${!investorId ? `
-    <div style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--tx2);line-height:1.7">
-      <strong>💡 كيف يعمل نظام الأرباح؟</strong><br>
-      • <strong>50%</strong> من ربح كل فئة للمالك (سيف)<br>
-      • <strong>50%</strong> الباقية تُوزَّع على المستثمرين <em>بنسبة مساهمة كل واحد بالمبلغ</em><br>
-      • بعد إضافة المستثمر، اذهب إلى الفئة المطلوبة وأضف مبلغ مساهمته هناك
-    </div>` : ''}
 
     <div class="form-group">
       <label class="form-label">الاسم *</label>
@@ -10828,32 +10833,17 @@ async function openInvestorDetailsModal(investorId) {
 
   const inv = data.investor || {};
   const investments = data.investments || [];
-  const totalContrib = investments.reduce((s, i) => s + parseFloat(i.amount || 0), 0);
-  const totalProfit = data.total_profit_share || 0;
+  const total = investments.reduce((s, i) => s + parseFloat(i.amount || 0), 0);
 
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">📊 ${escHtml(inv.name)} — تفاصيل المساهمات والأرباح</div>
+      <div class="modal-title">📊 ${escHtml(inv.name)} — تفاصيل المساهمات</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
-    <div class="stats-grid" style="margin-bottom:14px">
-      <div class="stat-card">
-        <div class="stat-label">إجمالي المساهمات</div>
-        <div class="stat-value" style="color:var(--bl)">${fmt(totalContrib)} د.أ</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">إجمالي الأرباح المستحقة</div>
-        <div class="stat-value" style="color:var(--gr)">${fmt(totalProfit)} د.أ</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">عدد الفئات</div>
-        <div class="stat-value">${investments.length}</div>
-      </div>
-    </div>
-
-    <div class="alert" style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--tx2)">
-      💡 توزيع الأرباح: <strong>50% للمالك</strong> و<strong>50% للمستثمرين</strong> بنسبة مساهمة كل منهم في الفئة
+    <div class="stat-card" style="margin-bottom:14px">
+      <div class="stat-label">إجمالي المساهمات في كل الفئات</div>
+      <div class="stat-value" style="color:var(--gr)">${fmt(total)} د.أ</div>
     </div>
 
     <div class="table-wrap">
@@ -10861,25 +10851,18 @@ async function openInvestorDetailsModal(investorId) {
         <thead>
           <tr>
             <th>الفئة</th>
-            <th>المساهمة (د.أ)</th>
-            <th>نسبة المساهمة %</th>
-            <th>ربح الفئة الكلي</th>
-            <th>حصته من الربح</th>
+            <th>المساهمة</th>
+            <th>ملاحظات</th>
           </tr>
         </thead>
         <tbody>
-          ${investments.length ? investments.map(i => {
-    const profit = parseFloat(i.category_total_profit || 0);
-    const share = parseFloat(i.profit_share || 0);
-    return `
+          ${investments.length ? investments.map(i => `
             <tr>
-              <td><strong>${i.category_icon || '📦'} ${escHtml(i.category_name)}</strong></td>
+              <td>${i.category_icon || '📦'} ${escHtml(i.category_name)}</td>
               <td style="font-weight:700">${fmt(i.amount)} د.أ</td>
-              <td>${fmt(i.contribution_pct)}%</td>
-              <td style="color:${profit >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:600">${fmt(profit)} د.أ</td>
-              <td style="color:var(--am);font-weight:700">${fmt(share)} د.أ</td>
-            </tr>`;
-  }).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
+              <td style="font-size:12px;color:var(--tx3)">${escHtml(i.notes || '—')}</td>
+            </tr>
+          `).join('') : `<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -10887,5 +10870,5 @@ async function openInvestorDetailsModal(investorId) {
     <div style="margin-top:10px">
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
-  `, '700px');
+  `, '600px');
 }
