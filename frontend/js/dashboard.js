@@ -214,6 +214,15 @@ function escHtml(s) {
     .replace(/'/g, '&#39;');
 }
 
+// Fix Arabic mojibake: UTF-8 bytes misread as Latin-1 (Ø§ → ا)
+function fixMojibake(str) {
+  if (!str || typeof str !== 'string') return str;
+  if (str.includes('Ø') || str.includes('Ù') || str.includes('Û')) {
+    try { return decodeURIComponent(escape(str)); } catch (e) {}
+  }
+  return str;
+}
+
 /**
  * confirmDanger(title, lines, onConfirm)
  * Shows a rich danger confirmation modal.
@@ -5965,8 +5974,8 @@ function employeeActivityRows(rows) {
   return rows.length
     ? rows.map(l => `<tr>
         <td><strong>${escHtml(l.user_name || l.username || '—')}</strong></td>
-        <td><span class="badge badge-blue">${escHtml(l.action || '—')}</span></td>
-        <td style="font-size:12px; color:var(--tx2); max-width:300px">${escHtml(l.detail || l.details || '—')}</td>
+        <td><span class="badge badge-blue">${escHtml(fixMojibake(l.action || '—'))}</span></td>
+        <td style="font-size:12px; color:var(--tx2); max-width:300px">${escHtml(fixMojibake(l.detail || l.details || '—'))}</td>
         <td style="font-size:12px; color:var(--tx3); white-space:nowrap">${fmtDate(l.created_at)}</td>
       </tr>`).join('')
     : emptyRow('لا توجد عمليات', 4);
@@ -10759,6 +10768,14 @@ function openInvestorModal(investorId = null) {
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
+    ${!investorId ? `
+    <div style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--tx2);line-height:1.8">
+      <strong>💡 كيف يعمل نظام الأرباح؟</strong><br>
+      • <strong>50%</strong> من ربح كل فئة للمالك (سيف)<br>
+      • <strong>50%</strong> الباقية تُوزَّع على المستثمرين بنسبة مساهمة كل واحد بالمبلغ<br>
+      • بعد إضافة المستثمر، اذهب إلى فئة المستودع وأضف مبلغ مساهمته هناك
+    </div>` : ''}
+
     <div class="form-group">
       <label class="form-label">الاسم *</label>
       <input class="form-input" id="wi_name" value="${escHtml(inv?.name || '')}">
@@ -10833,17 +10850,32 @@ async function openInvestorDetailsModal(investorId) {
 
   const inv = data.investor || {};
   const investments = data.investments || [];
-  const total = investments.reduce((s, i) => s + parseFloat(i.amount || 0), 0);
+  const totalContrib = investments.reduce((s, i) => s + parseFloat(i.amount || 0), 0);
+  const totalProfit = data.total_profit_share || 0;
 
   openModal(`
     <div class="modal-header">
-      <div class="modal-title">📊 ${escHtml(inv.name)} — تفاصيل المساهمات</div>
+      <div class="modal-title">📊 ${escHtml(inv.name)} — المساهمات والأرباح</div>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
 
-    <div class="stat-card" style="margin-bottom:14px">
-      <div class="stat-label">إجمالي المساهمات في كل الفئات</div>
-      <div class="stat-value" style="color:var(--gr)">${fmt(total)} د.أ</div>
+    <div class="stats-grid" style="margin-bottom:14px">
+      <div class="stat-card">
+        <div class="stat-label">إجمالي المساهمات</div>
+        <div class="stat-value" style="color:var(--bl)">${fmt(totalContrib)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">إجمالي الأرباح المستحقة</div>
+        <div class="stat-value" style="color:var(--gr)">${fmt(totalProfit)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">عدد الفئات</div>
+        <div class="stat-value">${investments.length}</div>
+      </div>
+    </div>
+
+    <div style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--tx2)">
+      💡 توزيع الأرباح: <strong>50% للمالك (سيف)</strong> — <strong>50% للمستثمرين</strong> بنسبة مساهمة كل منهم في كل فئة
     </div>
 
     <div class="table-wrap">
@@ -10851,18 +10883,25 @@ async function openInvestorDetailsModal(investorId) {
         <thead>
           <tr>
             <th>الفئة</th>
-            <th>المساهمة</th>
-            <th>ملاحظات</th>
+            <th>المساهمة (د.أ)</th>
+            <th>نسبة المساهمة %</th>
+            <th>ربح الفئة الكلي</th>
+            <th>حصته من الربح</th>
           </tr>
         </thead>
         <tbody>
-          ${investments.length ? investments.map(i => `
+          ${investments.length ? investments.map(i => {
+    const profit = parseFloat(i.category_total_profit || 0);
+    const share = parseFloat(i.profit_share || 0);
+    return `
             <tr>
-              <td>${i.category_icon || '📦'} ${escHtml(i.category_name)}</td>
+              <td><strong>${i.category_icon || '📦'} ${escHtml(i.category_name)}</strong></td>
               <td style="font-weight:700">${fmt(i.amount)} د.أ</td>
-              <td style="font-size:12px;color:var(--tx3)">${escHtml(i.notes || '—')}</td>
-            </tr>
-          `).join('') : `<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
+              <td>${fmt(i.contribution_pct || 0)}%</td>
+              <td style="color:${profit >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:600">${fmt(profit)} د.أ</td>
+              <td style="color:var(--am);font-weight:700">${fmt(share)} د.أ</td>
+            </tr>`;
+  }).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -10870,5 +10909,5 @@ async function openInvestorDetailsModal(investorId) {
     <div style="margin-top:10px">
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
-  `, '600px');
+  `, '700px');
 }
