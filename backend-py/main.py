@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from config.db import connect_db, close_db
 from routers import (
     ai,
+    aradi,
     audit,
     auth,
     checks,
@@ -136,6 +137,9 @@ app.include_router(china.router, prefix="/api/china", tags=["China"])
 
 # ── Shops Section (محلات) ────────────────────────────────────
 app.include_router(shops.router, prefix="/api/shops", tags=["Shops"])
+
+# ── Aradi Section (الأراضي) ──────────────────────────────────
+app.include_router(aradi.router, prefix="/api/aradi", tags=["Aradi"])
 
 # ── Search / AI ───────────────────────────────────────────────
 app.include_router(search.router, prefix="/api/search", tags=["Search"])
