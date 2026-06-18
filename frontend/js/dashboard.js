@@ -10877,9 +10877,11 @@ function _renderInvContribList() {
   }
 
   list.innerHTML = rows.map((r, idx) => {
-    const opts = categories.map(c =>
-      `<option value="${c.id}" ${String(c.id) === String(r.category_id) ? 'selected' : ''}>${escHtml((c.icon || '📦') + ' ' + c.name)}</option>`
+    const allSelected = r.category_id === 'all';
+    const catOpts = categories.map(c =>
+      `<option value="${c.id}" ${!allSelected && String(c.id) === String(r.category_id) ? 'selected' : ''}>${escHtml((c.icon || '📦') + ' ' + c.name)}</option>`
     ).join('');
+    const opts = `<option value="all" ${allSelected ? 'selected' : ''}>🌟 كل الفئات</option>` + catOpts;
     return `
     <div id="inv_row_${idx}" style="display:grid;grid-template-columns:1fr 120px 120px 36px;gap:6px;align-items:center;margin-bottom:6px">
       <select class="form-select" id="inv_cat_${idx}" style="font-size:13px">${opts}</select>
@@ -10909,6 +10911,7 @@ async function saveInvestorFull() {
   if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
 
   const rows = window._invContribRows || [];
+  const allCategories = window._invCategories || [];
   const contributions = [];
   for (let idx = 0; idx < rows.length; idx++) {
     const catId = document.getElementById(`inv_cat_${idx}`)?.value;
@@ -10916,7 +10919,13 @@ async function saveInvestorFull() {
     const paid = parseFloat(document.getElementById(`inv_paid_${idx}`)?.value || 0);
     if (!catId) continue;
     if (isNaN(amt) || amt < 0) { toast(`مبلغ غير صحيح في السطر ${idx + 1}`, 'error'); return; }
-    contributions.push({ category_id: Number(catId), amount: amt, paid_amount: paid });
+    if (catId === 'all') {
+      for (const cat of allCategories) {
+        contributions.push({ category_id: Number(cat.id), amount: amt, paid_amount: paid });
+      }
+    } else {
+      contributions.push({ category_id: Number(catId), amount: amt, paid_amount: paid });
+    }
   }
   const catIds = contributions.map(c => c.category_id);
   if (new Set(catIds).size !== catIds.length) { toast('لا يمكن تكرار نفس الفئة', 'error'); return; }
