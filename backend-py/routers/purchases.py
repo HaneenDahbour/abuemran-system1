@@ -373,6 +373,10 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                             float(item["quantity"] or 0),
                             item["product_id"],
                         )
+                    await conn.execute(
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
+                        purchase_id,
+                    )
 
                 await conn.execute(
                     "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
@@ -428,6 +432,18 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                             quantity,
                             product_uuid,
                             *([new_cost] if new_cost > 0 else []),
+                        )
+                        await conn.execute(
+                            """
+                            INSERT INTO stock_movements
+                              (product_id, type, quantity, source_type, source_id, notes, created_by)
+                            VALUES ($1, 'in', $2, 'purchase', $3, $4, $5)
+                            """,
+                            product_uuid,
+                            quantity,
+                            purchase_id,
+                            f"تعديل مشتريات #{purchase['invoice_number']}",
+                            user.get("id"),
                         )
 
                 invoice_number = (
@@ -502,6 +518,10 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                             float(item["quantity"] or 0),
                             item["product_id"],
                         )
+                    await conn.execute(
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
+                        purchase_id,
+                    )
 
                 await conn.execute(
                     "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
