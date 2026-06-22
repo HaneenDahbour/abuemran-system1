@@ -3430,10 +3430,10 @@ async function renderPurchases(container) {
                   <div style="font-size:16px; font-weight:800; color:${balance > 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(balance)} د.أ</div>
                 </div>
                 <div style="display:flex; gap:4px; flex-wrap:wrap">
-                  <button class="btn btn-ghost btn-sm" onclick="viewSupplierStatement(${s.id}, ${jsString(s.name)})">📄</button>
-                  ${isAccountant() ? `<button class="btn btn-ghost btn-sm" onclick="openEditSupplierById(${s.id})">✏️</button>` : ''}
-                  ${isAccountant() && balance > 0 ? `<button class="btn btn-primary btn-sm" onclick="openSupplierPaymentModal(${s.id}, ${jsString(s.name)})">💰 دفع</button>` : ''}
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteSupplier(${s.id}, ${jsString(s.name)})">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="viewSupplierStatement('${s.id}', ${jsString(s.name)})">📄</button>
+                  ${isAccountant() ? `<button class="btn btn-ghost btn-sm" onclick="openEditSupplierById('${s.id}')">✏️</button>` : ''}
+                  ${isAccountant() && balance > 0 ? `<button class="btn btn-primary btn-sm" onclick="openSupplierPaymentModal('${s.id}', ${jsString(s.name)})">💰 دفع</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteSupplier('${s.id}', ${jsString(s.name)})">🗑️</button>` : ''}
                 </div>
               </div>
             </div>
@@ -7238,7 +7238,7 @@ async function viewSupplierStatement(id, name) {
                 </td>
                 <td style="padding:10px 12px">
                   ${t.type === 'payment' && isAdmin()
-        ? `<button class="btn btn-danger btn-sm" onclick="deleteSupPayment(${t.id}, ${id}, ${jsString(name)})">🗑️</button>`
+        ? `<button class="btn btn-danger btn-sm" onclick="deleteSupPayment(${t.id}, '${id}', ${jsString(name)})">🗑️</button>`
         : ''}
                 </td>
               </tr>
@@ -7248,7 +7248,7 @@ async function viewSupplierStatement(id, name) {
       </div>
 
       <div style="display:flex;gap:8px;margin-top:14px">
-        ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="closeModal(); openSupplierPaymentModal(${id}, ${jsString(name)})">💰 تسجيل دفعة</button>` : ''}
+        ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="closeModal(); openSupplierPaymentModal('${id}', ${jsString(name)})">💰 تسجيل دفعة</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="closeModal()">إغلاق</button>
       </div>
     `;
@@ -7287,7 +7287,7 @@ function openSupplierPaymentModal(supplierId, supplierName) {
       <input class="form-input" id="sp_notes" placeholder="اختياري">
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveSupplierPayment(${supplierId}, ${jsString(supplierName)})">تسجيل الدفعة</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveSupplierPayment('${supplierId}', ${jsString(supplierName)})">تسجيل الدفعة</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -7487,7 +7487,7 @@ function openEditSupplierModal(s) {
       <input class="form-input" id="es_phone" value="${escHtml(s.phone || '')}">
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveEditSupplier(${s.id})">حفظ التعديلات</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditSupplier('${s.id}')">حفظ التعديلات</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -7506,7 +7506,7 @@ async function saveEditSupplier(id) {
 }
 
 function openEditSupplierById(id) {
-  const s = (window._suppliersCache || []).find(x => x.id === id);
+  const s = (window._suppliersCache || []).find(x => String(x.id) === String(id));
   if (!s) { toast('المورد غير موجود', 'error'); return; }
   openEditSupplierModal(s);
 }

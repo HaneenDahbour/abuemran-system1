@@ -20,6 +20,14 @@ def safe_uuid(val):
         return None
 
 
+def coerce_id(val):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        pass
+    return safe_uuid(val) or val
+
+
 def to_json_value(value):
     if isinstance(value, Decimal):
         return float(value)
@@ -102,7 +110,8 @@ async def get_suppliers(user=Depends(get_current_user)):
 
 
 @router.get("/{supplier_id}/statement")
-async def get_supplier_statement(supplier_id: int, user=Depends(get_current_user)):
+async def get_supplier_statement(supplier_id: str, user=Depends(get_current_user)):
+    supplier_id = coerce_id(supplier_id)
     pool = await get_pool()
     try:
         supplier = await pool.fetchrow(
@@ -175,8 +184,9 @@ async def get_supplier_statement(supplier_id: int, user=Depends(get_current_user
 
 @router.post("/{supplier_id}/payments")
 async def add_supplier_payment(
-    supplier_id: int, data: SupplierPaymentRequest, user=Depends(get_current_user)
+    supplier_id: str, data: SupplierPaymentRequest, user=Depends(get_current_user)
 ):
+    supplier_id = coerce_id(supplier_id)
     require_role(user, "admin", "accountant")
 
     if data.amount <= 0:
@@ -229,7 +239,8 @@ async def add_supplier_payment(
 
 
 @router.delete("/payments/{payment_id}")
-async def delete_supplier_payment(payment_id: int, user=Depends(get_current_user)):
+async def delete_supplier_payment(payment_id: str, user=Depends(get_current_user)):
+    payment_id = coerce_id(payment_id)
     require_role(user, "admin")
     pool = await get_pool()
     try:
@@ -280,8 +291,9 @@ async def create_supplier(data: SupplierRequest, user=Depends(get_current_user))
 
 @router.put("/{supplier_id}")
 async def update_supplier(
-    supplier_id: int, data: SupplierRequest, user=Depends(get_current_user)
+    supplier_id: str, data: SupplierRequest, user=Depends(get_current_user)
 ):
+    supplier_id = coerce_id(supplier_id)
     require_role(user, "admin", "accountant")
     name = clean_text(data.name)
     phone = clean_text(data.phone)
@@ -318,7 +330,8 @@ async def update_supplier(
 
 
 @router.delete("/{supplier_id}")
-async def delete_supplier(supplier_id: int, user=Depends(get_current_user)):
+async def delete_supplier(supplier_id: str, user=Depends(get_current_user)):
+    supplier_id = coerce_id(supplier_id)
     require_role(user, "admin")
     pool = await get_pool()
     try:
