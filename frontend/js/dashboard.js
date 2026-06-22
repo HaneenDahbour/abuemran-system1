@@ -3536,6 +3536,7 @@ function openPurchaseModal() {
     </div>
   `, '620px');
 
+  _purItemIdx = 0;
   Promise.all([API.getProducts(), API.getWarehouseCategories()]).then(([prods, cats]) => {
     window._productsCache = prods || [];
     window._categoriesCache = cats || [];
@@ -3568,11 +3569,13 @@ function buildProductOptions(products, selectedId) {
   return html;
 }
 
+let _purItemIdx = 0;
+
 function addPurchaseItemRow() {
   const wrap = document.getElementById('pur-items-wrap');
   if (!wrap) return;
 
-  const idx = wrap.children.length;
+  const idx = _purItemIdx++;
   const prodOpts = buildProductOptions(window._productsCache);
 
   const row = document.createElement('div');
@@ -3595,7 +3598,7 @@ function calcPurchaseTotal() {
   if (!wrap) return;
 
   let total = 0;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < _purItemIdx + 50; i++) {
     const qty = parseFloat(document.getElementById(`pi_qty_${i}`)?.value) || 0;
     const price = parseFloat(document.getElementById(`pi_price_${i}`)?.value) || 0;
     const sub = qty * price;
@@ -3608,12 +3611,16 @@ function calcPurchaseTotal() {
   if (el) el.textContent = `${fmt(total)} د.أ`;
 }
 
+let _savePurchaseBusy = false;
+
 async function savePurchase() {
+  if (_savePurchaseBusy) return;
+
   const wrap = document.getElementById('pur-items-wrap');
   if (!wrap) return;
 
   const items = [];
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < _purItemIdx + 50; i++) {
     const prodEl = document.getElementById(`pi_prod_${i}`);
     const qtyEl = document.getElementById(`pi_qty_${i}`);
     const priceEl = document.getElementById(`pi_price_${i}`);
@@ -3636,6 +3643,10 @@ async function savePurchase() {
   const autoReceive = document.getElementById('pur_auto_receive')?.checked !== false;
   const supplierId = document.getElementById('pur_supplier').value || null;
 
+  _savePurchaseBusy = true;
+  const btn = document.querySelector('.modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري الحفظ...'; }
+
   try {
     const purchase = await API.createPurchase({
       supplier_id: supplierId || null,
@@ -3654,6 +3665,9 @@ async function savePurchase() {
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ الفاتورة'; }
+  } finally {
+    _savePurchaseBusy = false;
   }
 }
 
@@ -3964,6 +3978,7 @@ async function openEditPurchaseModal(purchaseId) {
     </div>
   `, '640px');
 
+  _epurItemIdx = 0;
   const items = p.items || [];
   if (items.length) {
     items.forEach(item => addEditPurchaseRow(item));
@@ -3972,10 +3987,12 @@ async function openEditPurchaseModal(purchaseId) {
   }
 }
 
+let _epurItemIdx = 0;
+
 function addEditPurchaseRow(existing) {
   const wrap = document.getElementById('epur-items-wrap');
   if (!wrap) return;
-  const idx = wrap.children.length;
+  const idx = _epurItemIdx++;
   const prods = window._editPurchaseProducts || [];
   const prodOpts = buildProductOptions(prods, existing?.product_id);
 
@@ -3996,7 +4013,7 @@ function addEditPurchaseRow(existing) {
 
 function calcEditPurchaseTotal() {
   let total = 0;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < _epurItemIdx + 50; i++) {
     const qty = parseFloat(document.getElementById(`epi_qty_${i}`)?.value) || 0;
     const price = parseFloat(document.getElementById(`epi_price_${i}`)?.value) || 0;
     total += qty * price;
@@ -4005,9 +4022,13 @@ function calcEditPurchaseTotal() {
   if (el) el.textContent = `${fmt(total)} د.أ`;
 }
 
+let _saveEditPurchaseBusy = false;
+
 async function saveEditPurchase() {
+  if (_saveEditPurchaseBusy) return;
+
   const items = [];
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < _epurItemIdx + 50; i++) {
     const prodEl = document.getElementById(`epi_prod_${i}`);
     const qtyEl = document.getElementById(`epi_qty_${i}`);
     const priceEl = document.getElementById(`epi_price_${i}`);
@@ -4026,6 +4047,10 @@ async function saveEditPurchase() {
 
   const supplierId = document.getElementById('epur_supplier').value || null;
 
+  _saveEditPurchaseBusy = true;
+  const btn = document.querySelector('.modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري الحفظ...'; }
+
   try {
     await API.updatePurchase(window._editPurchaseId, {
       supplier_id: supplierId || null,
@@ -4039,6 +4064,9 @@ async function saveEditPurchase() {
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ التعديلات'; }
+  } finally {
+    _saveEditPurchaseBusy = false;
   }
 }
 
@@ -5746,6 +5774,7 @@ async function openWarehouseInvoiceModal() {
     </div>
   `, '640px');
 
+  _winvItemIdx = 0;
   addWarehouseInvoiceRow();
 }
 
@@ -5760,22 +5789,24 @@ function filterProductsByCategory() {
   const wrap = document.getElementById('winv-items-wrap');
   if (!wrap) return;
 
-  Array.from(wrap.children).forEach((row, i) => {
+  for (let i = 0; i < _winvItemIdx + 50; i++) {
     const sel = document.getElementById(`wp_prod_${i}`);
-    if (!sel) return;
+    if (!sel) continue;
     const current = sel.value;
     sel.innerHTML = `<option value="">اختر صنفاً</option>` +
       (window._filteredProducts || []).map(p =>
         `<option value="${p.id}" ${p.id == current ? 'selected' : ''}>${escHtml(p.name)} (${p.current_stock} ${escHtml(p.unit)})</option>`
       ).join('');
-  });
+  }
 }
+
+let _winvItemIdx = 0;
 
 function addWarehouseInvoiceRow() {
   const wrap = document.getElementById('winv-items-wrap');
   if (!wrap) return;
 
-  const idx = wrap.children.length;
+  const idx = _winvItemIdx++;
   const catId = document.getElementById('winv_cat')?.value;
   const allProds = window._productsCache || [];
   const prods = catId ? allProds.filter(p => String(p.category_id) === String(catId)) : allProds;
@@ -5802,7 +5833,7 @@ function addWarehouseInvoiceRow() {
 
 function calcWarehouseTotal() {
   let total = 0;
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < _winvItemIdx + 50; i++) {
     const qty = parseFloat(document.getElementById(`wp_qty_${i}`)?.value) || 0;
     const price = parseFloat(document.getElementById(`wp_price_${i}`)?.value) || 0;
     const sub = qty * price;
@@ -5814,9 +5845,13 @@ function calcWarehouseTotal() {
   if (el) el.textContent = `${fmt(total)} د.أ`;
 }
 
+let _saveWarehouseInvBusy = false;
+
 async function saveWarehouseInvoice() {
+  if (_saveWarehouseInvBusy) return;
+
   const items = [];
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < _winvItemIdx + 50; i++) {
     const prodEl = document.getElementById(`wp_prod_${i}`);
     const qtyEl = document.getElementById(`wp_qty_${i}`);
     const priceEl = document.getElementById(`wp_price_${i}`);
@@ -5833,6 +5868,10 @@ async function saveWarehouseInvoice() {
 
   if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
 
+  _saveWarehouseInvBusy = true;
+  const btn = document.querySelector('.modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري الحفظ...'; }
+
   try {
     await API.createWarehouseInvoice({
       invoice_number: document.getElementById('winv_num').value.trim() || null,
@@ -5848,6 +5887,9 @@ async function saveWarehouseInvoice() {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ الفاتورة'; }
+  } finally {
+    _saveWarehouseInvBusy = false;
   }
 }
 
