@@ -3671,14 +3671,20 @@ async function savePurchase() {
   }
 }
 
+let _confirmReceiveBusy = false;
+
 async function confirmReceive(id) {
+  if (_confirmReceiveBusy) return;
   if (!confirm('تأكيد استلام الفاتورة؟ سيتم رفع المخزون تلقائياً.')) return;
+  _confirmReceiveBusy = true;
   try {
     await API.receivePurchase(id);
     toast('تم استلام الفاتورة ✅ — تم تحديث المخزون', 'success');
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+  } finally {
+    _confirmReceiveBusy = false;
   }
 }
 
@@ -4567,7 +4573,7 @@ async function openCategoryFolder(catId) {
 
               <th>سعر التكلفة</th>
 
-              <th style="text-align:center">الحالة</th>            <th style="text-align:center">الحالة</th>
+              <th style="text-align:center">الحالة</th>
             <th>الإجراءات</th>
           </tr>
         </thead>

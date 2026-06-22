@@ -205,12 +205,39 @@ async def delete_warehouse_invoice(invoice_id: int, user=Depends(get_current_use
     pool = await get_pool()
 
     try:
-        deleted = await pool.fetchrow(
-            "DELETE FROM warehouse_invoices WHERE id=$1 RETURNING id", invoice_id
-        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                invoice = await conn.fetchrow(
+                    "SELECT * FROM warehouse_invoices WHERE id=$1 FOR UPDATE",
+                    invoice_id,
+                )
+                if not invoice:
+                    raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
 
-        if not deleted:
-            raise HTTPException(status_code=404, detail="الفاتورة غير موجودة")
+                items = await conn.fetch(
+                    "SELECT * FROM warehouse_invoice_items WHERE warehouse_invoice_id=$1",
+                    invoice_id,
+                )
+
+                for item in items:
+                    await conn.execute(
+                        "UPDATE products SET current_stock = current_stock + $1 WHERE id = $2",
+                        float(item["quantity"] or 0),
+                        item["product_id"],
+                    )
+
+                await conn.execute(
+                    "DELETE FROM stock_movements WHERE source_type='warehouse_invoice' AND source_id=$1",
+                    invoice_id,
+                )
+                await conn.execute(
+                    "DELETE FROM warehouse_invoice_items WHERE warehouse_invoice_id=$1",
+                    invoice_id,
+                )
+                await conn.execute(
+                    "DELETE FROM warehouse_invoices WHERE id=$1",
+                    invoice_id,
+                )
 
         return {"success": True}
 
