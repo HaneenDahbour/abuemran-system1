@@ -3638,7 +3638,7 @@ async function savePurchase() {
 
   try {
     const purchase = await API.createPurchase({
-      supplier_id: supplierId ? Number(supplierId) : null,
+      supplier_id: supplierId || null,
       invoice_number: document.getElementById('pur_num').value.trim() || null,
       date: document.getElementById('pur_date').value,
       notes: document.getElementById('pur_notes').value,
@@ -4028,7 +4028,7 @@ async function saveEditPurchase() {
 
   try {
     await API.updatePurchase(window._editPurchaseId, {
-      supplier_id: supplierId ? Number(supplierId) : null,
+      supplier_id: supplierId || null,
       invoice_number: document.getElementById('epur_num').value.trim() || null,
       date: document.getElementById('epur_date').value,
       notes: document.getElementById('epur_notes').value,
@@ -11158,7 +11158,7 @@ async function renderInvestorsList(container) {
           <tr>
             <th>الاسم</th>
             <th>الهاتف</th>
-            <th>إجمالي المساهمات (كل الفئات)</th>
+            <th>رأس المال (مرة واحدة)</th>
             <th>عدد الفئات</th>
             <th>ملاحظات</th>
             <th>الإجراءات</th>
@@ -11205,12 +11205,12 @@ async function openInvestorModal(investorId = null) {
   }
 
   window._invCategories = categories;
-  window._invContribRows = existingInvestments.map(i => ({
-    category_id: i.category_id,
-    amount: parseFloat(i.amount || 0),
-    paid_amount: parseFloat(i.paid_amount || 0),
-  }));
+  window._invExistingInvestments = existingInvestments;
   window._invEditId = investorId;
+
+  const totalContribution = Math.max(0, ...existingInvestments.map(i => parseFloat(i.amount || 0)));
+  const totalPaid = Math.max(0, ...existingInvestments.map(i => parseFloat(i.paid_amount || 0)));
+  const selectedCategoryIds = new Set(existingInvestments.map(i => String(i.category_id)));
 
   openModal(`
     <div class="modal-header">
@@ -11234,20 +11234,27 @@ async function openInvestorModal(investorId = null) {
     </div>
 
     <div style="border-top:1px solid var(--brd);padding-top:14px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong>💰 مساهماته في فئات المستودع</strong>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-sm" onclick="addInvContribRow()">+ فئة</button>
-          <button class="btn btn-ghost btn-sm" onclick="addAllCategoryRows()" title="إضافة كل الفئات بمبالغ مختلفة">+ كل الفئات</button>
+      <strong>💰 رأس مال المستثمر والفئات المشمولة</strong>
+      <div style="background:var(--bg2);border-radius:6px;padding:9px 12px;font-size:12px;color:var(--tx3);margin:8px 0 12px">
+        💡 رأس المال يُسجّل مرة واحدة فقط. اختيار عدة فئات لا يكرر المبلغ، بل يجمع أرباح المستثمر من كل الفئات المختارة.
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">إجمالي رأس المال (د.أ) *</label>
+          <input class="form-input" id="wi_total_contribution" type="number" step="0.001" min="0" value="${totalContribution || 0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">إجمالي المدفوع (د.أ)</label>
+          <input class="form-input" id="wi_total_paid" type="number" step="0.001" min="0" value="${totalPaid || 0}">
         </div>
       </div>
-      <div style="background:var(--bg2);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--tx3);margin-bottom:10px">
-        💡 50% ربح كل فئة لسيف (المالك) — 50% للمستثمرين بنسبة مساهمتهم
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">
+        <span class="form-label" style="margin:0">الفئات التي يشارك في أرباحها</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleAllInvestorCategories(true)">تحديد الكل</button>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 120px 120px 36px;gap:6px;font-size:12px;font-weight:600;color:var(--tx3);padding:0 4px;margin-bottom:4px">
-        <span>الفئة</span><span>المساهمة (د.أ)</span><span>المدفوع (د.أ)</span><span></span>
+      <div id="inv_category_checks" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:7px;max-height:230px;overflow:auto;border:1px solid var(--brd);border-radius:8px;padding:10px">
+        ${categories.map(c => `<label style="display:flex;align-items:center;gap:7px;padding:6px;cursor:pointer"><input type="checkbox" class="inv-category-check" value="${c.id}" ${selectedCategoryIds.has(String(c.id)) ? 'checked' : ''}><span>${escHtml((c.icon || '📦') + ' ' + c.name)}</span></label>`).join('') || '<span style="color:var(--tx3)">لا توجد فئات</span>'}
       </div>
-      <div id="inv_contrib_list"></div>
     </div>
 
     <div style="display:flex;gap:10px;margin-top:14px">
@@ -11256,8 +11263,10 @@ async function openInvestorModal(investorId = null) {
     </div>
   `, '680px');
 
-  // render rows after modal DOM is ready
-  _renderInvContribList();
+}
+
+function toggleAllInvestorCategories(checked) {
+  document.querySelectorAll('#inv_category_checks .inv-category-check').forEach(el => { el.checked = checked; });
 }
 
 function _renderInvContribList() {
@@ -11317,18 +11326,13 @@ async function saveInvestorFull() {
   const notes = document.getElementById('wi_notes')?.value?.trim() || null;
   if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
 
-  const rows = window._invContribRows || [];
-  const contributions = [];
-  for (let idx = 0; idx < rows.length; idx++) {
-    const catId = document.getElementById(`inv_cat_${idx}`)?.value;
-    const amt = parseFloat(document.getElementById(`inv_amt_${idx}`)?.value || 0);
-    const paid = parseFloat(document.getElementById(`inv_paid_${idx}`)?.value || 0);
-    if (!catId) continue;
-    if (isNaN(amt) || amt < 0) { toast(`مبلغ غير صحيح في السطر ${idx + 1}`, 'error'); return; }
-    contributions.push({ category_id: Number(catId), amount: amt, paid_amount: paid });
-  }
-  const catIds = contributions.map(c => c.category_id);
-  if (new Set(catIds).size !== catIds.length) { toast('لا يمكن تكرار نفس الفئة', 'error'); return; }
+  const amount = parseFloat(document.getElementById('wi_total_contribution')?.value || 0);
+  const paidAmount = parseFloat(document.getElementById('wi_total_paid')?.value || 0);
+  if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); return; }
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); return; }
+  const selectedCategoryIds = [...document.querySelectorAll('#inv_category_checks .inv-category-check:checked')]
+    .map(el => Number(el.value));
+  if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); return; }
 
   try {
     let finalId = investorId;
@@ -11338,9 +11342,16 @@ async function saveInvestorFull() {
       const created = await API.createWarehouseInvestor({ name, phone, notes });
       finalId = created.id;
     }
-    for (const c of contributions) {
-      await API.setCategoryInvestment(c.category_id, {
-        investor_id: Number(finalId), amount: c.amount, paid_amount: c.paid_amount,
+    const selectedSet = new Set(selectedCategoryIds.map(String));
+    const removed = (window._invExistingInvestments || []).filter(
+      existing => !selectedSet.has(String(existing.category_id))
+    );
+    for (const existing of removed) {
+      await API.deleteCategoryInvestment(existing.category_id, existing.id);
+    }
+    for (const categoryId of selectedCategoryIds) {
+      await API.setCategoryInvestment(categoryId, {
+        investor_id: Number(finalId), amount, paid_amount: paidAmount,
       });
     }
     toast('تم الحفظ ✅', 'success');
@@ -11383,7 +11394,7 @@ async function openInvestorDetailsModal(investorId) {
 
   const inv = data.investor || {};
   const investments = data.investments || [];
-  const totalContrib = investments.reduce((s, i) => s + parseFloat(i.amount || 0), 0);
+  const totalContrib = parseFloat(data.total_invested || 0);
   const totalProfit = data.total_profit_share || 0;
 
   openModal(`
@@ -11394,7 +11405,7 @@ async function openInvestorDetailsModal(investorId) {
 
     <div class="stats-grid" style="margin-bottom:14px">
       <div class="stat-card">
-        <div class="stat-label">إجمالي المساهمات</div>
+        <div class="stat-label">إجمالي رأس المال (مرة واحدة)</div>
         <div class="stat-value" style="color:var(--bl)">${fmt(totalContrib)} د.أ</div>
       </div>
       <div class="stat-card">
@@ -11408,7 +11419,7 @@ async function openInvestorDetailsModal(investorId) {
     </div>
 
     <div style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--tx2)">
-      💡 توزيع الأرباح: <strong>50% للمالك (سيف)</strong> — <strong>50% للمستثمرين</strong> بنسبة مساهمة كل منهم في كل فئة
+      💡 رأس المال ${fmt(totalContrib)} د.أ محسوب مرة واحدة، وأرباح الفئات المختارة مجمّعة أدناه. توزيع كل فئة: <strong>50% للمالك</strong> و<strong>50% للمستثمرين</strong>.
     </div>
 
     <div class="table-wrap">
@@ -11416,7 +11427,7 @@ async function openInvestorDetailsModal(investorId) {
         <thead>
           <tr>
             <th>الفئة</th>
-            <th>المساهمة (د.أ)</th>
+            <th>رأس المال المعتمد *</th>
             <th>نسبة المساهمة %</th>
             <th>ربح الفئة الكلي</th>
             <th>حصته من الربح</th>
@@ -11429,7 +11440,7 @@ async function openInvestorDetailsModal(investorId) {
     return `
             <tr>
               <td><strong>${i.category_icon || '📦'} ${escHtml(i.category_name)}</strong></td>
-              <td style="font-weight:700">${fmt(i.amount)} د.أ</td>
+            <td style="font-weight:700">${fmt(i.amount)} د.أ</td>
               <td>${fmt(i.contribution_pct || 0)}%</td>
               <td style="color:${profit >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:600">${fmt(profit)} د.أ</td>
               <td style="color:var(--am);font-weight:700">${fmt(share)} د.أ</td>
@@ -11446,6 +11457,7 @@ async function openInvestorDetailsModal(investorId) {
         </tbody>
       </table>
     </div>
+    <div style="font-size:11px;color:var(--tx3);margin-top:6px">* يظهر رأس المال في كل صف لاستخدامه في نسبة ربح تلك الفئة، لكنه لا يُجمع أو يُكرر في الإجمالي.</div>
 
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="btn btn-ghost btn-sm" onclick="openInvestorModal('${investorId}')">✏️ تعديل المساهمات</button>

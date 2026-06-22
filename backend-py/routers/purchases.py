@@ -51,6 +51,9 @@ def parse_purchase_date(value: Optional[str]) -> date:
 
 
 async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail: str):
+    # audit_log.entity_id is INTEGER in the live schema while purchases.id is UUID.
+    # Keep the UUID in detail and leave the incompatible legacy column empty.
+    audit_entity_id = None if isinstance(entity_id, UUID) else entity_id
     try:
         await conn.execute(
             """
@@ -60,7 +63,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
             user.get("id"),
             user.get("full_name") or user.get("username") or "مستخدم",
             action,
-            entity_id,
+            audit_entity_id,
             detail,
         )
     except Exception:
@@ -74,7 +77,7 @@ class PurchaseItem(BaseModel):
 
 
 class PurchaseRequest(BaseModel):
-    supplier_id: Optional[int] = None
+    supplier_id: Optional[str] = None
     invoice_number: Optional[str] = None
     date: Optional[str] = None
     notes: Optional[str] = None
@@ -133,6 +136,9 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
     )
     purchase_date = parse_purchase_date(data.date)
     notes = clean_text(data.notes)
+    supplier_id = safe_uuid(data.supplier_id) if data.supplier_id else None
+    if data.supplier_id and not supplier_id:
+        raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
 
     pool = await get_pool()
 
@@ -142,7 +148,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                 if data.supplier_id is not None:
                     supplier_exists = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
-                        data.supplier_id,
+                        supplier_id,
                     )
 
                     if not supplier_exists:
@@ -185,7 +191,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                     VALUES ($1, $2, $3, $4, $5, $6, 'pending')
                     RETURNING *
                     """,
-                    data.supplier_id,
+                    supplier_id,
                     invoice_number,
                     purchase_date,
                     total,
@@ -223,7 +229,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
 
 
 @router.put("/{purchase_id}/receive")
-async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
+async def receive_purchase(purchase_id: UUID, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     pool = await get_pool()
@@ -248,7 +254,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
 
                 items = await conn.fetch(
-                    "SELECT * FROM purchase_items WHERE purchase_id=$1::int ORDER BY id ASC",
+                    "SELECT * FROM purchase_items WHERE purchase_id=$1 ORDER BY id ASC",
                     purchase_id,
                 )
 
@@ -334,13 +340,16 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
 
 
 @router.put("/{purchase_id}")
-async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(get_current_user)):
+async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     if not data.items:
         raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
 
     pool = await get_pool()
+    supplier_id = safe_uuid(data.supplier_id) if data.supplier_id else None
+    if data.supplier_id and not supplier_id:
+        raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
 
     try:
         async with pool.acquire() as conn:
@@ -358,14 +367,14 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                 if data.supplier_id is not None:
                     supplier_exists = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
-                        data.supplier_id,
+                        supplier_id,
                     )
                     if not supplier_exists:
                         raise HTTPException(status_code=400, detail="المورد غير موجود")
 
                 if purchase["status"] == "received":
                     old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1::int",
+                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
                         purchase_id,
                     )
                     for item in old_items:
@@ -380,7 +389,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                     )
 
                 await conn.execute(
-                    "DELETE FROM purchase_items WHERE purchase_id=$1::int", purchase_id
+                    "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
                 )
 
                 total = 0.0
@@ -459,7 +468,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                     WHERE id=$6
                     RETURNING *
                     """,
-                    data.supplier_id,
+                    supplier_id,
                     invoice_number,
                     purchase_date,
                     total,
@@ -490,7 +499,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
 
 
 @router.delete("/{purchase_id}")
-async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
+async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     pool = await get_pool()
@@ -510,7 +519,7 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
 
                 if purchase["status"] == "received":
                     old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1::int",
+                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
                         purchase_id,
                     )
                     for item in old_items:
@@ -525,7 +534,7 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
 
                 await conn.execute(
-                    "DELETE FROM purchase_items WHERE purchase_id=$1::int", purchase_id
+                    "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 

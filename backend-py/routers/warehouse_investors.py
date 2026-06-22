@@ -138,7 +138,8 @@ async def list_investors(user=Depends(get_current_user)):
     rows = await pool.fetch("""
         SELECT
             wi.*,
-            COALESCE(SUM(wci.amount), 0) AS total_invested,
+            COALESCE(MAX(wci.amount), 0) AS total_invested,
+            COALESCE(MAX(wci.paid_amount), 0) AS total_paid,
             COUNT(wci.id)::int AS categories_count
         FROM warehouse_investors wi
         LEFT JOIN warehouse_category_investments wci ON wci.investor_id = wi.id
@@ -287,6 +288,10 @@ async def get_investor(investor_id: int, user=Depends(get_current_user)):
     return {
         "investor": row_to_dict(investor),
         "investments": enriched,
+        # The same capital amount is linked to every selected category so it can
+        # participate in each category's profit calculation. It is principal once.
+        "total_invested": round(max((float(i.get("amount") or 0) for i in enriched), default=0), 3),
+        "total_paid": round(max((float(i.get("paid_amount") or 0) for i in enriched), default=0), 3),
         "total_profit_share": round(total_profit_share, 3),
     }
 
