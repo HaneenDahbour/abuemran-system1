@@ -3536,13 +3536,36 @@ function openPurchaseModal() {
     </div>
   `, '620px');
 
-  API.getProducts().then(prods => {
+  Promise.all([API.getProducts(), API.getWarehouseCategories()]).then(([prods, cats]) => {
     window._productsCache = prods || [];
+    window._categoriesCache = cats || [];
     addPurchaseItemRow();
   }).catch(() => {
     window._productsCache = [];
+    window._categoriesCache = [];
     addPurchaseItemRow();
   });
+}
+
+function buildProductOptions(products, selectedId) {
+  const cats = {};
+  const uncategorized = [];
+  (products || []).forEach(p => {
+    const catName = p.category_name || 'بدون فئة';
+    const catId = p.category_id || 0;
+    if (!cats[catId]) cats[catId] = { name: catName, items: [] };
+    cats[catId].items.push(p);
+  });
+  let html = '<option value="">اختر صنفاً</option>';
+  Object.keys(cats).forEach(catId => {
+    const g = cats[catId];
+    html += `<optgroup label="${escHtml(g.name)}">`;
+    g.items.forEach(p => {
+      html += `<option value="${p.id}" ${selectedId && String(p.id) === String(selectedId) ? 'selected' : ''}>${escHtml(p.name)} (${escHtml(p.unit || 'قطعة')})</option>`;
+    });
+    html += '</optgroup>';
+  });
+  return html;
 }
 
 function addPurchaseItemRow() {
@@ -3550,20 +3573,18 @@ function addPurchaseItemRow() {
   if (!wrap) return;
 
   const idx = wrap.children.length;
-  const prodOpts = (window._productsCache || [])
-    .map(p => `<option value="${p.id}" data-unit="${escHtml(p.unit)}">${escHtml(p.name)}</option>`)
-    .join('');
+  const prodOpts = buildProductOptions(window._productsCache);
 
   const row = document.createElement('div');
-  row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr 1fr auto; gap:8px; align-items:center';
+  row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr 1fr auto auto; gap:8px; align-items:center';
   row.innerHTML = `
     <select class="form-select" id="pi_prod_${idx}" onchange="calcPurchaseTotal()">
-      <option value="">اختر صنفاً</option>
       ${prodOpts}
     </select>
     <input class="form-input" id="pi_qty_${idx}" type="number" placeholder="الكمية" min="0.001" step="0.001" oninput="calcPurchaseTotal()">
     <input class="form-input" id="pi_price_${idx}" type="number" placeholder="السعر" min="0" step="0.01" oninput="calcPurchaseTotal()">
     <div id="pi_subtotal_${idx}" style="padding:10px; background:var(--bg); border-radius:var(--r); font-size:12px; font-weight:700; color:var(--tx2); text-align:center">0.00</div>
+    <button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px" onclick="openQuickAddProductInPurchase('${idx}', 'pi')">+ جديد</button>
     <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); calcPurchaseTotal()">✕</button>
   `;
   wrap.appendChild(row);
@@ -3702,6 +3723,132 @@ async function saveQuickSupplier() {
   }
 }
 
+async function openQuickAddProductInPurchase(rowIdx, prefix) {
+  let categories = window._categoriesCache;
+  if (!categories) {
+    try { categories = await API.getWarehouseCategories(); } catch { categories = []; }
+    window._categoriesCache = categories;
+  }
+  const catOpts = (categories || []).map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'quick_product_overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `
+    <div style="background:var(--bg);border-radius:12px;padding:24px;width:400px;box-shadow:0 8px 32px rgba(0,0,0,.3);max-height:90vh;overflow-y:auto">
+      <div style="font-weight:700;font-size:16px;margin-bottom:14px">📦 إضافة صنف جديد</div>
+      <div class="form-group">
+        <label class="form-label">الفئة *
+          <button type="button" class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;margin-right:6px" onclick="toggleNewCategoryFields()">+ فئة جديدة</button>
+        </label>
+        <select class="form-select" id="qp_category">
+          <option value="">اختر فئة</option>
+          ${catOpts}
+        </select>
+      </div>
+      <div id="qp_new_cat_wrap" style="display:none;margin-bottom:12px;padding:10px;background:var(--bg2);border-radius:8px">
+        <div class="form-group" style="margin-bottom:8px">
+          <label class="form-label">اسم الفئة الجديدة *</label>
+          <input class="form-input" id="qp_cat_name" placeholder="مثلاً: مواد غذائية">
+        </div>
+        <div class="form-group">
+          <label class="form-label">أيقونة</label>
+          <input class="form-input" id="qp_cat_icon" value="📦" style="width:60px">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">اسم الصنف *</label>
+        <input class="form-input" id="qp_name" placeholder="مثلاً: طحين ابيض 50 كغ" autofocus>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">الوحدة</label>
+          <input class="form-input" id="qp_unit" value="قطعة" placeholder="كغ، لتر، قطعة...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">SKU (اختياري)</label>
+          <input class="form-input" id="qp_sku" placeholder="رمز المنتج">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn btn-primary" style="flex:1" onclick="saveQuickProduct('${rowIdx}', '${prefix}')">إضافة الصنف</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('quick_product_overlay').remove()">إلغاء</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('qp_name')?.focus(), 50);
+}
+
+function toggleNewCategoryFields() {
+  const wrap = document.getElementById('qp_new_cat_wrap');
+  const sel = document.getElementById('qp_category');
+  if (!wrap) return;
+  const show = wrap.style.display === 'none';
+  wrap.style.display = show ? 'block' : 'none';
+  if (sel) sel.disabled = show;
+  if (show) document.getElementById('qp_cat_name')?.focus();
+}
+
+async function saveQuickProduct(rowIdx, prefix) {
+  const name = document.getElementById('qp_name')?.value?.trim();
+  if (!name) { toast('اسم الصنف مطلوب', 'error'); return; }
+
+  const unit = document.getElementById('qp_unit')?.value?.trim() || 'قطعة';
+  const sku = document.getElementById('qp_sku')?.value?.trim() || null;
+  let categoryId = document.getElementById('qp_category')?.value || null;
+
+  const newCatWrap = document.getElementById('qp_new_cat_wrap');
+  if (newCatWrap && newCatWrap.style.display !== 'none') {
+    const catName = document.getElementById('qp_cat_name')?.value?.trim();
+    if (!catName) { toast('اسم الفئة مطلوب', 'error'); return; }
+    const catIcon = document.getElementById('qp_cat_icon')?.value?.trim() || '📦';
+    try {
+      const newCat = await API.createWarehouseCategory({ name: catName, icon: catIcon });
+      categoryId = newCat.id;
+      if (!window._categoriesCache) window._categoriesCache = [];
+      window._categoriesCache.push(newCat);
+      toast(`تم إنشاء الفئة "${catName}" ✅`, 'success');
+    } catch (e) {
+      toast(`خطأ في إنشاء الفئة: ${e.message}`, 'error');
+      return;
+    }
+  }
+
+  if (!categoryId) { toast('اختر فئة أو أنشئ فئة جديدة', 'error'); return; }
+
+  try {
+    const newProduct = await API.createProduct({
+      name,
+      unit,
+      sku,
+      category_id: Number(categoryId),
+    });
+
+    document.getElementById('quick_product_overlay')?.remove();
+
+    const cat = (window._categoriesCache || []).find(c => String(c.id) === String(categoryId));
+    if (cat && !newProduct.category_name) newProduct.category_name = cat.name;
+
+    if (!window._productsCache) window._productsCache = [];
+    window._productsCache.push(newProduct);
+    if (window._editPurchaseProducts) window._editPurchaseProducts.push(newProduct);
+
+    const selId = `${prefix}_prod_${rowIdx}`;
+    const sel = document.getElementById(selId);
+    if (sel) {
+      sel.innerHTML = buildProductOptions(
+        prefix === 'pi' ? window._productsCache : (window._editPurchaseProducts || window._productsCache),
+        newProduct.id
+      );
+    }
+
+    toast(`تم إضافة الصنف "${name}" ✅`, 'success');
+  } catch (e) {
+    toast(`خطأ في إنشاء الصنف: ${e.message}`, 'error');
+  }
+}
+
 async function viewPurchaseItems(id) {
   try {
     const purchases = await API.getPurchases();
@@ -3753,12 +3900,13 @@ async function deletePurchase(id) {
 }
 
 async function openEditPurchaseModal(purchaseId) {
-  let purchases = [], products = [], suppliers = [];
+  let purchases = [], products = [], suppliers = [], categories = [];
   try {
-    [purchases, products, suppliers] = await Promise.all([
-      API.getPurchases(), API.getProducts(), API.getSuppliers()
+    [purchases, products, suppliers, categories] = await Promise.all([
+      API.getPurchases(), API.getProducts(), API.getSuppliers(), API.getWarehouseCategories()
     ]);
   } catch (e) { toast(e.message, 'error'); return; }
+  window._categoriesCache = categories || [];
 
   const p = (purchases || []).find(x => String(x.id) === String(purchaseId));
   if (!p) { toast('الفاتورة غير موجودة', 'error'); return; }
@@ -3829,19 +3977,17 @@ function addEditPurchaseRow(existing) {
   if (!wrap) return;
   const idx = wrap.children.length;
   const prods = window._editPurchaseProducts || [];
-  const prodOpts = prods.map(pr =>
-    `<option value="${pr.id}" ${existing && String(pr.id) === String(existing.product_id) ? 'selected' : ''}>${escHtml(pr.name)} (${pr.current_stock} ${escHtml(pr.unit)})</option>`
-  ).join('');
+  const prodOpts = buildProductOptions(prods, existing?.product_id);
 
   const row = document.createElement('div');
-  row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:8px; align-items:center';
+  row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto auto; gap:8px; align-items:center';
   row.innerHTML = `
     <select class="form-select" id="epi_prod_${idx}" onchange="calcEditPurchaseTotal()">
-      <option value="">اختر صنفاً</option>
       ${prodOpts}
     </select>
     <input class="form-input" id="epi_qty_${idx}" type="number" placeholder="الكمية" min="0.001" step="0.001" value="${existing ? existing.quantity : ''}" oninput="calcEditPurchaseTotal()">
     <input class="form-input" id="epi_price_${idx}" type="number" placeholder="السعر" min="0" step="0.01" value="${existing ? existing.unit_price : ''}" oninput="calcEditPurchaseTotal()">
+    <button class="btn btn-ghost btn-sm" style="padding:4px 8px;font-size:11px" onclick="openQuickAddProductInPurchase('${idx}', 'epi')">+ جديد</button>
     <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); calcEditPurchaseTotal()">✕</button>
   `;
   wrap.appendChild(row);
