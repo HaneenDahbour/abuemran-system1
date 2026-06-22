@@ -3487,9 +3487,11 @@ function openPurchaseModal() {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">المورد</label>
+        <label class="form-label">المورد
+          <button type="button" class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;margin-right:6px" onclick="openQuickAddSupplierInPurchase()">+ جديد</button>
+        </label>
         <select class="form-select" id="pur_supplier">
-          <option value="">اختر مورداً</option>
+          <option value="">اختر مورداً (اختياري)</option>
           ${supplierOpts}
         </select>
       </div>
@@ -3518,7 +3520,14 @@ function openPurchaseModal() {
       <span style="font-size:18px; font-weight:800; color:var(--bld)" id="pur_total">0.00 د.أ</span>
     </div>
 
-    <div style="display:flex; gap:10px; margin-top:16px">
+    <div style="margin-top:12px; padding:10px 14px; background:var(--bg2); border-radius:8px; display:flex; align-items:center; gap:10px">
+      <input type="checkbox" id="pur_auto_receive" checked style="width:16px;height:16px;cursor:pointer">
+      <label for="pur_auto_receive" style="cursor:pointer; font-size:13px; font-weight:600">
+        ✅ استلام فوري — رفع الكميات في المستودع تلقائياً عند الحفظ
+      </label>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:14px">
       <button class="btn btn-primary" style="flex:1" onclick="savePurchase()">حفظ الفاتورة</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
@@ -3600,15 +3609,23 @@ async function savePurchase() {
     return;
   }
 
+  const autoReceive = document.getElementById('pur_auto_receive')?.checked !== false;
+  const supplierId = document.getElementById('pur_supplier').value || null;
+
   try {
-    await API.createPurchase({
-      supplier_id: document.getElementById('pur_supplier').value || null,
+    const purchase = await API.createPurchase({
+      supplier_id: supplierId ? Number(supplierId) : null,
       invoice_number: document.getElementById('pur_num').value.trim() || null,
       date: document.getElementById('pur_date').value,
       notes: document.getElementById('pur_notes').value,
       items,
     });
-    toast('تمت إضافة فاتورة الشراء', 'success');
+    if (autoReceive) {
+      await API.receivePurchase(purchase.id);
+      toast('✅ تم حفظ الفاتورة وتحديث المستودع تلقائياً', 'success');
+    } else {
+      toast('تمت إضافة فاتورة الشراء — اضغط "استلام" لرفع المخزون', 'success');
+    }
     closeModal();
     navigateTo('purchases');
   } catch (e) {
@@ -3622,6 +3639,61 @@ async function confirmReceive(id) {
     await API.receivePurchase(id);
     toast('تم استلام الفاتورة ✅ — تم تحديث المخزون', 'success');
     navigateTo('purchases');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function openQuickAddSupplierInPurchase() {
+  // Save current purchase form state
+  const supplierId = document.getElementById('pur_supplier')?.value;
+  const invoiceNum = document.getElementById('pur_num')?.value;
+  const date = document.getElementById('pur_date')?.value;
+  const notes = document.getElementById('pur_notes')?.value;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'quick_supplier_overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = `
+    <div style="background:var(--bg);border-radius:12px;padding:24px;width:340px;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+      <div style="font-weight:700;font-size:16px;margin-bottom:14px">🏪 إضافة مورد جديد</div>
+      <div class="form-group">
+        <label class="form-label">اسم المورد *</label>
+        <input class="form-input" id="qs_name" placeholder="اسم المورد" autofocus>
+      </div>
+      <div class="form-group">
+        <label class="form-label">رقم الهاتف</label>
+        <input class="form-input" id="qs_phone" placeholder="اختياري">
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="saveQuickSupplier()">إضافة</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('quick_supplier_overlay').remove()">إلغاء</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('qs_name')?.focus(), 50);
+}
+
+async function saveQuickSupplier() {
+  const name = document.getElementById('qs_name')?.value?.trim();
+  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  const phone = document.getElementById('qs_phone')?.value?.trim() || null;
+  try {
+    const newSupplier = await API.createSupplier({ name, phone });
+    document.getElementById('quick_supplier_overlay')?.remove();
+    // Add new supplier to cache and dropdown
+    if (!window._suppliersCache) window._suppliersCache = [];
+    window._suppliersCache.push(newSupplier);
+    const sel = document.getElementById('pur_supplier');
+    if (sel) {
+      const opt = document.createElement('option');
+      opt.value = newSupplier.id;
+      opt.textContent = name;
+      opt.selected = true;
+      sel.appendChild(opt);
+    }
+    toast(`تم إضافة المورد "${name}" ✅`, 'success');
   } catch (e) {
     toast(e.message, 'error');
   }
@@ -10844,7 +10916,10 @@ async function openInvestorModal(investorId = null) {
     <div style="border-top:1px solid var(--brd);padding-top:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
         <strong>💰 مساهماته في فئات المستودع</strong>
-        <button class="btn btn-ghost btn-sm" onclick="addInvContribRow()">+ إضافة فئة</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="addInvContribRow()">+ فئة</button>
+          <button class="btn btn-ghost btn-sm" onclick="addAllCategoryRows()" title="إضافة كل الفئات بمبالغ مختلفة">+ كل الفئات</button>
+        </div>
       </div>
       <div style="background:var(--bg2);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--tx3);margin-bottom:10px">
         💡 50% ربح كل فئة لسيف (المالك) — 50% للمستثمرين بنسبة مساهمتهم
@@ -10877,16 +10952,14 @@ function _renderInvContribList() {
   }
 
   list.innerHTML = rows.map((r, idx) => {
-    const allSelected = r.category_id === 'all';
     const catOpts = categories.map(c =>
-      `<option value="${c.id}" ${!allSelected && String(c.id) === String(r.category_id) ? 'selected' : ''}>${escHtml((c.icon || '📦') + ' ' + c.name)}</option>`
+      `<option value="${c.id}" ${String(c.id) === String(r.category_id) ? 'selected' : ''}>${escHtml((c.icon || '📦') + ' ' + c.name)}</option>`
     ).join('');
-    const opts = `<option value="all" ${allSelected ? 'selected' : ''}>🌟 كل الفئات</option>` + catOpts;
     return `
     <div id="inv_row_${idx}" style="display:grid;grid-template-columns:1fr 120px 120px 36px;gap:6px;align-items:center;margin-bottom:6px">
-      <select class="form-select" id="inv_cat_${idx}" style="font-size:13px">${opts}</select>
-      <input class="form-input" id="inv_amt_${idx}" type="number" step="0.001" min="0" value="${r.amount || 0}" style="font-size:13px">
-      <input class="form-input" id="inv_paid_${idx}" type="number" step="0.001" min="0" value="${r.paid_amount || 0}" style="font-size:13px;border-color:var(--gr)">
+      <select class="form-select" id="inv_cat_${idx}" style="font-size:13px">${catOpts}</select>
+      <input class="form-input" id="inv_amt_${idx}" type="number" step="0.001" min="0" value="${r.amount || 0}" style="font-size:13px" placeholder="المساهمة">
+      <input class="form-input" id="inv_paid_${idx}" type="number" step="0.001" min="0" value="${r.paid_amount || 0}" style="font-size:13px;border-color:var(--gr)" placeholder="المدفوع">
       <button class="btn btn-danger btn-sm" onclick="removeInvContribRow(${idx})" style="padding:4px 8px">🗑️</button>
     </div>`;
   }).join('');
@@ -10894,8 +10967,22 @@ function _renderInvContribList() {
 
 function addInvContribRow() {
   const categories = window._invCategories || [];
-  window._invContribRows.push({ category_id: categories[0]?.id || '', amount: 0, paid_amount: 0 });
+  const usedIds = (window._invContribRows || []).map(r => String(r.category_id));
+  const next = categories.find(c => !usedIds.includes(String(c.id)));
+  window._invContribRows.push({ category_id: next?.id || categories[0]?.id || '', amount: 0, paid_amount: 0 });
   _renderInvContribList();
+}
+
+function addAllCategoryRows() {
+  const categories = window._invCategories || [];
+  const usedIds = (window._invContribRows || []).map(r => String(r.category_id));
+  const toAdd = categories.filter(c => !usedIds.includes(String(c.id)));
+  if (!toAdd.length) { toast('كل الفئات مضافة بالفعل', 'info'); return; }
+  for (const cat of toAdd) {
+    window._invContribRows.push({ category_id: cat.id, amount: 0, paid_amount: 0 });
+  }
+  _renderInvContribList();
+  toast(`تم إضافة ${toAdd.length} فئة — أدخل مساهمة كل فئة يدوياً`, 'info');
 }
 
 function removeInvContribRow(idx) {
@@ -10911,7 +10998,6 @@ async function saveInvestorFull() {
   if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
 
   const rows = window._invContribRows || [];
-  const allCategories = window._invCategories || [];
   const contributions = [];
   for (let idx = 0; idx < rows.length; idx++) {
     const catId = document.getElementById(`inv_cat_${idx}`)?.value;
@@ -10919,13 +11005,7 @@ async function saveInvestorFull() {
     const paid = parseFloat(document.getElementById(`inv_paid_${idx}`)?.value || 0);
     if (!catId) continue;
     if (isNaN(amt) || amt < 0) { toast(`مبلغ غير صحيح في السطر ${idx + 1}`, 'error'); return; }
-    if (catId === 'all') {
-      for (const cat of allCategories) {
-        contributions.push({ category_id: Number(cat.id), amount: amt, paid_amount: paid });
-      }
-    } else {
-      contributions.push({ category_id: Number(catId), amount: amt, paid_amount: paid });
-    }
+    contributions.push({ category_id: Number(catId), amount: amt, paid_amount: paid });
   }
   const catIds = contributions.map(c => c.category_id);
   if (new Set(catIds).size !== catIds.length) { toast('لا يمكن تكرار نفس الفئة', 'error'); return; }
@@ -11035,11 +11115,20 @@ async function openInvestorDetailsModal(investorId) {
               <td style="color:var(--am);font-weight:700">${fmt(share)} د.أ</td>
             </tr>`;
   }).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
+          ${investments.length ? `
+          <tr style="background:var(--bg2);border-top:2px solid var(--brd)">
+            <td><strong>الإجمالي</strong></td>
+            <td style="font-weight:800;color:var(--bl)">${fmt(totalContrib)} د.أ</td>
+            <td>—</td>
+            <td>—</td>
+            <td style="font-weight:800;color:var(--gr);font-size:15px">${fmt(totalProfit)} د.أ</td>
+          </tr>` : ''}
         </tbody>
       </table>
     </div>
 
-    <div style="margin-top:10px">
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="openInvestorModal(${investorId})">✏️ تعديل المساهمات</button>
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
   `, '700px');
