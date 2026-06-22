@@ -7678,6 +7678,40 @@ async function confirmDeleteSupplier(id, name) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+// Apply advances to unpaid salaries FIFO. An advance is a carried employee
+// balance and therefore can cover a salary in a later calendar month.
+function applyAdvancesToSalaries(salaries, advances) {
+  const result = (salaries || []).map(s => ({
+    ...s,
+    advance_applied: 0,
+    effective_remaining: s.status === 'paid' ? 0 : Number(s.salary_amount || 0),
+    effective_status: s.status === 'paid' ? 'paid' : 'pending',
+  }));
+  const balances = new Map();
+
+  (advances || []).forEach(a => {
+    if (!a.user_id) return;
+    const key = String(a.user_id);
+    balances.set(key, (balances.get(key) || 0) + Number(a.amount || 0));
+  });
+
+  result
+    .filter(s => s.status !== 'paid' && s.employee_user_id)
+    .sort((a, b) => String(a.salary_month || '').localeCompare(String(b.salary_month || '')) || Number(a.id) - Number(b.id))
+    .forEach(s => {
+      const key = String(s.employee_user_id);
+      const available = balances.get(key) || 0;
+      const amount = Number(s.salary_amount || 0);
+      const applied = Math.min(available, amount);
+      s.advance_applied = applied;
+      s.effective_remaining = Math.max(amount - applied, 0);
+      s.effective_status = applied >= amount ? 'covered_by_advance' : applied > 0 ? 'partial' : 'pending';
+      balances.set(key, Math.max(available - applied, 0));
+    });
+
+  return result;
+}
+
 async function renderExpenses(container) {
   let expenses = [], salaries = [], advances = [], warehouseRents = [];
   try {
@@ -7687,6 +7721,8 @@ async function renderExpenses(container) {
       API.getAdvances(),
     ]);
   } catch (e) { expenses = []; salaries = []; advances = []; }
+
+  salaries = applyAdvancesToSalaries(salaries, advances);
 
   try {
     warehouseRents = await API.getWarehouseRents() || [];
@@ -7803,13 +7839,10 @@ async function renderExpenses(container) {
           </thead>
           <tbody>
             ${salaries.length ? salaries.map(s => {
-        // سُلف نفس الشهر لنفس الموظف — لعرض المتبقي من الراتب
-        const ym = String(s.salary_month || '').slice(0, 7);
-        const advSum = (advances || [])
-          .filter(a => String(a.user_id) === String(s.employee_user_id)
-                    && String(a.advance_date || '').slice(0, 7) === ym)
-          .reduce((t, x) => t + Number(x.amount || 0), 0);
-        const remaining = Math.max(Number(s.salary_amount || 0) - advSum, 0);
+        // Carried advance balance allocated to this salary (not month-limited).
+        const advSum = Number(s.advance_applied || 0);
+        const remaining = Number(s.effective_remaining || 0);
+        const isEffectivelyPaid = s.status === 'paid' || s.effective_status === 'covered_by_advance';
         return `
               <tr>
                 <td>${fmtDate(s.salary_month)}</td>
@@ -7817,12 +7850,12 @@ async function renderExpenses(container) {
                 <td style="font-weight:800;color:var(--gr)">${fmt(s.salary_amount)} د.أ</td>
                 <td>${fmtDate(s.paid_date)}</td>
                 <td>
-                  <span class="badge ${s.status === 'paid' ? 'badge-green' : 'badge-amber'}">
-                    ${s.status === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+                  <span class="badge ${isEffectivelyPaid ? 'badge-green' : 'badge-amber'}">
+                    ${s.status === 'paid' ? 'مدفوع' : s.effective_status === 'covered_by_advance' ? 'مغطّى من رصيد السلف' : s.effective_status === 'partial' ? 'مدفوع جزئياً' : 'غير مدفوع'}
                   </span>
                   ${s.status !== 'paid' && advSum > 0 ? `
                     <div style="font-size:10px;color:#9a4500;margin-top:4px;font-weight:700">
-                      سُلف الشهر: ${fmt(advSum)} — المتبقي: ${fmt(remaining)} د.أ
+                      المطبّق من رصيد السلف: ${fmt(advSum)} — المتبقي: ${fmt(remaining)} د.أ
                     </div>` : ''}
                 </td>
                 <td>${escHtml(s.notes || '—')}</td>
@@ -8866,6 +8899,8 @@ async function renderEmployees(container) {
     advances = advancesRes.status === 'fulfilled' ? (advancesRes.value || []) : [];
   } catch (e) { users = []; }
 
+  salaries = applyAdvancesToSalaries(salaries, advances);
+
   const employees = (users || []).filter(u =>
     ['admin', 'accountant', 'employee'].includes(u.role)
   );
@@ -8875,6 +8910,11 @@ async function renderEmployees(container) {
     const empAdv = (advances || []).filter(a => String(a.user_id) === String(emp.id));
     const totalSalary = empSal.reduce((s, x) => s + parseFloat(x.salary_amount || 0), 0);
     const totalAdvances = empAdv.reduce((s, x) => s + parseFloat(x.amount || 0), 0);
+    const appliedAdvances = empSal.reduce((s, x) => s + Number(x.advance_applied || 0), 0);
+    const salaryDue = empSal
+      .filter(x => x.status !== 'paid')
+      .reduce((s, x) => s + Number(x.effective_remaining || 0), 0);
+    const advanceBalance = Math.max(totalAdvances - appliedAdvances, 0);
 
     // وضع راتب الشهر الحالي مقابل السلف
     const ym = new Date().toISOString().slice(0, 7);
@@ -8884,20 +8924,26 @@ async function renderEmployees(container) {
       .reduce((s, x) => s + parseFloat(x.amount || 0), 0);
     const thisMonthSalRec = empSal.find(s =>
       String(s.salary_month || '').slice(0, 7) === ym);
-    const monthSalaryPaid    = thisMonthSalRec?.status === 'paid';
-    const monthSalaryPending = !!thisMonthSalRec && !monthSalaryPaid;
-    const monthRemaining = (monthSalaryPaid || monthSalaryPending)
-      ? 0
-      : Math.max(baseSalary - monthAdvances, 0);
+    const monthSalaryPaid = thisMonthSalRec?.status === 'paid';
+    const monthSalaryCovered = thisMonthSalRec?.effective_status === 'covered_by_advance';
+    const monthSalaryPartial = thisMonthSalRec?.effective_status === 'partial';
+    const monthSalaryPending = !!thisMonthSalRec && !monthSalaryPaid && !monthSalaryCovered;
+    const monthRemaining = thisMonthSalRec
+      ? Number(thisMonthSalRec.effective_remaining || 0)
+      : Math.max(baseSalary - advanceBalance, 0);
 
     return {
       ...emp,
       totalSalary,
       totalAdvances,
-      netBalance: totalSalary - totalAdvances,
+      netBalance: salaryDue - advanceBalance,
+      salaryDue,
+      advanceBalance,
       baseSalary,
       monthAdvances,
       monthSalaryPaid,
+      monthSalaryCovered,
+      monthSalaryPartial,
       monthSalaryPending,
       monthRemaining,
 
@@ -8938,17 +8984,19 @@ async function renderEmployees(container) {
           </div>
           ${emp.baseSalary > 0 ? `
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;
-                      background:${emp.monthSalaryPaid ? 'var(--grl)' : emp.monthSalaryPending ? '#fff8e1' : '#fffbeb'};
+                      background:${(emp.monthSalaryPaid || emp.monthSalaryCovered) ? 'var(--grl)' : '#fff8e1'};
                       border-radius:8px;padding:8px 12px;margin-bottom:12px">
             <div style="font-size:11px;font-weight:700;color:var(--tx2)">
               💵 الراتب: <strong>${fmt(emp.baseSalary)}</strong> د.أ
             </div>
             <div style="font-size:11px;font-weight:800;
-                        color:${emp.monthSalaryPaid ? 'var(--gr)' : emp.monthSalaryPending ? 'var(--am)' : '#9a4500'}">
+                        color:${(emp.monthSalaryPaid || emp.monthSalaryCovered) ? 'var(--gr)' : 'var(--am)'}">
               ${emp.monthSalaryPaid
               ? '✅ راتب الشهر مدفوع'
+              : emp.monthSalaryCovered
+                ? `✅ مغطّى من السلفة — رصيد متبقٍ ${fmt(emp.advanceBalance)} د.أ`
               : emp.monthSalaryPending
-                ? '🕐 راتب الشهر غير مدفوع بعد'
+                ? `${emp.monthSalaryPartial ? '🟡 مدفوع جزئياً' : '🕐 غير مدفوع'} — المتبقي ${fmt(emp.monthRemaining)} د.أ`
                 : `المتبقي هذا الشهر: ${fmt(emp.monthRemaining)} د.أ`}
             </div>
           </div>` : ''}
@@ -9432,20 +9480,25 @@ async function viewEmployeeStatement(userId, employeeName) {
     const el = document.getElementById('emp-stmt-content');
     if (!el) return;
 
-    const salaries  = data.salaries  || [];
+    const salaries  = applyAdvancesToSalaries(data.salaries || [], data.advances || []);
     const advances  = data.advances  || [];
     const totalSal  = parseFloat(data.total_salary   || 0);
     const totalAdv  = parseFloat(data.total_advances || 0);
-    const net       = parseFloat(data.net_balance    || 0);
+    const appliedAdvances = salaries.reduce((sum, s) => sum + Number(s.advance_applied || 0), 0);
+    const salaryDue = salaries
+      .filter(s => s.status !== 'paid')
+      .reduce((sum, s) => sum + Number(s.effective_remaining || 0), 0);
+    const advanceBalance = Math.max(totalAdv - appliedAdvances, 0);
+    const net = salaryDue - advanceBalance;
 
     const salRows = salaries.map(s => `
       <tr>
         <td>${fmtDate(s.salary_month)}</td>
         <td style="color:var(--gr);font-weight:700">+${fmt(s.salary_amount)} د.أ</td>
-        <td><span style="background:${s.status==='paid'?'var(--grl)':'var(--aml)'};
-                         color:${s.status==='paid'?'var(--gr)':'var(--am)'};
+        <td><span style="background:${(s.status==='paid'||s.effective_status==='covered_by_advance')?'var(--grl)':'var(--aml)'};
+                         color:${(s.status==='paid'||s.effective_status==='covered_by_advance')?'var(--gr)':'var(--am)'};
                          padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">
-          ${s.status === 'paid' ? 'مدفوع' : 'معلّق'}
+          ${s.status === 'paid' ? 'مدفوع' : s.effective_status === 'covered_by_advance' ? 'مغطّى من السلفة' : s.effective_status === 'partial' ? `جزئي — متبقٍ ${fmt(s.effective_remaining)}` : 'معلّق'}
         </span></td>
         <td style="font-size:12px;color:var(--tx3)">${fmtDate(s.paid_date)}</td>
         <td style="font-size:12px;color:var(--tx2)">${escHtml(s.notes || '—')}</td>
@@ -9479,7 +9532,7 @@ async function viewEmployeeStatement(userId, employeeName) {
           <div style="font-size:22px;font-weight:800;color:var(--rd)">${fmt(totalAdv)} د.أ</div>
         </div>
         <div style="background:${net>=0?'var(--grl)':'var(--rdl,#fff0f0)'};border-radius:12px;padding:14px;text-align:center">
-          <div style="font-size:11px;color:${net>=0?'var(--gr)':'var(--rd)'};font-weight:700;margin-bottom:4px">الصافي المستحق</div>
+          <div style="font-size:11px;color:${net>=0?'var(--gr)':'var(--rd)'};font-weight:700;margin-bottom:4px">${net >= 0 ? 'مستحق للموظف' : 'رصيد سلفة على الموظف'}</div>
           <div style="font-size:22px;font-weight:800;color:${net>=0?'var(--gr)':'var(--rd)'}">${fmt(Math.abs(net))} د.أ</div>
         </div>
       </div>
@@ -9527,7 +9580,7 @@ async function viewEmployeeStatement(userId, employeeName) {
           <button class="btn btn-ghost btn-sm"
             onclick="closeModal(); openAdvanceModal('${userId}', ${jsString(employeeName)})">+ سلفة</button>
         ` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="printEmployeeStatement(${jsString(employeeName)}, ${jsString(JSON.stringify(data))})">🖨️ طباعة</button>
+        <button class="btn btn-ghost btn-sm" onclick="printEmployeeStatement(${jsString(employeeName)}, ${jsString(JSON.stringify({ ...data, salaries, net_balance: net }))})">🖨️ طباعة</button>
         <button class="btn btn-ghost btn-sm" onclick="closeModal()">إغلاق</button>
       </div>
     `;
@@ -9545,7 +9598,7 @@ function printEmployeeStatement(name, data) {
   const salRows = salaries.map(s =>
     `<tr><td>${s.salary_month ? s.salary_month.split('T')[0] : '—'}</td>
      <td style="color:green">${Number(s.salary_amount||0).toFixed(3)} د.أ</td>
-     <td>${s.status==='paid'?'مدفوع':'معلّق'}</td>
+     <td>${s.status==='paid'?'مدفوع':s.effective_status==='covered_by_advance'?'مغطّى من السلفة':s.effective_status==='partial'?`جزئي — متبقٍ ${Number(s.effective_remaining||0).toFixed(3)}`:'معلّق'}</td>
      <td>${escHtml(s.notes||'—')}</td></tr>`
   ).join('') || '<tr><td colspan="4" style="text-align:center">لا توجد رواتب</td></tr>';
 
