@@ -141,7 +141,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
             async with conn.transaction():
                 if data.supplier_id is not None:
                     supplier_exists = await conn.fetchval(
-                        "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
+                        "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1::int)",
                         data.supplier_id,
                     )
 
@@ -167,7 +167,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                     product_uuid = safe_uuid(item.product_id)
 
                     product_exists = await conn.fetchval(
-                        "SELECT EXISTS(SELECT 1 FROM products WHERE id=$1)",
+                        "SELECT EXISTS(SELECT 1 FROM products WHERE id=$1::uuid)",
                         product_uuid,
                     )
 
@@ -182,7 +182,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                 purchase = await conn.fetchrow(
                     """
                     INSERT INTO purchases (supplier_id, invoice_number, date, total, notes, created_by, status)
-                    VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+                    VALUES ($1::int, $2, $3, $4, $5, $6::int, 'pending')
                     RETURNING *
                     """,
                     data.supplier_id,
@@ -198,7 +198,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
                     await conn.execute(
                         """
                         INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price)
-                        VALUES ($1, $2, $3, $4)
+                        VALUES ($1::int, $2::uuid, $3, $4)
                         """,
                         purchase["id"],
                         product_uuid,
@@ -232,7 +232,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
         async with pool.acquire() as conn:
             async with conn.transaction():
                 purchase = await conn.fetchrow(
-                    "SELECT * FROM purchases WHERE id=$1 FOR UPDATE",
+                    "SELECT * FROM purchases WHERE id=$1::int FOR UPDATE",
                     purchase_id,
                 )
 
@@ -259,7 +259,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
 
                 for item in items:
                     product = await conn.fetchrow(
-                        "SELECT id, name, current_stock FROM products WHERE id=$1 FOR UPDATE",
+                        "SELECT id, name, current_stock FROM products WHERE id=$1::uuid FOR UPDATE",
                         item["product_id"],
                     )
 
@@ -285,7 +285,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                             """
                             UPDATE products
                             SET current_stock=$1, cost_price=$2, base_price=$2
-                            WHERE id=$3
+                            WHERE id=$3::uuid
                             """,
                             new_stock,
                             new_cost_price,
@@ -293,7 +293,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                         )
                     else:
                         await conn.execute(
-                            "UPDATE products SET current_stock=$1 WHERE id=$2",
+                            "UPDATE products SET current_stock=$1 WHERE id=$2::uuid",
                             new_stock,
                             item["product_id"],
                         )
@@ -303,7 +303,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                         INSERT INTO stock_movements
                           (product_id, type, quantity, source_type, source_id, notes, created_by)
                         VALUES
-                          ($1, 'in', $2, 'purchase', $3, $4, $5)
+                          ($1::uuid, 'in', $2, 'purchase', $3::int, $4, $5::int)
                         """,
                         item["product_id"],
                         quantity,
@@ -313,7 +313,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
 
                 updated_purchase = await conn.fetchrow(
-                    "UPDATE purchases SET status='received' WHERE id=$1 RETURNING *",
+                    "UPDATE purchases SET status='received' WHERE id=$1::int RETURNING *",
                     purchase_id,
                 )
 
@@ -346,7 +346,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
         async with pool.acquire() as conn:
             async with conn.transaction():
                 purchase = await conn.fetchrow(
-                    "SELECT * FROM purchases WHERE id=$1 FOR UPDATE",
+                    "SELECT * FROM purchases WHERE id=$1::int FOR UPDATE",
                     purchase_id,
                 )
 
@@ -357,7 +357,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
 
                 if data.supplier_id is not None:
                     supplier_exists = await conn.fetchval(
-                        "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
+                        "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1::int)",
                         data.supplier_id,
                     )
                     if not supplier_exists:
@@ -370,12 +370,12 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                     )
                     for item in old_items:
                         await conn.execute(
-                            "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
+                            "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2::uuid",
                             float(item["quantity"] or 0),
                             item["product_id"],
                         )
                     await conn.execute(
-                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1::int",
                         purchase_id,
                     )
 
@@ -399,7 +399,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
 
                     product_uuid = safe_uuid(item.product_id)
                     product_exists = await conn.fetchval(
-                        "SELECT EXISTS(SELECT 1 FROM products WHERE id=$1)",
+                        "SELECT EXISTS(SELECT 1 FROM products WHERE id=$1::uuid)",
                         product_uuid,
                     )
                     if not product_exists:
@@ -413,7 +413,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                     await conn.execute(
                         """
                         INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price)
-                        VALUES ($1, $2, $3, $4)
+                        VALUES ($1::int, $2::uuid, $3, $4)
                         """,
                         purchase_id,
                         product_uuid,
@@ -428,7 +428,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                             UPDATE products
                             SET current_stock = current_stock + $1
                             """ + (", cost_price = $3, base_price = $3" if new_cost > 0 else "") + """
-                            WHERE id = $2
+                            WHERE id = $2::uuid
                             """,
                             quantity,
                             product_uuid,
@@ -438,7 +438,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                             """
                             INSERT INTO stock_movements
                               (product_id, type, quantity, source_type, source_id, notes, created_by)
-                            VALUES ($1, 'in', $2, 'purchase', $3, $4, $5)
+                            VALUES ($1::uuid, 'in', $2, 'purchase', $3::int, $4, $5::int)
                             """,
                             product_uuid,
                             quantity,
@@ -455,8 +455,8 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                 updated = await conn.fetchrow(
                     """
                     UPDATE purchases
-                    SET supplier_id=$1, invoice_number=$2, date=$3, total=$4, notes=$5
-                    WHERE id=$6
+                    SET supplier_id=$1::int, invoice_number=$2, date=$3, total=$4, notes=$5
+                    WHERE id=$6::int
                     RETURNING *
                     """,
                     data.supplier_id,
@@ -499,7 +499,7 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
         async with pool.acquire() as conn:
             async with conn.transaction():
                 purchase = await conn.fetchrow(
-                    "SELECT * FROM purchases WHERE id=$1 FOR UPDATE",
+                    "SELECT * FROM purchases WHERE id=$1::int FOR UPDATE",
                     purchase_id,
                 )
 
@@ -515,19 +515,19 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
                     for item in old_items:
                         await conn.execute(
-                            "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
+                            "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2::uuid",
                             float(item["quantity"] or 0),
                             item["product_id"],
                         )
                     await conn.execute(
-                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1::int",
                         purchase_id,
                     )
 
                 await conn.execute(
                     "DELETE FROM purchase_items WHERE purchase_id=$1::int", purchase_id
                 )
-                await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
+                await conn.execute("DELETE FROM purchases WHERE id=$1::int", purchase_id)
 
                 try:
                     await conn.execute(
