@@ -53,16 +53,19 @@ def require_warehouse_editor(user):
 
 
 async def insert_audit(conn, user, action: str, detail: str):
-    await conn.execute(
-        """
-        INSERT INTO audit_log (user_id, user_name, action, detail)
-        VALUES ($1, $2, $3, $4)
-        """,
-        user.get("id"),
-        user.get("full_name") or user.get("username") or "مستخدم",
-        action,
-        detail,
-    )
+    try:
+        await conn.execute(
+            """
+            INSERT INTO audit_log (user_id, user_name, action, detail)
+            VALUES ($1, $2, $3, $4)
+            """,
+            user.get("id"),
+            user.get("full_name") or user.get("username") or "مستخدم",
+            action,
+            detail,
+        )
+    except Exception:
+        pass
 
 
 async def ensure_category_exists(conn, category_id: Optional[int]):

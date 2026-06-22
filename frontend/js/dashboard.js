@@ -1058,12 +1058,12 @@ function renderClientRow(cl) {
     <td>${riskLabel(cl.risk_level)}</td>
     <td>
       <div style="display:flex; gap:6px; flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="viewClientStatement(${cl.id}, ${jsString(cl.name)})">📄 كشف تفصيلي</button>
+        <button class="btn btn-ghost btn-sm" onclick="viewClientStatement('${cl.id}', ${jsString(cl.name)})">📄 كشف تفصيلي</button>
         ${isAccountant() ? `
-          <button class="btn btn-primary btn-sm" onclick="openQuickPayment(${cl.id}, ${jsString(cl.name)})">💰 قبض</button>
-          <button class="btn btn-ghost btn-sm" onclick="openEditClient(${cl.id})">✏️</button>
+          <button class="btn btn-primary btn-sm" onclick="openQuickPayment('${cl.id}', ${jsString(cl.name)})">💰 قبض</button>
+          <button class="btn btn-ghost btn-sm" onclick="openEditClient('${cl.id}')">✏️</button>
         ` : ''}
-        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteClient(${cl.id}, ${jsString(cl.name)})">🗑️</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteClient('${cl.id}', ${jsString(cl.name)})">🗑️</button>` : ''}
       </div>
     </td>
   </tr>`;
@@ -1110,7 +1110,7 @@ function openClientModal(data = null) {
       <input class="form-input" id="cl_phone" value="${escHtml(data?.phone || '')}" placeholder="07X XXXX XXXX">
     </div>
     <div style="display:flex; gap:10px; margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="${isEdit ? `saveEditClient(${data.id})` : 'saveNewClient()'}">
+      <button class="btn btn-primary" style="flex:1" onclick="${isEdit ? `saveEditClient('${data.id}')` : 'saveNewClient()'}">
         ${isEdit ? 'حفظ التعديلات' : 'إضافة العميل'}
       </button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
@@ -1171,9 +1171,9 @@ async function saveEditClient(id) {
     });
     // preserve balance from cache
     if (window._clientsCache) {
-      const cached = window._clientsCache.find(c => c.id === id);
+      const cached = window._clientsCache.find(c => String(c.id) === String(id));
       if (cached) updated.balance = cached.balance;
-      const idx = window._clientsCache.findIndex(c => c.id === id);
+      const idx = window._clientsCache.findIndex(c => String(c.id) === String(id));
       if (idx !== -1) window._clientsCache[idx] = { ...window._clientsCache[idx], ...updated };
     }
     toast('تم تحديث بيانات العميل ✅', 'success');
@@ -1397,8 +1397,8 @@ function _invoiceActionButtons(inv) {
   if (wfStatus === 'pending') {
     if (isAdmin()) {
       html += `
-        <button class="btn btn-success btn-sm" onclick="approveInvoice(${inv.id})">✅ اعتماد</button>
-        <button class="btn btn-danger btn-sm"  onclick="rejectInvoiceModal(${inv.id})">✗ رفض</button>
+        <button class="btn btn-success btn-sm" onclick="approveInvoice('${inv.id}')">✅ اعتماد</button>
+        <button class="btn btn-danger btn-sm"  onclick="rejectInvoiceModal('${inv.id}')">✗ رفض</button>
 <button class="btn btn-ghost btn-sm" onclick="showInvoiceDetails(${jsString(inv.id)})">📄 تفاصيل</button>      `;
     }
     // Anyone with accountant+ role or the creator can edit a pending invoice
@@ -1406,7 +1406,7 @@ function _invoiceActionButtons(inv) {
       html += `<button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>`;
     }
     // Creator or admin can delete pending
-    html += `<button class="btn btn-ghost btn-sm" onclick="deleteInvoice(${inv.id})">🗑️</button>`;
+    html += `<button class="btn btn-ghost btn-sm" onclick="deleteInvoice('${inv.id}')">🗑️</button>`;
 
   } else if (wfStatus === 'rejected') {
     html += `
@@ -1415,7 +1415,7 @@ function _invoiceActionButtons(inv) {
       </span>
     `;
     if (isAdmin()) {
-      html += `<button class="btn btn-danger btn-sm" onclick="deleteInvoice(${inv.id})">🗑️</button>`;
+      html += `<button class="btn btn-danger btn-sm" onclick="deleteInvoice('${inv.id}')">🗑️</button>`;
     }
 
   } else {
@@ -1427,7 +1427,7 @@ function _invoiceActionButtons(inv) {
       `;
     }
     if (isAdmin()) {
-      html += `<button class="btn btn-danger btn-sm" onclick="deleteInvoice(${inv.id})">🗑️</button>`;
+      html += `<button class="btn btn-danger btn-sm" onclick="deleteInvoice('${inv.id}')">🗑️</button>`;
     }
   }
 
@@ -1452,8 +1452,8 @@ function showInvoiceDetails(invoiceId) {
     }
     if (isAdmin()) {
       btns += `
-        <button class="btn btn-success" onclick="closeModal(); approveInvoice(${inv.id})">✅ اعتماد</button>
-        <button class="btn btn-danger"  onclick="closeModal(); rejectInvoiceModal(${inv.id})">✗ رفض</button>`;
+        <button class="btn btn-success" onclick="closeModal(); approveInvoice('${inv.id}')">✅ اعتماد</button>
+        <button class="btn btn-danger"  onclick="closeModal(); rejectInvoiceModal('${inv.id}')">✗ رفض</button>`;
     }
     if (btns) {
       actionsHtml = `
@@ -2751,7 +2751,7 @@ async function saveInvoice() {
       }
 
       result.client_name = result.client_name ||
-        (window._clientsCache || []).find(c => c.id === result.client_id)?.name || '—';
+        (window._clientsCache || []).find(c => String(c.id) === String(result.client_id))?.name || '—';
       // Enrich attributed_employee_name from local cache for in-place row update
       if (result.attributed_employee_id && !result.attributed_employee_name) {
         const emp = (window._employeesCache || []).find(
@@ -2783,7 +2783,7 @@ async function saveInvoice() {
 }
 
 async function deleteInvoice(id) {
-  const inv = (window._invoicesCache || []).find(i => i.id === id || i.id === Number(id));
+  const inv = (window._invoicesCache || []).find(i => String(i.id) === String(id) || i.id === Number(id));
   const isApproved = !inv || (inv.status || 'approved') === 'approved';
   const itemCount = inv?.items?.length || 0;
   const lines = [
@@ -2830,7 +2830,7 @@ async function approveInvoice(id) {
 
     // Update cache
     if (window._invoicesCache) {
-      const idx = window._invoicesCache.findIndex(i => i.id === id);
+      const idx = window._invoicesCache.findIndex(i => String(i.id) === String(id));
       if (idx !== -1) window._invoicesCache[idx] = { ...window._invoicesCache[idx], ...result };
     }
 
@@ -2882,7 +2882,7 @@ function rejectInvoiceModal(id) {
       <input class="form-input" id="rej_reason" placeholder="مثال: بيانات الصنف غير صحيحة، الكمية تجاوزت المخزون..." autofocus>
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-danger" style="flex:1" id="rej-confirm-btn" onclick="doRejectInvoice(${id})">
+      <button class="btn btn-danger" style="flex:1" id="rej-confirm-btn" onclick="doRejectInvoice('${id}')">
         تأكيد الرفض
       </button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
@@ -2907,7 +2907,7 @@ async function doRejectInvoice(id) {
 
     // Update cache
     if (window._invoicesCache) {
-      const idx = window._invoicesCache.findIndex(i => i.id === id);
+      const idx = window._invoicesCache.findIndex(i => String(i.id) === String(id));
       if (idx !== -1) window._invoicesCache[idx] = { ...window._invoicesCache[idx], ...result };
     }
 
@@ -2942,7 +2942,7 @@ function renderPaymentRow(p) {
     <td>${escHtml(p.invoice_number || '—')}</td>
     <td>${escHtml(p.employee_name || '—')}</td>
     <td style="color:var(--tx2);font-size:12px">${escHtml(p.notes || '—')}</td>
-    <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment(${p.id})">🗑️</button>` : ''}</td>
+    <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${p.id}')">🗑️</button>` : ''}</td>
   </tr>`;
 }
 async function renderPayments(container) {
@@ -3109,7 +3109,7 @@ async function savePayment() {
     closeModal();
 
     // Attach client name from cache
-    result.client_name = (window._clientsCache || []).find(c => c.id === result.client_id)?.name || '—';
+    result.client_name = (window._clientsCache || []).find(c => String(c.id) === String(result.client_id))?.name || '—';
     result.payment_method = document.getElementById('pay_method')?.value || 'cash';
 
     if (window._paymentInvoiceId) {
@@ -3132,7 +3132,7 @@ async function savePayment() {
   }
 }
 async function deletePayment(id) {
-  const p = (window._paymentsCache || []).find(x => x.id === id || x.id === Number(id));
+  const p = (window._paymentsCache || []).find(x => String(x.id) === String(id) || x.id === Number(id));
   const lines = [
     `المبلغ: ${p ? fmt(p.amount) + ' د.أ' : '—'}`,
     `العميل: ${p?.client_name || '—'}`,
@@ -3173,9 +3173,9 @@ function renderCheckRow(ch) {
     <td>
       <div style="display:flex;gap:6px">
         ${ch.status === 'pending' && isAccountant() ? `
-          <button class="btn btn-success btn-sm" onclick="updateCheck(${ch.id},'cashed')">✅ تحصيل</button>
-          <button class="btn btn-ghost btn-sm" onclick="updateCheck(${ch.id},'returned')">↩️ راجع</button>` : ''}
-        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCheck(${ch.id})">🗑️</button>` : ''}
+          <button class="btn btn-success btn-sm" onclick="updateCheck('${ch.id}','cashed')">✅ تحصيل</button>
+          <button class="btn btn-ghost btn-sm" onclick="updateCheck('${ch.id}','returned')">↩️ راجع</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCheck('${ch.id}')">🗑️</button>` : ''}
       </div>
     </td>
   </tr>`;
@@ -3361,7 +3361,7 @@ async function updateCheck(id, status) {
 }
 
 async function deleteCheck(id) {
-  const ch = (window._checksCache || []).find(x => x.id === id || x.id === Number(id));
+  const ch = (window._checksCache || []).find(x => String(x.id) === String(id) || x.id === Number(id));
   const lines = [
     `رقم الشيك: ${ch?.check_number || '—'}`,
     `المبلغ: ${ch ? fmt(ch.amount) + ' د.أ' : '—'}`,
@@ -3463,10 +3463,10 @@ async function renderPurchases(container) {
                 <td>${purchaseStatusBadge(p.status)}</td>
                 <td>
                   <div style="display:flex; gap:6px; flex-wrap:wrap">
-                    <button class="btn btn-ghost btn-sm" onclick="viewPurchaseItems(${p.id})">📋 الأصناف</button>
-                    ${isAccountant() ? `<button class="btn btn-ghost btn-sm" onclick="openEditPurchaseModal(${p.id})">✏️ تعديل</button>` : ''}
-                    ${p.status === 'pending' && isAccountant() ? `<button class="btn btn-success btn-sm" onclick="confirmReceive(${p.id})">✅ استلام</button>` : ''}
-                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePurchase(${p.id})">🗑️</button>` : ''}
+                    <button class="btn btn-ghost btn-sm" onclick="viewPurchaseItems('${p.id}')">📋 الأصناف</button>
+                    ${isAccountant() ? `<button class="btn btn-ghost btn-sm" onclick="openEditPurchaseModal('${p.id}')">✏️ تعديل</button>` : ''}
+                    ${p.status === 'pending' && isAccountant() ? `<button class="btn btn-success btn-sm" onclick="confirmReceive('${p.id}')">✅ استلام</button>` : ''}
+                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePurchase('${p.id}')">🗑️</button>` : ''}
                   </div>
                 </td>
               </tr>
@@ -3705,7 +3705,7 @@ async function saveQuickSupplier() {
 async function viewPurchaseItems(id) {
   try {
     const purchases = await API.getPurchases();
-    const p = (purchases || []).find(x => x.id === id);
+    const p = (purchases || []).find(x => String(x.id) === String(id));
     const items = p?.items || [];
 
     openModal(`
@@ -3760,7 +3760,7 @@ async function openEditPurchaseModal(purchaseId) {
     ]);
   } catch (e) { toast(e.message, 'error'); return; }
 
-  const p = (purchases || []).find(x => x.id === purchaseId);
+  const p = (purchases || []).find(x => String(x.id) === String(purchaseId));
   if (!p) { toast('الفاتورة غير موجودة', 'error'); return; }
 
   window._editPurchaseProducts = products || [];
@@ -4035,14 +4035,14 @@ async function renderWarehouse(container) {
 
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               ${canEditWarehouseStructure() ? `
-                  <button class="btn btn-ghost btn-sm" onclick="openEditCategoryModal(${cat.id})">✏️</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openEditCategoryModal('${cat.id}')">✏️</button>
                     ` : ''}
               ${canManageWarehouse() ? `
-                  <button class="btn btn-primary btn-sm" onclick="openAddProductModal(${cat.id})">+ صنف</button>
+                  <button class="btn btn-primary btn-sm" onclick="openAddProductModal('${cat.id}')">+ صنف</button>
                 ` : ''}
-              ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryConfirm(${cat.id})">🗑️</button>` : ''}
-              ${canManageWarehouse() ? `<button class="btn btn-ghost btn-sm" onclick="openCategoryInvestmentsModal(${cat.id})">💹 المستثمرون</button>` : ''}
-              <button class="btn btn-ghost btn-sm" onclick="openCategoryFolder(${cat.id})">📂 فتح</button>
+              ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryConfirm('${cat.id}')">🗑️</button>` : ''}
+              ${canManageWarehouse() ? `<button class="btn btn-ghost btn-sm" onclick="openCategoryInvestmentsModal('${cat.id}')">💹 المستثمرون</button>` : ''}
+              <button class="btn btn-ghost btn-sm" onclick="openCategoryFolder('${cat.id}')">📂 فتح</button>
             </div>
 
           </div>
@@ -4376,7 +4376,7 @@ async function openCategoryFolder(catId) {
         </div>
         ${canManageWarehouse()
       ? `<button class="btn btn-primary btn-sm"
-               onclick="closeModal(); openAddProductModal(${catId})">+ إضافة صنف</button>`
+               onclick="closeModal(); openAddProductModal('${catId}')">+ إضافة صنف</button>`
       : ''}
       </div>
     </div>
@@ -4461,8 +4461,8 @@ async function openCategoryFolder(catId) {
                   <div style="display:flex;gap:4px;flex-wrap:wrap">
                     <button class="btn btn-ghost btn-sm" onclick="openProductDetails('${p.id}')">🔎</button>
                     <button class="btn btn-ghost btn-sm" onclick="viewMovements('${p.id}', ${jsString(p.name)})">📊</button>
-                    ${canManageWarehouse() ? `<button class="btn btn-ghost btn-sm" onclick="openEditProduct('${p.id}', ${catId})">✏️</button>` : ''}
-                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteProduct('${p.id}', ${catId}, this)">🗑️</button>` : ''}
+                    ${canManageWarehouse() ? `<button class="btn btn-ghost btn-sm" onclick="openEditProduct('${p.id}', '${catId}')">✏️</button>` : ''}
+                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteProduct('${p.id}', '${catId}', this)">🗑️</button>` : ''}
                   </div>
                 </td>
               </tr>
@@ -4749,7 +4749,7 @@ async function exportWarehouseExcel() {
   }
 }
 async function deleteCategoryConfirm(id) {
-  const cat = (window._whCategoriesCache || []).find(c => c.id === id || c.id === Number(id));
+  const cat = (window._whCategoriesCache || []).find(c => String(c.id) === String(id) || c.id === Number(id));
   const prodCount = cat?.product_count || 0;
   const lines = [
     `الفئة: ${cat?.name || id}`,
@@ -4775,7 +4775,7 @@ async function deleteCategoryConfirm(id) {
 }
 
 function openEditCategoryModal(id) {
-  const cat = (window._whCategoriesCache || []).find(c => c.id === id);
+  const cat = (window._whCategoriesCache || []).find(c => String(c.id) === String(id));
   if (!cat) {
     toast('لم يتم تحميل بيانات الفئة', 'error');
     return;
@@ -4797,7 +4797,7 @@ function openEditCategoryModal(id) {
       </div>
     </div>
     <div style="display:flex; gap:10px; margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveEditCategory(${id})">حفظ التعديلات</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditCategory('${id}')">حفظ التعديلات</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -5517,8 +5517,8 @@ async function viewWarehouseInvoices() {
             <td style="font-size:12px; color:var(--tx3)">${fmtDate(inv.date)}</td>
             <td>
               <div style="display:flex; gap:4px">
-                <button class="btn btn-ghost btn-sm" onclick="viewWarehouseInvoiceItems(${inv.id})">📋</button>
-                ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteWarehouseInvoice(${inv.id})">🗑️</button>` : ''}
+                <button class="btn btn-ghost btn-sm" onclick="viewWarehouseInvoiceItems('${inv.id}')">📋</button>
+                ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteWarehouseInvoice('${inv.id}')">🗑️</button>` : ''}
               </div>
             </td>
           </tr>`).join('') : `<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--tx3)">لا توجد فواتير</td></tr>`}
@@ -5708,7 +5708,7 @@ async function saveWarehouseInvoice() {
 async function viewWarehouseInvoiceItems(id) {
   try {
     const invoices = await API.getWarehouseInvoices();
-    const inv = (invoices || []).find(x => x.id === id);
+    const inv = (invoices || []).find(x => String(x.id) === String(id));
     const items = inv?.items || [];
 
     openModal(`
@@ -5837,7 +5837,7 @@ async function renderUsers(container) {
                     <div style="display:flex;gap:6px">
                       <button class="btn btn-ghost btn-sm" onclick="openEditUserModal(${jsString(JSON.stringify(u))})">✏️</button>
                       ${u.id !== getUser()?.id
-                        ? `<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id}, ${jsString(u.full_name)})">🗑️</button>`
+                        ? `<button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}', ${jsString(u.full_name)})">🗑️</button>`
                         : '<span style="font-size:12px; color:var(--tx3)">أنت</span>'}
                     </div>
                   </td>
@@ -6078,7 +6078,7 @@ async function openEditUserModal(u) {
     ${shopAccessHtml('eu', shops, u.shop_id)}
     ${permissionCheckboxesHtml('eu', Array.isArray(u.permissions) ? u.permissions : null)}
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveEditUser(${u.id})">حفظ التعديلات</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditUser('${u.id}')">حفظ التعديلات</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -6971,7 +6971,7 @@ async function renderRecipients(container) {
                     </button>
                     ${isAccountant() ? `
                     <button class="btn btn-primary btn-sm"
-                      onclick="openRecipientPayment(${jsString(r.name)}, ${r.client_id || 'null'})">
+                      onclick="openRecipientPayment(${jsString(r.name)}, '${r.client_id || 'null'}')">
                       💰 قبض
                     </button>` : ''}
                   </div>
@@ -7055,7 +7055,7 @@ async function viewRecipientStatement(name) {
                 </td>
                 <td style="padding:10px 12px">
                   ${!isInv && isAdmin()
-          ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment(${t.id}, ${jsString(name)})">🗑️</button>`
+          ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${t.id}', ${jsString(name)})">🗑️</button>`
           : ''}
                 </td>
               </tr>`;
@@ -7067,7 +7067,7 @@ async function viewRecipientStatement(name) {
       <div style="display:flex;gap:8px;margin-top:14px">
         ${isAccountant() ? `
         <button class="btn btn-primary btn-sm"
-          onclick="closeModal(); openRecipientPayment(${jsString(name)}, ${txs.find(t => t.client_id)?.client_id || 'null'})">
+          onclick="closeModal(); openRecipientPayment(${jsString(name)}, '${txs.find(t => t.client_id)?.client_id || 'null'}')">
           💰 تسجيل دفعة
         </button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="closeModal()">إغلاق</button>
@@ -7238,7 +7238,7 @@ async function viewSupplierStatement(id, name) {
                 </td>
                 <td style="padding:10px 12px">
                   ${t.type === 'payment' && isAdmin()
-        ? `<button class="btn btn-danger btn-sm" onclick="deleteSupPayment(${t.id}, '${id}', ${jsString(name)})">🗑️</button>`
+        ? `<button class="btn btn-danger btn-sm" onclick="deleteSupPayment('${t.id}', '${id}', ${jsString(name)})">🗑️</button>`
         : ''}
                 </td>
               </tr>
@@ -7624,8 +7624,8 @@ async function renderExpenses(container) {
                 <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
                 <td>${escHtml(e.notes || '—')}</td>
                 <td><div style="display:flex;gap:6px">
-                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editExpenseById(${e.id})">✏️</button>` : ''}
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense(${e.id})">🗑️</button>` : ''}
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editExpenseById('${e.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense('${e.id}')">🗑️</button>` : ''}
                 </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد مصاريف', 7)}
@@ -7670,8 +7670,8 @@ async function renderExpenses(container) {
                 </td>
                 <td>${escHtml(s.notes || '—')}</td>
                 <td><div style="display:flex;gap:6px">
-                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editSalaryById(${s.id})">✏️</button>` : ''}
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary(${s.id})">🗑️</button>` : ''}
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editSalaryById('${s.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteSalary('${s.id}')">🗑️</button>` : ''}
                 </div></td>
               </tr>`;
       }).join('') : emptyRow('لا توجد رواتب', 7)}
@@ -7700,8 +7700,8 @@ async function renderExpenses(container) {
                 <td>${escHtml(a.advance_type || 'advance')}</td>
                 <td>${escHtml(a.notes || '—')}</td>
                 <td><div style="display:flex;gap:6px">
-                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editAdvanceById(${a.id})">✏️</button>` : ''}
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromExpenses(${a.id})">🗑️</button>` : ''}
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editAdvanceById('${a.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromExpenses('${a.id}')">🗑️</button>` : ''}
                 </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد سلف', 6)}
@@ -7735,9 +7735,9 @@ async function renderExpenses(container) {
                 <td style="color:var(--am);font-weight:700">${r.pending_months_count || 0}</td>
                 <td>${escHtml(r.notes || '—')}</td>
                 <td><div style="display:flex;gap:6px;flex-wrap:wrap">
-                  <button class="btn btn-ghost btn-sm" onclick="openWarehouseRentPaymentsModal(${r.id})">📅 الأشهر</button>
-                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openWarehouseRentModal(${r.id})">✏️</button>` : ''}
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteWarehouseRentConfirm(${r.id})">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="openWarehouseRentPaymentsModal('${r.id}')">📅 الأشهر</button>
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openWarehouseRentModal('${r.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteWarehouseRentConfirm('${r.id}')">🗑️</button>` : ''}
                 </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد سجلات إيجار', 8)}
@@ -7826,7 +7826,7 @@ function openEditExpenseModal(e) {
       <input class="form-input" id="ee_notes" value="${escHtml(e.notes || '')}">
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveEditExpense(${e.id})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditExpense('${e.id}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -7899,7 +7899,7 @@ function openWarehouseRentModal(rentId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveWarehouseRent(${rentId ?? 'null'})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveWarehouseRent('${rentId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -7991,7 +7991,7 @@ async function openWarehouseRentPaymentsModal(rentId) {
                 <td style="font-size:12px;color:var(--tx3)">${p.paid_date ? fmtDate(p.paid_date) : '—'}</td>
                 <td>
                   <button class="btn ${p.status === 'paid' ? 'btn-ghost' : 'btn-primary'} btn-sm"
-                          onclick="toggleWarehouseRentPaymentUI(${rentId}, '${String(p.month).slice(0,10)}', '${p.status === 'paid' ? 'pending' : 'paid'}')">
+                          onclick="toggleWarehouseRentPaymentUI('${rentId}', '${String(p.month).slice(0,10)}', '${p.status === 'paid' ? 'pending' : 'paid'}')">
                     ${p.status === 'paid' ? 'تحديد كغير مدفوع' : 'تحديد كمدفوع'}
                   </button>
                 </td>
@@ -8002,7 +8002,7 @@ async function openWarehouseRentPaymentsModal(rentId) {
       </div>
 
       <div style="display:flex;gap:10px;margin-top:8px">
-        <button class="btn btn-primary" style="flex:1" onclick="printWarehouseRent(${rentId})">🖨️ طباعة</button>
+        <button class="btn btn-primary" style="flex:1" onclick="printWarehouseRent('${rentId}')">🖨️ طباعة</button>
         <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
       </div>
     `, '700px');
@@ -8120,7 +8120,7 @@ function openEditSalaryModal(s) {
       <input class="form-input" id="es_notes" value="${escHtml(s.notes || '')}">
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveEditSalary(${s.id})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditSalary('${s.id}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -8187,7 +8187,7 @@ function openEditAdvanceModal(a) {
       <input class="form-input" id="ea_notes" value="${escHtml(a.notes || '')}">
     </div>
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveEditAdvance(${a.id})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditAdvance('${a.id}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -8776,7 +8776,7 @@ async function renderEmployees(container) {
                     onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
             ${emp.id !== getUser()?.id
       ? `<button class="btn btn-danger btn-sm"
-                   onclick="deleteEmployee(${emp.id}, ${jsString(emp.full_name)})">🗑️</button>`
+                   onclick="deleteEmployee('${emp.id}', ${jsString(emp.full_name)})">🗑️</button>`
       : '<span style="font-size:11px;color:var(--tx3)">أنت</span>'}
           </div>
           ${emp.baseSalary > 0 ? `
@@ -8798,11 +8798,11 @@ async function renderEmployees(container) {
 
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm"
-              onclick="viewEmployeeStatement(${emp.id}, ${jsString(emp.full_name)})">📄 التفاصيل</button>
+              onclick="viewEmployeeStatement('${emp.id}', ${jsString(emp.full_name)})">📄 التفاصيل</button>
             <button class="btn btn-ghost btn-sm"
-              onclick="openSalaryForEmployee(${emp.id}, ${jsString(emp.full_name)})">💰 راتب</button>
+              onclick="openSalaryForEmployee('${emp.id}', ${jsString(emp.full_name)})">💰 راتب</button>
             <button class="btn btn-ghost btn-sm"
-              onclick="openAdvanceModal(${emp.id}, ${jsString(emp.full_name)})">➖ سلفة</button>
+              onclick="openAdvanceModal('${emp.id}', ${jsString(emp.full_name)})">➖ سلفة</button>
           </div>
         </div>
       `).join('') : `
@@ -8855,7 +8855,7 @@ function openSalaryForEmployee(userId, employeeName) {
 
     <div style="display:flex;gap:10px;margin-top:8px">
       <button class="btn btn-primary" style="flex:1"
-        onclick="saveSalaryForEmployee(${userId}, ${jsString(employeeName)})">
+        onclick="saveSalaryForEmployee('${userId}', ${jsString(employeeName)})">
         حفظ الراتب
       </button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
@@ -9089,7 +9089,7 @@ async function viewClientStatement(id, name) {
           ? `فاتورة #${escHtml(t.description || t.id)}
              <button class="btn btn-ghost btn-sm" title="طباعة الفاتورة بالتفاصيل"
                      style="font-size:10px;padding:1px 7px;margin-right:4px"
-                     onclick="printInvoiceById(${Number(t.id) || 0})">🖨️</button>`
+                     onclick="printInvoiceById('${Number(t.id) || 0}')">🖨️</button>`
           : `<span style="color:#057a55">مقبوضة</span>${t.notes
             ? ' — ' + escHtml(
               String(t.notes)
@@ -9155,7 +9155,7 @@ async function viewClientStatement(id, name) {
         </div>
         ${isAccountant() ? `
           <button class="btn btn-primary btn-sm"
-            onclick="openCheckModalForClient(${id}, ${jsString(name)})">+ إضافة شيك</button>` : ''}
+            onclick="openCheckModalForClient('${id}', ${jsString(name)})">+ إضافة شيك</button>` : ''}
       </div>
       <div style="border:1px solid var(--brd);border-radius:10px;overflow:hidden">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -9187,9 +9187,9 @@ async function viewClientStatement(id, name) {
               <td style="padding:8px 12px">${stBadge}</td>
               <td style="padding:8px 12px;white-space:nowrap">
                 ${ch.status === 'pending' && isAccountant() ? `
-                  <button class="btn btn-success btn-sm" onclick="updateCheckFromStatement(${ch.id},'cashed',${id},${jsString(name)})">✅</button>
-                  <button class="btn btn-ghost btn-sm" onclick="updateCheckFromStatement(${ch.id},'returned',${id},${jsString(name)})">↩️</button>` : ''}
-                ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCheckFromStatement(${ch.id},${id},${jsString(name)})">🗑️</button>` : ''}
+                  <button class="btn btn-success btn-sm" onclick="updateCheckFromStatement('${ch.id}','cashed','${id}',${jsString(name)})">✅</button>
+                  <button class="btn btn-ghost btn-sm" onclick="updateCheckFromStatement('${ch.id}','returned','${id}',${jsString(name)})">↩️</button>` : ''}
+                ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteCheckFromStatement('${ch.id}','${id}',${jsString(name)})">🗑️</button>` : ''}
               </td>
             </tr>`;
       }).join('') : `
@@ -9294,7 +9294,7 @@ async function viewEmployeeStatement(userId, employeeName) {
         <td style="font-size:12px;color:var(--tx2)">${escHtml(s.notes || '—')}</td>
         ${isAdmin() ? `<td style="white-space:nowrap">
           <button class="btn btn-ghost btn-sm" onclick="openEditSalaryModal(${jsString(JSON.stringify(s))})">✏️</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteSalaryFromStatement(${s.id}, ${userId}, ${jsString(employeeName)})">🗑️</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSalaryFromStatement('${s.id}', '${userId}', ${jsString(employeeName)})">🗑️</button>
         </td>` : '<td></td>'}
       </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد رواتب</td></tr>';
 
@@ -9306,7 +9306,7 @@ async function viewEmployeeStatement(userId, employeeName) {
         <td style="font-size:12px;color:var(--tx2)">${escHtml(a.notes || '—')}</td>
         ${isAdmin() ? `<td style="white-space:nowrap">
           <button class="btn btn-ghost btn-sm" onclick="openEditAdvanceModal(${jsString(JSON.stringify(a))})">✏️</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromStatement(${a.id}, ${userId}, ${jsString(employeeName)})">🗑️</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteAdvanceFromStatement('${a.id}', '${userId}', ${jsString(employeeName)})">🗑️</button>
         </td>` : '<td></td>'}
       </tr>`).join('') || '<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد سلف</td></tr>';
 
@@ -9366,9 +9366,9 @@ async function viewEmployeeStatement(userId, employeeName) {
       <div style="display:flex;gap:8px;margin-top:4px">
         ${isAccountant() ? `
           <button class="btn btn-primary btn-sm"
-            onclick="closeModal(); openSalaryForEmployee(${userId}, ${jsString(employeeName)})">+ راتب</button>
+            onclick="closeModal(); openSalaryForEmployee('${userId}', ${jsString(employeeName)})">+ راتب</button>
           <button class="btn btn-ghost btn-sm"
-            onclick="closeModal(); openAdvanceModal(${userId}, ${jsString(employeeName)})">+ سلفة</button>
+            onclick="closeModal(); openAdvanceModal('${userId}', ${jsString(employeeName)})">+ سلفة</button>
         ` : ''}
         <button class="btn btn-ghost btn-sm" onclick="printEmployeeStatement(${jsString(employeeName)}, ${jsString(JSON.stringify(data))})">🖨️ طباعة</button>
         <button class="btn btn-ghost btn-sm" onclick="closeModal()">إغلاق</button>
@@ -9748,9 +9748,9 @@ async function renderChinaInvestors(container) {
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(inv.notes || '—')}</td>
                 <td>
                   <div style="display:flex;gap:4px;flex-wrap:wrap">
-                    <button class="btn btn-ghost btn-sm" onclick="openChinaInvestorDetails(${inv.id})">📊 التفاصيل</button>
-                    <button class="btn btn-ghost btn-sm" onclick="openChinaInvestorModal(${inv.id})">✏️</button>
-                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaInvestorConfirm(${inv.id})">🗑️</button>` : ''}
+                    <button class="btn btn-ghost btn-sm" onclick="openChinaInvestorDetails('${inv.id}')">📊 التفاصيل</button>
+                    <button class="btn btn-ghost btn-sm" onclick="openChinaInvestorModal('${inv.id}')">✏️</button>
+                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaInvestorConfirm('${inv.id}')">🗑️</button>` : ''}
                   </div>
                 </td>
               </tr>
@@ -9788,7 +9788,7 @@ function openChinaInvestorModal(investorId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestor(${investorId ?? 'null'})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestor('${investorId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -9855,7 +9855,7 @@ async function openChinaInvestorDetails(investorId) {
       </div>
 
       <div style="display:flex; justify-content:flex-end; margin-bottom:10px">
-        <button class="btn btn-primary btn-sm" onclick="openChinaInvestorTransactionModal(${investorId})">+ حركة جديدة</button>
+        <button class="btn btn-primary btn-sm" onclick="openChinaInvestorTransactionModal('${investorId}')">+ حركة جديدة</button>
       </div>
 
       <div class="table-wrap">
@@ -9870,7 +9870,7 @@ async function openChinaInvestorDetails(investorId) {
                 <td style="color:${typeColor[t.type] || 'var(--tx)'};font-weight:700">${typeLabel[t.type] || t.type}</td>
                 <td style="font-weight:800">${fmt(t.amount)} د.أ</td>
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(t.notes || '—')}</td>
-                <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaInvestorTransaction(${t.id}, ${investorId})">🗑️</button>` : ''}</td>
+                <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaInvestorTransaction('${t.id}', '${investorId}')">🗑️</button>` : ''}</td>
               </tr>
             `).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد حركات</td></tr>`}
           </tbody>
@@ -9915,7 +9915,7 @@ function openChinaInvestorTransactionModal(investorId) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestorTransaction(${investorId})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestorTransaction('${investorId}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -9991,9 +9991,9 @@ async function renderChinaSuppliers(container) {
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.notes || '—')}</td>
               <td>
                 <div style="display:flex;gap:4px;flex-wrap:wrap">
-                  <button class="btn btn-ghost btn-sm" onclick="openChinaSupplierStatement(${s.id})">📊 التفاصيل</button>
-                  <button class="btn btn-ghost btn-sm" onclick="openChinaSupplierModal(${s.id})">✏️</button>
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSupplierConfirm(${s.id})">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaSupplierStatement('${s.id}')">📊 التفاصيل</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaSupplierModal('${s.id}')">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSupplierConfirm('${s.id}')">🗑️</button>` : ''}
                 </div>
               </td>
             </tr>
@@ -10030,7 +10030,7 @@ function openChinaSupplierModal(supplierId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSupplier(${supplierId ?? 'null'})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSupplier('${supplierId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -10174,7 +10174,7 @@ async function openChinaSupplierStatement(supplierId) {
       </div>
 
       <div style="display:flex;gap:10px;margin-top:8px">
-        <button class="btn btn-primary" style="flex:1" onclick="printChinaSupplierStatement(${supplierId})">🖨️ طباعة</button>
+        <button class="btn btn-primary" style="flex:1" onclick="printChinaSupplierStatement('${supplierId}')">🖨️ طباعة</button>
         <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
       </div>
     `, '800px');
@@ -10281,8 +10281,8 @@ async function renderChinaPayments(container) {
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.created_by_name || '—')}</td>
               <td>
                 <div style="display:flex;gap:4px">
-                  <button class="btn btn-ghost btn-sm" onclick="openChinaPaymentModal(${p.id})">✏️</button>
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPaymentConfirm(${p.id})">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaPaymentModal('${p.id}')">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPaymentConfirm('${p.id}')">🗑️</button>` : ''}
                 </div>
               </td>
             </tr>
@@ -10345,7 +10345,7 @@ function openChinaPaymentModal(paymentId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment(${paymentId ?? 'null'})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment('${paymentId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -10423,8 +10423,8 @@ async function renderChinaPurchases(container) {
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               <td>
                 <div style="display:flex;gap:4px">
-                  <button class="btn btn-ghost btn-sm" onclick="openChinaPurchaseModal(${p.id})">✏️</button>
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPurchaseConfirm(${p.id})">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaPurchaseModal('${p.id}')">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaPurchaseConfirm('${p.id}')">🗑️</button>` : ''}
                 </div>
               </td>
             </tr>
@@ -10499,7 +10499,7 @@ function openChinaPurchaseModal(purchaseId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase(${purchaseId ?? 'null'})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase('${purchaseId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -10579,8 +10579,8 @@ async function renderChinaSales(container) {
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.notes || '—')}</td>
               <td>
                 <div style="display:flex;gap:4px">
-                  <button class="btn btn-ghost btn-sm" onclick="openChinaSaleModal(${s.id})">✏️</button>
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSaleConfirm(${s.id})">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="openChinaSaleModal('${s.id}')">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteChinaSaleConfirm('${s.id}')">🗑️</button>` : ''}
                 </div>
               </td>
             </tr>
@@ -10648,7 +10648,7 @@ function openChinaSaleModal(saleId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale(${saleId ?? 'null'})">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale('${saleId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
@@ -10793,7 +10793,7 @@ async function renderInvestorsOverview(container) {
                 <td style="color:var(--bl);font-weight:700">${fmt(c.owner_share || 0)} د.أ</td>
                 <td style="color:var(--am);font-weight:700">${fmt(c.investors_pool || 0)} د.أ</td>
                 <td>
-                  <button class="btn btn-ghost btn-sm" onclick="openCategoryInvestmentsModal(${c.id})">📊 التفاصيل والمساهمات</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openCategoryInvestmentsModal('${c.id}')">📊 التفاصيل والمساهمات</button>
                 </td>
               </tr>
             `;
@@ -10855,7 +10855,7 @@ async function openCategoryInvestmentsModal(categoryId) {
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <h4 style="margin:0">مساهمات المستثمرين</h4>
-      <button class="btn btn-primary btn-sm" onclick="openAddInvestmentForm(${categoryId})">+ إضافة مستثمر</button>
+      <button class="btn btn-primary btn-sm" onclick="openAddInvestmentForm('${categoryId}')">+ إضافة مستثمر</button>
     </div>
     <div id="add-investment-form" style="margin-bottom:8px"></div>
 
@@ -10894,8 +10894,8 @@ async function openCategoryInvestmentsModal(categoryId) {
                   ${fmt(remaining)} د.أ
                 </td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap;min-width:80px">
-                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment(${categoryId}, ${s.investor_id})" title="حفظ">💾</button>
-                  ${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm(${categoryId}, ${inv.id}, ${s.investor_id})" title="حذف">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}')" title="حفظ">💾</button>
+                  ${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm('${categoryId}', '${inv.id}', '${s.investor_id}')" title="حذف">🗑️</button>` : ''}
                 </td>
               </tr>`;
   }).join('') : `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--tx3)">لا يوجد مستثمرون في هذه الفئة بعد</td></tr>`}
@@ -10932,7 +10932,7 @@ function openAddInvestmentForm(categoryId) {
         <label class="form-label" style="font-size:12px">المدفوع (د.أ)</label>
         <input class="form-input" type="number" step="0.001" min="0" id="new_inv_paid" value="0" style="font-size:13px;border-color:var(--gr)">
       </div>
-      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment(${categoryId}, null)" style="align-self:flex-end">إضافة</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null)" style="align-self:flex-end">إضافة</button>
     </div>
   `;
 }
@@ -11017,9 +11017,9 @@ async function renderInvestorsList(container) {
               <td style="font-size:12px;color:var(--tx3)">${escHtml(inv.notes || '—')}</td>
               <td>
                 <div style="display:flex;gap:4px;flex-wrap:wrap">
-                  <button class="btn btn-ghost btn-sm" onclick="openInvestorDetailsModal(${inv.id})">📊 التفاصيل</button>
-                  <button class="btn btn-ghost btn-sm" onclick="openInvestorModal(${inv.id})">✏️</button>
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteInvestorConfirm(${inv.id})">🗑️</button>` : ''}
+                  <button class="btn btn-ghost btn-sm" onclick="openInvestorDetailsModal('${inv.id}')">📊 التفاصيل</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openInvestorModal('${inv.id}')">✏️</button>
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteInvestorConfirm('${inv.id}')">🗑️</button>` : ''}
                 </div>
               </td>
             </tr>
@@ -11291,7 +11291,7 @@ async function openInvestorDetailsModal(investorId) {
     </div>
 
     <div style="margin-top:10px;display:flex;gap:8px">
-      <button class="btn btn-ghost btn-sm" onclick="openInvestorModal(${investorId})">✏️ تعديل المساهمات</button>
+      <button class="btn btn-ghost btn-sm" onclick="openInvestorModal('${investorId}')">✏️ تعديل المساهمات</button>
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
   `, '700px');

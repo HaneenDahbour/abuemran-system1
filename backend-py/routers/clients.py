@@ -42,17 +42,20 @@ def clean_text(value: Optional[str]) -> Optional[str]:
 
 
 async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail: str):
-    await conn.execute(
-        """
-        INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
-        VALUES ($1, $2, $3, 'client', $4, $5)
-        """,
-        user.get("id"),
-        user.get("full_name") or user.get("username") or "مستخدم",
-        action,
-        entity_id,
-        detail,
-    )
+    try:
+        await conn.execute(
+            """
+            INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
+            VALUES ($1, $2, $3, 'client', $4, $5)
+            """,
+            user.get("id"),
+            user.get("full_name") or user.get("username") or "مستخدم",
+            action,
+            entity_id,
+            detail,
+        )
+    except Exception:
+        pass
 
 
 class ClientRequest(BaseModel):
