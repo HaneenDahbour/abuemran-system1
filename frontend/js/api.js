@@ -276,11 +276,11 @@
     createPurchase: data =>
       apiFetch('/purchases', { method: 'POST', body: JSON.stringify(data) }),
     updatePurchase: (id, data) =>
-      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}`, { method: 'PUT', body: JSON.stringify(data) }),
+      apiFetch(`/purchases/${parseInt(id, 10) || id}`, { method: 'PUT', body: JSON.stringify(data) }),
     receivePurchase: id =>
-      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}/receive`, { method: 'PUT' }),
+      apiFetch(`/purchases/${parseInt(id, 10) || id}/receive`, { method: 'PUT' }),
     deletePurchase: id =>
-      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}`, { method: 'DELETE' }),
+      apiFetch(`/purchases/${parseInt(id, 10) || id}`, { method: 'DELETE' }),
 
     // ── Warehouse Categories ──────────────────────────────────────
     getWarehouseCategories: () => apiFetch('/warehouse-categories'),
