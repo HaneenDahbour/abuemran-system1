@@ -378,6 +378,10 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
                         purchase_id,
                     )
                     for item in old_items:
+                        await conn.fetchrow(
+                            "SELECT id FROM products WHERE id = $1 FOR UPDATE",
+                            item["product_id"],
+                        )
                         await conn.execute(
                             "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
                             float(item["quantity"] or 0),
@@ -432,6 +436,10 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
 
                     if purchase["status"] == "received":
                         new_cost = unit_price
+                        await conn.fetchrow(
+                            "SELECT id FROM products WHERE id = $1 FOR UPDATE",
+                            product_uuid,
+                        )
                         await conn.execute(
                             """
                             UPDATE products
@@ -523,6 +531,10 @@ async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
                         purchase_id,
                     )
                     for item in old_items:
+                        await conn.fetchrow(
+                            "SELECT id FROM products WHERE id = $1 FOR UPDATE",
+                            item["product_id"],
+                        )
                         await conn.execute(
                             "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
                             float(item["quantity"] or 0),

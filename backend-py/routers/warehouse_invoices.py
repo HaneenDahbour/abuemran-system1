@@ -156,21 +156,18 @@ async def create_warehouse_invoice(
                     product_uuid,
                 )
 
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO stock_movements
-                            (product_id, type, quantity, source_type, source_id, notes, created_by)
-                        VALUES ($1, 'out', $2, 'warehouse_invoice', $3, $4, $5)
-                        """,
-                        product_uuid,
-                        item.quantity,
-                        inv["id"],
-                        f"فاتورة مستودع #{invoice_number}",
-                        user.get("id"),
-                    )
-                except Exception:
-                    pass
+                await conn.execute(
+                    """
+                    INSERT INTO stock_movements
+                        (product_id, type, quantity, source_type, source_id, notes, created_by)
+                    VALUES ($1, 'out', $2, 'warehouse_invoice', $3, $4, $5)
+                    """,
+                    product_uuid,
+                    item.quantity,
+                    inv["id"],
+                    f"فاتورة مستودع #{invoice_number}",
+                    user.get("id"),
+                )
 
         try:
             await pool.execute(
