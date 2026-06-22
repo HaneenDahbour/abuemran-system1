@@ -248,9 +248,46 @@ async def get_investor(investor_id: int, user=Depends(get_current_user)):
         investor_id,
     )
 
+    # For each investment, compute category profit and this investor's share
+    enriched = []
+    total_profit_share = 0.0
+
+    for inv in investments:
+        inv_dict = row_to_dict(inv)
+        category_id = inv_dict["category_id"]
+
+        # Get all investors in this category to compute contribution %
+        cat_investors = await pool.fetch(
+            """
+            SELECT investor_id, amount
+            FROM warehouse_category_investments
+            WHERE category_id = $1
+            """,
+            category_id,
+        )
+        total_invested_in_cat = sum(float(r["amount"] or 0) for r in cat_investors)
+        this_amount = float(inv_dict.get("amount") or 0)
+        contribution_pct = (this_amount / total_invested_in_cat * 100) if total_invested_in_cat > 0 else 0.0
+
+        # Compute category profit
+        financials = await get_category_total_profit(pool, category_id)
+        cat_total_profit = float(financials.get("total_profit") or 0)
+        distributable = max(cat_total_profit, 0)
+        investors_pool = round(distributable * (1 - OWNER_SHARE_PCT), 3)
+        pct_of_investors = (this_amount / total_invested_in_cat) if total_invested_in_cat > 0 else 0.0
+        profit_share = round(investors_pool * pct_of_investors, 3)
+
+        inv_dict["contribution_pct"] = round(contribution_pct, 3)
+        inv_dict["category_total_profit"] = round(cat_total_profit, 3)
+        inv_dict["investors_pool"] = investors_pool
+        inv_dict["profit_share"] = profit_share
+        total_profit_share += profit_share
+        enriched.append(inv_dict)
+
     return {
         "investor": row_to_dict(investor),
-        "investments": [row_to_dict(r) for r in investments],
+        "investments": enriched,
+        "total_profit_share": round(total_profit_share, 3),
     }
 
 
