@@ -41,18 +41,27 @@ def clean_text(value: Optional[str]) -> Optional[str]:
     return value or None
 
 
-async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail: str):
-    await conn.execute(
-        """
-        INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
-        VALUES ($1, $2, $3, 'supplier', $4, $5)
-        """,
-        user.get("id"),
-        user.get("full_name") or user.get("username") or "مستخدم",
-        action,
-        entity_id,
-        detail,
-    )
+async def insert_audit(pool_or_conn, user, action: str, entity_id=None, detail: str = ""):
+    try:
+        eid = None
+        if entity_id is not None:
+            try:
+                eid = int(entity_id)
+            except (ValueError, TypeError):
+                eid = None
+        await pool_or_conn.execute(
+            """
+            INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
+            VALUES ($1, $2, $3, 'supplier', $4, $5)
+            """,
+            user.get("id"),
+            user.get("full_name") or user.get("username") or "مستخدم",
+            action,
+            eid,
+            detail,
+        )
+    except Exception:
+        pass
 
 
 class SupplierRequest(BaseModel):
@@ -261,10 +270,8 @@ async def create_supplier(data: SupplierRequest, user=Depends(get_current_user))
                     name,
                     phone,
                 )
-                await insert_audit(
-                    conn, user, "أضاف مورد", row["id"], f"إضافة مورد: {name}"
-                )
-                return row_to_dict(row)
+        await insert_audit(pool, user, "أضاف مورد", row["id"], f"إضافة مورد: {name}")
+        return row_to_dict(row)
     except HTTPException:
         raise
     except Exception as e:
@@ -297,15 +304,13 @@ async def update_supplier(
                 if duplicate:
                     raise HTTPException(status_code=400, detail="الاسم مستخدم مسبقاً")
                 row = await conn.fetchrow(
-                    "UPDATE suppliers SET name=$1, phone=$2, updated_at=NOW() WHERE id=$3 RETURNING *",
+                    "UPDATE suppliers SET name=$1, phone=$2 WHERE id=$3 RETURNING *",
                     name,
                     phone,
                     supplier_id,
                 )
-                await insert_audit(
-                    conn, user, "تعديل مورد", supplier_id, f"تعديل: {name}"
-                )
-                return row_to_dict(row)
+        await insert_audit(pool, user, "تعديل مورد", supplier_id, f"تعديل: {name}")
+        return row_to_dict(row)
     except HTTPException:
         raise
     except Exception as e:
@@ -317,6 +322,7 @@ async def delete_supplier(supplier_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
     pool = await get_pool()
     try:
+        supplier_name = None
         async with pool.acquire() as conn:
             async with conn.transaction():
                 supplier = await conn.fetchrow(
@@ -324,6 +330,7 @@ async def delete_supplier(supplier_id: int, user=Depends(get_current_user)):
                 )
                 if not supplier:
                     raise HTTPException(status_code=404, detail="المورد غير موجود")
+                supplier_name = supplier["name"]
                 linked = await conn.fetchval(
                     "SELECT EXISTS(SELECT 1 FROM purchases WHERE supplier_id=$1)",
                     supplier_id,
@@ -334,10 +341,8 @@ async def delete_supplier(supplier_id: int, user=Depends(get_current_user)):
                         detail="لا يمكن حذف المورد لأنه مرتبط بفواتير شراء",
                     )
                 await conn.execute("DELETE FROM suppliers WHERE id=$1", supplier_id)
-                await insert_audit(
-                    conn, user, "حذف مورد", supplier_id, f"حذف: {supplier['name']}"
-                )
-                return {"success": True}
+        await insert_audit(pool, user, "حذف مورد", supplier_id, f"حذف: {supplier_name}")
+        return {"success": True}
     except HTTPException:
         raise
     except Exception as e:
