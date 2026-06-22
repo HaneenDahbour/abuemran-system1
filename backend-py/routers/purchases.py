@@ -94,23 +94,24 @@ async def get_purchases(user=Depends(get_current_user)):
             ORDER BY p.created_at DESC, p.id DESC
             """)
 
-        results = []
+        item_rows = await pool.fetch("""
+            SELECT pi.*, pr.name AS product_name, pr.unit AS product_unit
+            FROM purchase_items pi
+            JOIN products pr ON pi.product_id = pr.id
+            ORDER BY pi.purchase_id, pi.id ASC
+            """)
 
+        items_by_purchase = {}
+        for item in item_rows:
+            pid = item["purchase_id"]
+            if pid not in items_by_purchase:
+                items_by_purchase[pid] = []
+            items_by_purchase[pid].append(row_to_dict(item))
+
+        results = []
         for row in rows:
             purchase = row_to_dict(row)
-
-            items = await pool.fetch(
-                """
-                SELECT pi.*, pr.name AS product_name, pr.unit AS product_unit
-                FROM purchase_items pi
-                JOIN products pr ON pi.product_id = pr.id
-                WHERE pi.purchase_id = $1
-                ORDER BY pi.id ASC
-                """,
-                row["id"],
-            )
-
-            purchase["items"] = [row_to_dict(i) for i in items]
+            purchase["items"] = items_by_purchase.get(row["id"], [])
             results.append(purchase)
 
         return results
@@ -247,7 +248,7 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
 
                 items = await conn.fetch(
-                    "SELECT * FROM purchase_items WHERE purchase_id=$1 ORDER BY id ASC",
+                    "SELECT * FROM purchase_items WHERE purchase_id=$1::int ORDER BY id ASC",
                     purchase_id,
                 )
 
@@ -364,7 +365,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
 
                 if purchase["status"] == "received":
                     old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
+                        "SELECT * FROM purchase_items WHERE purchase_id=$1::int",
                         purchase_id,
                     )
                     for item in old_items:
@@ -379,7 +380,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                     )
 
                 await conn.execute(
-                    "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
+                    "DELETE FROM purchase_items WHERE purchase_id=$1::int", purchase_id
                 )
 
                 total = 0.0
@@ -509,7 +510,7 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
 
                 if purchase["status"] == "received":
                     old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
+                        "SELECT * FROM purchase_items WHERE purchase_id=$1::int",
                         purchase_id,
                     )
                     for item in old_items:
@@ -524,7 +525,7 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
 
                 await conn.execute(
-                    "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
+                    "DELETE FROM purchase_items WHERE purchase_id=$1::int", purchase_id
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 
