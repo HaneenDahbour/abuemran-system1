@@ -529,21 +529,23 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
-                        VALUES ($1, $2, 'حذف فاتورة شراء', 'purchase', $3, $4)
-                        """,
-                        user.get("id"),
-                        user.get("full_name") or "مستخدم",
-                        purchase_id,
-                        f"حذف فاتورة شراء #{purchase['invoice_number']}",
-                    )
-                except Exception:
-                    pass
+            # Audit is deliberately outside the stock/delete transaction.
+            # A schema mismatch in audit_log must never roll back the deletion.
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
+                    VALUES ($1, $2, 'حذف فاتورة شراء', 'purchase', $3, $4)
+                    """,
+                    user.get("id"),
+                    user.get("full_name") or "مستخدم",
+                    purchase_id,
+                    f"حذف فاتورة شراء #{purchase['invoice_number']}",
+                )
+            except Exception:
+                pass
 
-                return {"success": True}
+            return {"success": True}
 
     except HTTPException:
         raise
