@@ -474,7 +474,7 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
 
 @router.delete("/{purchase_id}")
 async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
-    require_role(user, "admin")
+    require_role(user, "admin", "accountant")
 
     pool = await get_pool()
 

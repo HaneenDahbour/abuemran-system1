@@ -3466,7 +3466,7 @@ async function renderPurchases(container) {
                     <button class="btn btn-ghost btn-sm" onclick="viewPurchaseItems('${p.id}')">📋 الأصناف</button>
                     ${isAccountant() ? `<button class="btn btn-ghost btn-sm" onclick="openEditPurchaseModal('${p.id}')">✏️ تعديل</button>` : ''}
                     ${p.status === 'pending' && isAccountant() ? `<button class="btn btn-success btn-sm" onclick="confirmReceive('${p.id}')">✅ استلام</button>` : ''}
-                    ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePurchase('${p.id}')">🗑️</button>` : ''}
+                    ${isAccountant() ? `<button class="btn btn-danger btn-sm" onclick="deletePurchase('${p.id}')">🗑️</button>` : ''}
                   </div>
                 </td>
               </tr>
