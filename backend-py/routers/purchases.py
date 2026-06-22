@@ -329,6 +329,146 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.put("/{purchase_id}")
+async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+
+    if not data.items:
+        raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
+
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                purchase = await conn.fetchrow(
+                    "SELECT * FROM purchases WHERE id=$1 FOR UPDATE",
+                    purchase_id,
+                )
+
+                if not purchase:
+                    raise HTTPException(
+                        status_code=404, detail="فاتورة الشراء غير موجودة"
+                    )
+
+                if data.supplier_id is not None:
+                    supplier_exists = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
+                        data.supplier_id,
+                    )
+                    if not supplier_exists:
+                        raise HTTPException(status_code=400, detail="المورد غير موجود")
+
+                if purchase["status"] == "received":
+                    old_items = await conn.fetch(
+                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
+                        purchase_id,
+                    )
+                    for item in old_items:
+                        await conn.execute(
+                            "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
+                            float(item["quantity"] or 0),
+                            item["product_id"],
+                        )
+
+                await conn.execute(
+                    "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
+                )
+
+                total = 0.0
+                for item in data.items:
+                    quantity = float(item.quantity)
+                    unit_price = float(item.unit_price)
+
+                    if quantity <= 0:
+                        raise HTTPException(
+                            status_code=400, detail="كمية الصنف يجب أن تكون أكبر من صفر"
+                        )
+                    if unit_price < 0:
+                        raise HTTPException(
+                            status_code=400, detail="سعر الصنف لا يمكن أن يكون سالباً"
+                        )
+
+                    product_uuid = safe_uuid(item.product_id)
+                    product_exists = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM products WHERE id=$1)",
+                        product_uuid,
+                    )
+                    if not product_exists:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"الصنف رقم {item.product_id} غير موجود",
+                        )
+
+                    total += quantity * unit_price
+
+                    await conn.execute(
+                        """
+                        INSERT INTO purchase_items (purchase_id, product_id, quantity, unit_price)
+                        VALUES ($1, $2, $3, $4)
+                        """,
+                        purchase_id,
+                        product_uuid,
+                        quantity,
+                        unit_price,
+                    )
+
+                    if purchase["status"] == "received":
+                        new_cost = unit_price
+                        await conn.execute(
+                            """
+                            UPDATE products
+                            SET current_stock = current_stock + $1
+                            """ + (", cost_price = $3, base_price = $3" if new_cost > 0 else "") + """
+                            WHERE id = $2
+                            """,
+                            quantity,
+                            product_uuid,
+                            *([new_cost] if new_cost > 0 else []),
+                        )
+
+                invoice_number = (
+                    clean_text(data.invoice_number) or purchase["invoice_number"]
+                )
+                purchase_date = parse_purchase_date(data.date) if data.date else purchase["date"]
+
+                updated = await conn.fetchrow(
+                    """
+                    UPDATE purchases
+                    SET supplier_id=$1, invoice_number=$2, date=$3, total=$4, notes=$5
+                    WHERE id=$6
+                    RETURNING *
+                    """,
+                    data.supplier_id,
+                    invoice_number,
+                    purchase_date,
+                    total,
+                    clean_text(data.notes),
+                    purchase_id,
+                )
+
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
+                        VALUES ($1, $2, 'تعديل فاتورة شراء', 'purchase', $3, $4)
+                        """,
+                        user.get("id"),
+                        user.get("full_name") or "مستخدم",
+                        purchase_id,
+                        f"تعديل فاتورة #{invoice_number} — {total:.2f} د.أ",
+                    )
+                except Exception:
+                    pass
+
+                return row_to_dict(updated)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/{purchase_id}")
 async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
@@ -349,23 +489,35 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
 
                 if purchase["status"] == "received":
-                    raise HTTPException(
-                        status_code=400,
-                        detail="لا يمكن حذف فاتورة شراء مستلمة لأنها أثرت على المخزون. احتفظ بها لأمان السجلات.",
+                    old_items = await conn.fetch(
+                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
+                        purchase_id,
                     )
+                    for item in old_items:
+                        await conn.execute(
+                            "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
+                            float(item["quantity"] or 0),
+                            item["product_id"],
+                        )
 
                 await conn.execute(
                     "DELETE FROM purchase_items WHERE purchase_id=$1", purchase_id
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 
-                await insert_audit(
-                    conn,
-                    user,
-                    "حذف فاتورة شراء",
-                    purchase_id,
-                    f"حذف فاتورة شراء #{purchase['invoice_number']}",
-                )
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
+                        VALUES ($1, $2, 'حذف فاتورة شراء', 'purchase', $3, $4)
+                        """,
+                        user.get("id"),
+                        user.get("full_name") or "مستخدم",
+                        purchase_id,
+                        f"حذف فاتورة شراء #{purchase['invoice_number']}",
+                    )
+                except Exception:
+                    pass
 
                 return {"success": True}
 

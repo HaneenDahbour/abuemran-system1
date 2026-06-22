@@ -275,6 +275,8 @@
     getPurchases: () => apiFetch('/purchases'),
     createPurchase: data =>
       apiFetch('/purchases', { method: 'POST', body: JSON.stringify(data) }),
+    updatePurchase: (id, data) =>
+      apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}`, { method: 'PUT', body: JSON.stringify(data) }),
     receivePurchase: id =>
       apiFetch(`/purchases/${requireId(id, 'معرّف فاتورة الشراء')}/receive`, { method: 'PUT' }),
     deletePurchase: id =>

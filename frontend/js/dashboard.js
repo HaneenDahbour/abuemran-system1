@@ -3429,9 +3429,11 @@ async function renderPurchases(container) {
                   <div style="font-size:10px; color:var(--tx3)">متبقي له</div>
                   <div style="font-size:16px; font-weight:800; color:${balance > 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(balance)} د.أ</div>
                 </div>
-                <div style="display:flex; gap:4px">
+                <div style="display:flex; gap:4px; flex-wrap:wrap">
                   <button class="btn btn-ghost btn-sm" onclick="viewSupplierStatement(${s.id}, ${jsString(s.name)})">📄</button>
+                  ${isAccountant() ? `<button class="btn btn-ghost btn-sm" onclick="openEditSupplierById(${s.id})">✏️</button>` : ''}
                   ${isAccountant() && balance > 0 ? `<button class="btn btn-primary btn-sm" onclick="openSupplierPaymentModal(${s.id}, ${jsString(s.name)})">💰 دفع</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteSupplier(${s.id}, ${jsString(s.name)})">🗑️</button>` : ''}
                 </div>
               </div>
             </div>
@@ -3460,8 +3462,9 @@ async function renderPurchases(container) {
                 <td style="font-size:12px; color:var(--tx3)">${fmtDate(p.date)}</td>
                 <td>${purchaseStatusBadge(p.status)}</td>
                 <td>
-                  <div style="display:flex; gap:6px">
+                  <div style="display:flex; gap:6px; flex-wrap:wrap">
                     <button class="btn btn-ghost btn-sm" onclick="viewPurchaseItems(${p.id})">📋 الأصناف</button>
+                    ${isAccountant() ? `<button class="btn btn-ghost btn-sm" onclick="openEditPurchaseModal(${p.id})">✏️ تعديل</button>` : ''}
                     ${p.status === 'pending' && isAccountant() ? `<button class="btn btn-success btn-sm" onclick="confirmReceive(${p.id})">✅ استلام</button>` : ''}
                     ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePurchase(${p.id})">🗑️</button>` : ''}
                   </div>
@@ -3735,7 +3738,7 @@ async function viewPurchaseItems(id) {
 async function deletePurchase(id) {
   const lines = [
     'فاتورة الشراء وكل بنودها',
-    'ملاحظة: لا يمكن حذف فاتورة مستلمة — المخزون محمي',
+    'إذا كانت مستلمة سيتم إرجاع الكميات للمخزون تلقائياً',
   ];
   confirmDanger('حذف فاتورة الشراء', lines, async () => {
   try {
@@ -3747,6 +3750,150 @@ async function deletePurchase(id) {
   }
   closeModal();
   });
+}
+
+async function openEditPurchaseModal(purchaseId) {
+  let purchases = [], products = [], suppliers = [];
+  try {
+    [purchases, products, suppliers] = await Promise.all([
+      API.getPurchases(), API.getProducts(), API.getSuppliers()
+    ]);
+  } catch (e) { toast(e.message, 'error'); return; }
+
+  const p = (purchases || []).find(x => x.id === purchaseId);
+  if (!p) { toast('الفاتورة غير موجودة', 'error'); return; }
+
+  window._editPurchaseProducts = products || [];
+  window._editPurchaseId = purchaseId;
+
+  const supplierOpts = (suppliers || [])
+    .map(s => `<option value="${s.id}" ${s.id == p.supplier_id ? 'selected' : ''}>${escHtml(s.name)}</option>`)
+    .join('');
+
+  const statusNote = p.status === 'received'
+    ? '<div style="padding:10px;background:#fff3cd;border-radius:8px;margin-bottom:12px;font-size:12px;color:#856404">⚠️ هذه الفاتورة مستلمة — التعديل سيعكس الكميات القديمة ويطبق الجديدة على المخزون تلقائياً</div>'
+    : '';
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل فاتورة شراء #${escHtml(p.invoice_number || p.id)}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    ${statusNote}
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">المورد</label>
+        <select class="form-select" id="epur_supplier">
+          <option value="">اختر مورداً (اختياري)</option>
+          ${supplierOpts}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">رقم الفاتورة</label>
+        <input class="form-input" id="epur_num" value="${escHtml(p.invoice_number || '')}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">التاريخ</label>
+        <input class="form-input" id="epur_date" type="date" value="${p.date || ''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">ملاحظات</label>
+        <input class="form-input" id="epur_notes" value="${escHtml(p.notes || '')}">
+      </div>
+    </div>
+    <div style="margin:16px 0 8px; font-weight:700; font-size:13px">📦 الأصناف</div>
+    <div id="epur-items-wrap" style="display:flex; flex-direction:column; gap:8px"></div>
+    <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="addEditPurchaseRow()">+ إضافة صنف</button>
+    <div style="margin-top:16px; padding:12px; background:var(--bll); border-radius:var(--r); display:flex; justify-content:space-between; align-items:center">
+      <span style="font-weight:700; color:var(--tx2)">الإجمالي</span>
+      <span style="font-size:18px; font-weight:800; color:var(--bld)" id="epur_total">0.00 د.أ</span>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:16px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveEditPurchase()">حفظ التعديلات</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `, '640px');
+
+  const items = p.items || [];
+  if (items.length) {
+    items.forEach(item => addEditPurchaseRow(item));
+  } else {
+    addEditPurchaseRow();
+  }
+}
+
+function addEditPurchaseRow(existing) {
+  const wrap = document.getElementById('epur-items-wrap');
+  if (!wrap) return;
+  const idx = wrap.children.length;
+  const prods = window._editPurchaseProducts || [];
+  const prodOpts = prods.map(pr =>
+    `<option value="${pr.id}" ${existing && String(pr.id) === String(existing.product_id) ? 'selected' : ''}>${escHtml(pr.name)} (${pr.current_stock} ${escHtml(pr.unit)})</option>`
+  ).join('');
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:8px; align-items:center';
+  row.innerHTML = `
+    <select class="form-select" id="epi_prod_${idx}" onchange="calcEditPurchaseTotal()">
+      <option value="">اختر صنفاً</option>
+      ${prodOpts}
+    </select>
+    <input class="form-input" id="epi_qty_${idx}" type="number" placeholder="الكمية" min="0.001" step="0.001" value="${existing ? existing.quantity : ''}" oninput="calcEditPurchaseTotal()">
+    <input class="form-input" id="epi_price_${idx}" type="number" placeholder="السعر" min="0" step="0.01" value="${existing ? existing.unit_price : ''}" oninput="calcEditPurchaseTotal()">
+    <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove(); calcEditPurchaseTotal()">✕</button>
+  `;
+  wrap.appendChild(row);
+  calcEditPurchaseTotal();
+}
+
+function calcEditPurchaseTotal() {
+  let total = 0;
+  for (let i = 0; i < 50; i++) {
+    const qty = parseFloat(document.getElementById(`epi_qty_${i}`)?.value) || 0;
+    const price = parseFloat(document.getElementById(`epi_price_${i}`)?.value) || 0;
+    total += qty * price;
+  }
+  const el = document.getElementById('epur_total');
+  if (el) el.textContent = `${fmt(total)} د.أ`;
+}
+
+async function saveEditPurchase() {
+  const items = [];
+  for (let i = 0; i < 50; i++) {
+    const prodEl = document.getElementById(`epi_prod_${i}`);
+    const qtyEl = document.getElementById(`epi_qty_${i}`);
+    const priceEl = document.getElementById(`epi_price_${i}`);
+    if (!prodEl) continue;
+
+    const product_id = prodEl.value;
+    const quantity = parseFloat(qtyEl?.value);
+    const unit_price = parseFloat(priceEl?.value);
+
+    if (product_id && quantity > 0 && unit_price >= 0) {
+      items.push({ product_id, quantity, unit_price });
+    }
+  }
+
+  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
+
+  const supplierId = document.getElementById('epur_supplier').value || null;
+
+  try {
+    await API.updatePurchase(window._editPurchaseId, {
+      supplier_id: supplierId ? Number(supplierId) : null,
+      invoice_number: document.getElementById('epur_num').value.trim() || null,
+      date: document.getElementById('epur_date').value,
+      notes: document.getElementById('epur_notes').value,
+      items,
+    });
+    toast('تم تعديل الفاتورة ✅', 'success');
+    closeModal();
+    navigateTo('purchases');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 async function doLogin(username, password) {
@@ -7354,6 +7501,22 @@ async function saveEditSupplier(id) {
     toast('تم تحديث المورد ✅', 'success');
     window._suppliersCache = null;
     closeModal();
+    navigateTo('purchases');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function openEditSupplierById(id) {
+  const s = (window._suppliersCache || []).find(x => x.id === id);
+  if (!s) { toast('المورد غير موجود', 'error'); return; }
+  openEditSupplierModal(s);
+}
+
+async function confirmDeleteSupplier(id, name) {
+  if (!confirm(`هل تريد حذف المورد "${name}"؟`)) return;
+  try {
+    await API.deleteSupplier(id);
+    toast('تم حذف المورد ✅', 'success');
+    window._suppliersCache = null;
     navigateTo('purchases');
   } catch (e) { toast(e.message, 'error'); }
 }
