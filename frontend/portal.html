@@ -14,14 +14,19 @@
 
   <style>
     .portal-card {
-      max-width: 560px;
+      max-width: 700px;
     }
 
     .portal-sections {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 16px;
       margin-top: 8px;
+    }
+
+    @media(max-width:600px){
+      .portal-sections { grid-template-columns: 1fr; }
+      .portal-card { max-width: 100%; }
     }
 
     .portal-tile {
@@ -122,6 +127,11 @@
           <div class="ttl">المحلات</div>
           <div class="sub">نظام إدارة المحلات والصندوق اليومي</div>
         </div>
+        <div class="portal-tile" id="tile-aradi" onclick="selectSection('aradi')">
+          <div class="ico">🏞️</div>
+          <div class="ttl">الأراضي</div>
+          <div class="sub">عقود البيع، الأقساط، والمستثمرين</div>
+        </div>
       </div>
 
       <div id="portalLoginBox">
@@ -162,12 +172,18 @@
 
     let selectedSection = null;
 
+    const TITLES = {
+      warehouse: '🏭 تسجيل الدخول — المستودع',
+      shops:     '🏬 تسجيل الدخول — المحلات',
+      aradi:     '🏞️ تسجيل الدخول — الأراضي',
+    };
+
     function selectSection(section) {
       selectedSection = section;
-      document.getElementById('tile-warehouse').classList.toggle('active', section === 'warehouse');
-      document.getElementById('tile-shops').classList.toggle('active', section === 'shops');
-      document.getElementById('portalLoginTitle').textContent =
-        section === 'warehouse' ? '🏭 تسجيل الدخول — المستودع' : '🏬 تسجيل الدخول — المحلات';
+      ['warehouse','shops','aradi'].forEach(s =>
+        document.getElementById('tile-'+s)?.classList.toggle('active', s === section)
+      );
+      document.getElementById('portalLoginTitle').textContent = TITLES[section] || 'تسجيل الدخول';
       document.getElementById('portalLoginBox').classList.add('show');
       document.getElementById('portal-err').textContent = '';
       document.getElementById('pu').focus();
@@ -175,8 +191,9 @@
 
     function closeSection() {
       selectedSection = null;
-      document.getElementById('tile-warehouse').classList.remove('active');
-      document.getElementById('tile-shops').classList.remove('active');
+      ['warehouse','shops','aradi'].forEach(s =>
+        document.getElementById('tile-'+s)?.classList.remove('active')
+      );
       document.getElementById('portalLoginBox').classList.remove('show');
       document.getElementById('portal-err').textContent = '';
       document.getElementById('pu').value = '';
@@ -213,6 +230,11 @@
           localStorage.setItem('shop_token', data.token);
           localStorage.setItem('shop_user', JSON.stringify(data.user));
           location.href = 'shops.html';
+        } else if (selectedSection === 'aradi') {
+          if (!['admin', 'accountant'].includes(role)) throw new Error('هذا الحساب لا يملك صلاحية الوصول لقسم الأراضي');
+          localStorage.setItem('aradi_token', data.token);
+          localStorage.setItem('aradi_user', JSON.stringify(data.user));
+          location.href = 'aradi.html';
         } else {
           const allowed = !['shop_manager', 'shop_employee'].includes(role) || !!data.user.shop_id;
           if (!allowed) throw new Error('هذا الحساب مخصص لقسم المحلات فقط — اختر "المحلات"');
