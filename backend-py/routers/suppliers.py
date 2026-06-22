@@ -124,11 +124,26 @@ async def get_supplier_statement(supplier_id: str, user=Depends(get_current_user
             """
             SELECT id, invoice_number, date, total, status, notes
             FROM purchases
-            WHERE supplier_id = $1 AND status = 'received'
-            ORDER BY date ASC, id ASC
+            WHERE supplier_id = $1
+            ORDER BY date DESC, id DESC
             """,
             supplier_id,
         )
+
+        purchase_history = []
+        for purchase in purchases:
+            purchase_data = row_to_dict(purchase)
+            item_rows = await pool.fetch(
+                """SELECT pi.id, pi.product_id, pr.name AS product_name,
+                          pr.unit AS product_unit, pi.quantity, pi.unit_price,
+                          (pi.quantity * pi.unit_price) AS total
+                   FROM purchase_items pi
+                   LEFT JOIN products pr ON pr.id=pi.product_id
+                   WHERE pi.purchase_id=$1 ORDER BY pi.id""",
+                purchase["id"],
+            )
+            purchase_data["items"] = [row_to_dict(item) for item in item_rows]
+            purchase_history.append(purchase_data)
 
         payments = await pool.fetch(
             """
@@ -143,6 +158,8 @@ async def get_supplier_statement(supplier_id: str, user=Depends(get_current_user
         transactions = []
 
         for p in purchases:
+            if p["status"] != "received":
+                continue
             d = row_to_dict(p)
             d["type"] = "purchase"
             d["amount"] = float(d.get("total") or 0)
@@ -175,6 +192,7 @@ async def get_supplier_statement(supplier_id: str, user=Depends(get_current_user
             "total_purchased": round(total_purchased, 3),
             "total_paid": round(total_paid, 3),
             "transactions": transactions,
+            "purchases": purchase_history,
         }
     except HTTPException:
         raise
@@ -360,4 +378,3 @@ async def delete_supplier(supplier_id: str, user=Depends(get_current_user)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-

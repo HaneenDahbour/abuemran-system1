@@ -7334,6 +7334,7 @@ async function viewSupplierStatement(id, name) {
     if (!el) return;
 
     const txs = data.transactions || [];
+    const purchases = data.purchases || [];
     const balance = parseFloat(data.balance || 0);
 
     el.innerHTML = `
@@ -7391,6 +7392,16 @@ async function viewSupplierStatement(id, name) {
             `).join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:#9e9a94">لا توجد حركات</td></tr>`}
           </tbody>
         </table>
+      </div>
+
+      <div style="font-weight:800;margin:18px 0 8px">تفاصيل ما تم شراؤه من المورد</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${purchases.length ? purchases.map(p => `
+          <details style="border:1px solid var(--brd);border-radius:9px;padding:10px 12px">
+            <summary style="cursor:pointer;font-weight:700">#${escHtml(p.invoice_number || p.id)} — ${fmtDate(p.date)} — ${fmt(p.total)} د.أ — ${p.status === 'received' ? 'مستلمة' : 'معلقة'}</summary>
+            <div style="margin-top:8px;font-size:12px">${(p.items || []).map(i => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-top:1px solid var(--brd)"><span>${escHtml(i.product_name || 'صنف محذوف')}</span><span>${fmt(i.quantity)} ${escHtml(i.product_unit || '')} × ${fmt(i.unit_price)} = ${fmt(i.total)} د.أ</span></div>`).join('') || 'لا توجد أصناف'}</div>
+            ${p.notes ? `<div style="margin-top:7px;color:var(--tx3)">${escHtml(p.notes)}</div>` : ''}
+          </details>`).join('') : '<div style="color:var(--tx3)">لا توجد فواتير لهذا المورد</div>'}
       </div>
 
       <div style="display:flex;gap:8px;margin-top:14px">
