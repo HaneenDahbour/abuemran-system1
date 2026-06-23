@@ -1395,6 +1395,7 @@ function _invoiceActionButtons(inv) {
   let html = '';
 
   if (wfStatus === 'pending') {
+    html += `<button class="btn btn-ghost btn-sm" onclick="printInvoiceFromEncoded(${jsString(encoded)})">🖨️ طباعة</button>`;
     if (isAdmin()) {
       html += `
         <button class="btn btn-success btn-sm" onclick="approveInvoice('${inv.id}')">✅ اعتماد</button>
@@ -1445,23 +1446,23 @@ function showInvoiceDetails(invoiceId) {
 
   // Action buttons for pending invoices — review, fix, then approve from one place
   let actionsHtml = '';
-  if (isPending) {
-    let btns = '';
-    if (isAccountant()) {
-      btns += `<button class="btn btn-primary" onclick="editInvoiceById(${jsString(inv.id)})">✏️ تعديل الفاتورة</button>`;
+  {
+    let btns = `<button class="btn btn-ghost" onclick="closeModal(); printInvoiceById('${Number(inv.id) || 0}')">🖨️ طباعة</button>`;
+    if (isPending) {
+      if (isAccountant()) {
+        btns += `<button class="btn btn-primary" onclick="editInvoiceById(${jsString(inv.id)})">✏️ تعديل الفاتورة</button>`;
+      }
+      if (isAdmin()) {
+        btns += `
+          <button class="btn btn-success" onclick="closeModal(); approveInvoice('${inv.id}')">✅ اعتماد</button>
+          <button class="btn btn-danger"  onclick="closeModal(); rejectInvoiceModal('${inv.id}')">✗ رفض</button>`;
+      }
     }
-    if (isAdmin()) {
-      btns += `
-        <button class="btn btn-success" onclick="closeModal(); approveInvoice('${inv.id}')">✅ اعتماد</button>
-        <button class="btn btn-danger"  onclick="closeModal(); rejectInvoiceModal('${inv.id}')">✗ رفض</button>`;
-    }
-    if (btns) {
-      actionsHtml = `
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:14px;
-                    border-top:1px solid var(--brd)">
-          ${btns}
-        </div>`;
-    }
+    actionsHtml = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:14px;
+                  border-top:1px solid var(--brd)">
+        ${btns}
+      </div>`;
   }
 
   openModal(`
