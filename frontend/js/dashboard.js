@@ -5921,27 +5921,38 @@ async function viewMovements(productId, productName) {
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div id="mv-content"><div class="loading"><div class="spinner"></div></div></div>
-  `, '600px');
+  `, '750px');
 
   try {
     const movements = await API.getStockMovements(productId);
     const el = document.getElementById('mv-content');
     if (!el) return;
 
+    const orphanedCount = movements.filter(m => m.orphaned).length;
+
     el.innerHTML = `
-      <div class="table-wrap" style="max-height:360px; overflow-y:auto">
+      ${orphanedCount ? `<div class="alert alert-danger" style="margin-bottom:10px; padding:10px; font-size:13px">
+        ⚠️ يوجد ${orphanedCount} حركة يتيمة (الفاتورة المصدر محذوفة) — يمكنك حذفها لتصحيح المخزون
+      </div>` : ''}
+      <div class="table-wrap" style="max-height:400px; overflow-y:auto">
         <table>
-          <thead><tr><th>النوع</th><th>الكمية</th><th>المصدر</th><th>ملاحظات</th><th>التاريخ</th></tr></thead>
+          <thead><tr><th>النوع</th><th>الكمية</th><th>المصدر</th><th>الفاتورة</th><th>ملاحظات</th><th>التاريخ</th><th></th></tr></thead>
           <tbody>
-            ${movements.length ? movements.map(m => `<tr>
+            ${movements.length ? movements.map(m => `<tr style="${m.orphaned ? 'background:#fff0f0' : ''}">
               <td>${m.type === 'in'
         ? '<span class="badge badge-green">↓ دخول</span>'
         : '<span class="badge badge-red">↑ خروج</span>'}</td>
               <td style="font-weight:700">${m.quantity}</td>
               <td style="font-size:12px; color:var(--tx2)">${escHtml(m.source_type || '—')}</td>
+              <td style="font-size:12px; color:var(--tx2)">${
+                m.purchase_invoice
+                  ? '#' + escHtml(m.purchase_invoice) + (m.purchase_supplier ? ' (' + escHtml(m.purchase_supplier) + ')' : '')
+                  : m.orphaned ? '<span style="color:var(--rd)">محذوفة</span>' : '—'
+              }</td>
               <td style="font-size:12px; color:var(--tx3)">${escHtml(m.notes || '—')}</td>
               <td style="font-size:12px; color:var(--tx3)">${fmtDate(m.created_at)}</td>
-            </tr>`).join('') : emptyRow('لا توجد حركات', 5)}
+              <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" style="padding:2px 8px; font-size:10px" onclick="deleteMovement('${productId}', ${m.id}, '${escHtml(productName)}')">🗑️</button>` : ''}</td>
+            </tr>`).join('') : emptyRow('لا توجد حركات', 7)}
           </tbody>
         </table>
       </div>
@@ -5949,6 +5960,17 @@ async function viewMovements(productId, productName) {
   } catch (e) {
     const el = document.getElementById('mv-content');
     if (el) el.innerHTML = `<div class="alert alert-danger">${escHtml(e.message)}</div>`;
+  }
+}
+
+async function deleteMovement(productId, movementId, productName) {
+  if (!confirm('هل أنت متأكد من حذف هذه الحركة؟ سيتم تعديل المخزون تلقائياً.')) return;
+  try {
+    const result = await API.deleteStockMovement(productId, movementId);
+    toast(`تم حذف الحركة — المخزون الجديد: ${result.new_stock}`, 'success');
+    viewMovements(productId, productName);
+  } catch (e) {
+    toast(e.message, 'error');
   }
 }
 /* ═══════════════════════════════════════════════════
