@@ -538,13 +538,13 @@ async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 
-            await insert_audit(
-                conn,
-                user,
-                "حذف فاتورة شراء",
-                purchase_id,
-                f"حذف فاتورة شراء #{purchase['invoice_number']}",
-            )
+                await insert_audit(
+                    conn,
+                    user,
+                    "حذف فاتورة شراء",
+                    None,
+                    f"حذف فاتورة شراء #{purchase['invoice_number']}",
+                )
 
             return {"success": True}
 

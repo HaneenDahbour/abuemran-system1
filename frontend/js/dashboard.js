@@ -3889,20 +3889,14 @@ async function viewPurchaseItems(id) {
 }
 
 async function deletePurchase(id) {
-  const lines = [
-    'فاتورة الشراء وكل بنودها',
-    'إذا كانت مستلمة سيتم إرجاع الكميات للمخزون تلقائياً',
-  ];
-  confirmDanger('حذف فاتورة الشراء', lines, async () => {
+  if (!confirm('هل أنت متأكد من حذف فاتورة الشراء؟\nإذا كانت مستلمة سيتم إرجاع الكميات للمخزون تلقائياً.')) return;
   try {
     await API.deletePurchase(id);
-    toast('تم الحذف', 'success');
+    toast('تم حذف فاتورة الشراء', 'success');
     navigateTo('purchases');
   } catch (e) {
-    toast(e.message, 'error');
+    toast(e.message || 'تعذر حذف فاتورة الشراء', 'error');
   }
-  closeModal();
-  });
 }
 
 async function openEditPurchaseModal(purchaseId) {
