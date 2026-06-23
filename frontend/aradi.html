@@ -550,27 +550,62 @@ async function saveContract(){
 
 async function showContractEditForm(id){
   const c=S.contracts.find(x=>x.id===id); if(!c) return;
+  if(!S.buyers.length) S.buyers=await api('/aradi/buyers').catch(()=>[]);
+  if(!S.plots.length) S.plots=await api('/aradi/plots').catch(()=>[]);
   openModal(`
     <div class="modal-header"><div class="modal-title">تعديل العقد</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">رقم العقد</label><input class="form-input" id="ce-num" value="${esc(c.contract_number||'')}"/></div>
-      <div class="form-group"><label class="form-label">الحالة</label>
-        <select class="form-select" id="ce-status">
-          ${['active','completed','cancelled','defaulted'].map(s=>`<option value="${s}" ${c.status===s?'selected':''}>${statusText(s)}</option>`).join('')}
+      <div class="form-group"><label class="form-label">المشتري *</label>
+        <select class="form-select" id="ce-buyer">
+          ${S.buyers.map(b=>`<option value="${b.id}" ${c.buyer_id===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}
         </select>
       </div>
+      <div class="form-group"><label class="form-label">القطعة</label>
+        <select class="form-select" id="ce-plot">
+          <option value="">— بدون قطعة —</option>
+          ${S.plots.map(p=>`<option value="${p.id}" ${c.plot_id===p.id?'selected':''}>${esc(p.plot_number)} — ${esc(p.project_name||'')}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">رقم العقد</label><input class="form-input" id="ce-num" value="${esc(c.contract_number||'')}"/></div>
+      <div class="form-group"><label class="form-label">سعر البيع *</label><input class="form-input" type="number" id="ce-price" value="${c.sale_price||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">الدفعة الأولى</label><input class="form-input" type="number" id="ce-down" value="${c.down_payment||0}"/></div>
+      <div class="form-group"><label class="form-label">قيمة القسط</label><input class="form-input" type="number" id="ce-inst" value="${c.installment_amount||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">عدد الأقساط</label><input class="form-input" type="number" id="ce-cnt" value="${c.installment_count||0}"/></div>
+      <div class="form-group"><label class="form-label">تاريخ أول قسط</label><input class="form-input" type="date" id="ce-fdate" value="${c.first_installment_date||''}"/></div>
+    </div>
+    <div class="form-group"><label class="form-label">الحالة</label>
+      <select class="form-select" id="ce-status">
+        ${['active','completed','cancelled','defaulted'].map(s=>`<option value="${s}" ${c.status===s?'selected':''}>${statusText(s)}</option>`).join('')}
+      </select>
     </div>
     <div class="form-group"><label class="form-label">ملاحظات</label><textarea class="form-input" id="ce-notes" rows="2">${esc(c.notes||'')}</textarea></div>
     <div id="ce-err" class="portal-err"></div>
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn btn-primary" style="flex:1" onclick="updateContract(${id})">💾 حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
-    </div>`);
+    </div>`,'600px');
 }
 
 async function updateContract(id){
-  const c=S.contracts.find(x=>x.id===id); if(!c) return;
-  const body={buyer_id:c.buyer_id,sale_price:c.sale_price,contract_number:document.getElementById('ce-num').value.trim()||null,status:document.getElementById('ce-status').value,notes:document.getElementById('ce-notes').value.trim()||null};
+  const body={
+    buyer_id:parseInt(document.getElementById('ce-buyer').value)||null,
+    plot_id:parseInt(document.getElementById('ce-plot').value)||null,
+    contract_number:document.getElementById('ce-num').value.trim()||null,
+    sale_price:parseFloat(document.getElementById('ce-price').value)||0,
+    down_payment:parseFloat(document.getElementById('ce-down').value)||0,
+    installment_amount:parseFloat(document.getElementById('ce-inst').value)||0,
+    installment_count:parseInt(document.getElementById('ce-cnt').value)||0,
+    first_installment_date:document.getElementById('ce-fdate').value||null,
+    status:document.getElementById('ce-status').value,
+    notes:document.getElementById('ce-notes').value.trim()||null,
+  };
+  if(!body.buyer_id){ document.getElementById('ce-err').textContent='اختر المشتري'; return; }
   try{
     await api(`/aradi/contracts/${id}`,{method:'PUT',body:JSON.stringify(body)});
     closeModal(); toast('تم التعديل','success'); await loadContracts();
@@ -836,6 +871,12 @@ async function editBuyerPay(id){
   openModal(`
     <div class="modal-header"><div class="modal-title">تعديل الدفعة</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="ebp-amt" value="${r.amount}"/></div>
+      <div class="form-group"><label class="form-label">نوع الدفعة</label>
+        <select class="form-select" id="ebp-type">${['installment','down_payment','extra','correction'].map(t=>`<option value="${t}" ${r.payment_type===t?'selected':''}>${payTypeLabel(t)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" type="date" id="ebp-date" value="${r.payment_date||''}"/></div>
       <div class="form-group"><label class="form-label">طريقة الدفع</label>
         <select class="form-select" id="ebp-meth">${['cash','check','bank_transfer','other'].map(m=>`<option value="${m}" ${r.method===m?'selected':''}>${methodLabel(m)}</option>`).join('')}</select>
@@ -849,11 +890,11 @@ async function editBuyerPay(id){
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn btn-primary" style="flex:1" onclick="saveBuyerPayEdit(${id})">💾 حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
-    </div>`,'440px');
+    </div>`,'480px');
 }
 
 async function saveBuyerPayEdit(id){
-  const body={payment_date:document.getElementById('ebp-date').value||null,method:document.getElementById('ebp-meth').value,status:document.getElementById('ebp-stat').value,notes:document.getElementById('ebp-notes').value.trim()||null};
+  const body={amount:parseFloat(document.getElementById('ebp-amt').value)||null,payment_type:document.getElementById('ebp-type').value,payment_date:document.getElementById('ebp-date').value||null,method:document.getElementById('ebp-meth').value,status:document.getElementById('ebp-stat').value,notes:document.getElementById('ebp-notes').value.trim()||null};
   try{ await api(`/aradi/payments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadBuyerPayments(); }
   catch(e){ document.getElementById('ebp-err').textContent=e.message; }
 }
@@ -1085,8 +1126,23 @@ async function showInvestmentDetail(id){
 async function showInvestmentEdit(id){
   const rows=await api('/aradi/investments').catch(()=>[]);
   const inv=rows.find(r=>r.id===id); if(!inv) return;
+  if(!S.investors.length) S.investors=await api('/aradi/investors').catch(()=>[]);
+  if(!S.plots.length) S.plots=await api('/aradi/plots').catch(()=>[]);
   openModal(`
     <div class="modal-header"><div class="modal-title">تعديل الاستثمار</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">المستثمر *</label>
+        <select class="form-select" id="ie-investor">
+          ${S.investors.map(i=>`<option value="${i.id}" ${inv.investor_id===i.id?'selected':''}>${esc(i.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">القطعة</label>
+        <select class="form-select" id="ie-plot">
+          <option value="">— بدون قطعة —</option>
+          ${S.plots.map(p=>`<option value="${p.id}" ${inv.plot_id===p.id?'selected':''}>${esc(p.plot_number)} — ${esc(p.project_name||'')}</option>`).join('')}
+        </select>
+      </div>
+    </div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">رقم الاستثمار</label><input class="form-input" id="ie-num" value="${esc(inv.investment_number||'')}"/></div>
       <div class="form-group"><label class="form-label">الحالة</label>
@@ -1100,13 +1156,22 @@ async function showInvestmentEdit(id){
     <div class="form-group"><label class="form-label">ملاحظات</label><textarea class="form-input" id="ie-notes" rows="2">${esc(inv.notes||'')}</textarea></div>
     <div id="ie-err" class="portal-err"></div>
     <div style="display:flex;gap:10px;margin-top:6px">
-      <button class="btn btn-primary" style="flex:1" onclick="updateInvestment(${id},${inv.investor_id})">💾 حفظ</button>
+      <button class="btn btn-primary" style="flex:1" onclick="updateInvestment(${id})">💾 حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
-    </div>`);
+    </div>`,'560px');
 }
 
-async function updateInvestment(id,investorId){
-  const body={investor_id:investorId,investment_number:document.getElementById('ie-num').value.trim()||null,capital_amount:parseFloat(document.getElementById('ie-cap').value)||0,profit_amount:parseFloat(document.getElementById('ie-profit').value)||0,status:document.getElementById('ie-status').value,notes:document.getElementById('ie-notes').value.trim()||null};
+async function updateInvestment(id){
+  const body={
+    investor_id:parseInt(document.getElementById('ie-investor').value)||null,
+    plot_id:parseInt(document.getElementById('ie-plot').value)||null,
+    investment_number:document.getElementById('ie-num').value.trim()||null,
+    capital_amount:parseFloat(document.getElementById('ie-cap').value)||0,
+    profit_amount:parseFloat(document.getElementById('ie-profit').value)||0,
+    status:document.getElementById('ie-status').value,
+    notes:document.getElementById('ie-notes').value.trim()||null,
+  };
+  if(!body.investor_id){ document.getElementById('ie-err').textContent='اختر المستثمر'; return; }
   try{ await api(`/aradi/investments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadInvestments(); }
   catch(e){ document.getElementById('ie-err').textContent=e.message; }
 }
@@ -1155,24 +1220,27 @@ async function editInvPay(id){
   openModal(`
     <div class="modal-header"><div class="modal-title">تعديل دفعة المستثمر</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="eip-amt" value="${r.amount}"/></div>
       <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" type="date" id="eip-date" value="${r.payment_date||''}"/></div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="form-label">طريقة الدفع</label>
         <select class="form-select" id="eip-meth">${['cash','check','bank_transfer','other'].map(m=>`<option value="${m}" ${r.method===m?'selected':''}>${methodLabel(m)}</option>`).join('')}</select>
       </div>
-    </div>
-    <div class="form-group"><label class="form-label">الحالة</label>
-      <select class="form-select" id="eip-stat">${['pending','confirmed','rejected','void'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select>
+      <div class="form-group"><label class="form-label">الحالة</label>
+        <select class="form-select" id="eip-stat">${['pending','confirmed','rejected','void'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select>
+      </div>
     </div>
     <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="eip-notes" value="${esc(r.notes||'')}"/></div>
     <div id="eip-err" class="portal-err"></div>
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn btn-primary" style="flex:1" onclick="saveInvPayEdit(${id})">💾 حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
-    </div>`,'440px');
+    </div>`,'480px');
 }
 
 async function saveInvPayEdit(id){
-  const body={payment_date:document.getElementById('eip-date').value||null,method:document.getElementById('eip-meth').value,status:document.getElementById('eip-stat').value,notes:document.getElementById('eip-notes').value.trim()||null};
+  const body={amount:parseFloat(document.getElementById('eip-amt').value)||null,payment_date:document.getElementById('eip-date').value||null,method:document.getElementById('eip-meth').value,status:document.getElementById('eip-stat').value,notes:document.getElementById('eip-notes').value.trim()||null};
   try{ await api(`/aradi/investor-payments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadInvestorPayments(); }
   catch(e){ document.getElementById('eip-err').textContent=e.message; }
 }
@@ -1329,27 +1397,53 @@ async function showCheckEdit(id){
   const rows=await api('/aradi/checks').catch(()=>[]);
   const r=rows.find(x=>x.id===id); if(!r) return;
   openModal(`
-    <div class="modal-header"><div class="modal-title">تحديث حالة الشيك</div><button class="modal-close" onclick="closeModal()">✕</button></div>
-    <p style="font-size:13px;margin-bottom:14px">شيك رقم <strong>${esc(r.check_number||'—')}</strong> بمبلغ <strong>${cur(r.amount)}</strong></p>
+    <div class="modal-header"><div class="modal-title">تعديل الشيك</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">الحالة</label>
-        <select class="form-select" id="che-status">
-          ${['received','deposited','cleared','returned','cancelled'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}
-        </select>
+      <div class="form-group"><label class="form-label">الاتجاه</label>
+        <select class="form-select" id="che-dir">${['in','out'].map(d=>`<option value="${d}" ${r.direction===d?'selected':''}>${d==='in'?'داخل ← (من مشترٍ)':'خارج → (لمستثمر/مصروف)'}</option>`).join('')}</select>
       </div>
-      <div class="form-group"><label class="form-label">تاريخ الاستلام</label><input class="form-input" type="date" id="che-rdate" value="${r.received_date||''}"/></div>
+      <div class="form-group"><label class="form-label">النوع</label>
+        <select class="form-select" id="che-rtype">${['buyer_payment','investor_payment','expense','manual'].map(t=>`<option value="${t}" ${r.related_type===t?'selected':''}>${{buyer_payment:'دفعة مشترٍ',investor_payment:'دفعة مستثمر',expense:'مصروف',manual:'يدوي'}[t]}</option>`).join('')}</select>
+      </div>
     </div>
-    <div class="form-group"><label class="form-label">البنك</label><input class="form-input" id="che-bank" value="${esc(r.bank_name||'')}"/></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">اسم الشخص</label><input class="form-input" id="che-name" value="${esc(r.person_name||'')}"/></div>
+      <div class="form-group"><label class="form-label">رقم الشيك</label><input class="form-input" id="che-num" value="${esc(r.check_number||'')}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="che-amt" value="${r.amount}"/></div>
+      <div class="form-group"><label class="form-label">تاريخ الشيك</label><input class="form-input" type="date" id="che-cdate" value="${r.check_date||''}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">تاريخ الاستلام</label><input class="form-input" type="date" id="che-rdate" value="${r.received_date||''}"/></div>
+      <div class="form-group"><label class="form-label">البنك</label><input class="form-input" id="che-bank" value="${esc(r.bank_name||'')}"/></div>
+    </div>
+    <div class="form-group"><label class="form-label">الحالة</label>
+      <select class="form-select" id="che-status">
+        ${['received','deposited','cleared','returned','cancelled'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}
+      </select>
+    </div>
     <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="che-notes" value="${esc(r.notes||'')}"/></div>
     <div id="che-err" class="portal-err"></div>
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn btn-primary" style="flex:1" onclick="updateCheck(${id})">💾 حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
-    </div>`);
+    </div>`,'540px');
 }
 
 async function updateCheck(id){
-  const body={status:document.getElementById('che-status').value,received_date:document.getElementById('che-rdate').value||null,bank_name:document.getElementById('che-bank').value.trim()||null,notes:document.getElementById('che-notes').value.trim()||null};
+  const body={
+    direction:document.getElementById('che-dir').value,
+    related_type:document.getElementById('che-rtype').value,
+    person_name:document.getElementById('che-name').value.trim()||null,
+    check_number:document.getElementById('che-num').value.trim()||null,
+    amount:parseFloat(document.getElementById('che-amt').value)||null,
+    check_date:document.getElementById('che-cdate').value||null,
+    received_date:document.getElementById('che-rdate').value||null,
+    bank_name:document.getElementById('che-bank').value.trim()||null,
+    status:document.getElementById('che-status').value,
+    notes:document.getElementById('che-notes').value.trim()||null,
+  };
   try{ await api(`/aradi/checks/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadChecks(); }
   catch(e){ document.getElementById('che-err').textContent=e.message; }
 }
@@ -1442,10 +1536,26 @@ async function voidExpense(id){
 async function editExpense(id){
   const rows=await api('/aradi/expenses').catch(()=>[]);
   const r=rows.find(x=>x.id===id); if(!r) return;
+  if(!S.plots.length) S.plots=await api('/aradi/plots').catch(()=>[]);
   openModal(`
     <div class="modal-header"><div class="modal-title">تعديل المصروف</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
+      <div class="form-group"><label class="form-label">القطعة</label>
+        <select class="form-select" id="ee-plot">
+          <option value="">— عام (بدون قطعة) —</option>
+          ${S.plots.map(p=>`<option value="${p.id}" ${r.plot_id===p.id?'selected':''}>${esc(p.plot_number)}</option>`).join('')}
+        </select>
+      </div>
       <div class="form-group"><label class="form-label">التصنيف</label><input class="form-input" id="ee-cat" value="${esc(r.category||'')}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="ee-amt" value="${r.amount}"/></div>
+      <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" type="date" id="ee-date" value="${r.expense_date||''}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">طريقة الدفع</label>
+        <select class="form-select" id="ee-meth">${['cash','check','bank_transfer','other'].map(m=>`<option value="${m}" ${r.method===m?'selected':''}>${methodLabel(m)}</option>`).join('')}</select>
+      </div>
       <div class="form-group"><label class="form-label">الحالة</label>
         <select class="form-select" id="ee-stat">${['pending','confirmed','rejected','void'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select>
       </div>
@@ -1455,11 +1565,19 @@ async function editExpense(id){
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn btn-primary" style="flex:1" onclick="saveExpenseEdit(${id})">💾 حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
-    </div>`,'440px');
+    </div>`,'520px');
 }
 
 async function saveExpenseEdit(id){
-  const body={category:document.getElementById('ee-cat').value.trim()||null,status:document.getElementById('ee-stat').value,notes:document.getElementById('ee-notes').value.trim()||null};
+  const body={
+    plot_id:parseInt(document.getElementById('ee-plot').value)||null,
+    category:document.getElementById('ee-cat').value.trim()||null,
+    amount:parseFloat(document.getElementById('ee-amt').value)||null,
+    expense_date:document.getElementById('ee-date').value||null,
+    method:document.getElementById('ee-meth').value,
+    status:document.getElementById('ee-stat').value,
+    notes:document.getElementById('ee-notes').value.trim()||null,
+  };
   try{ await api(`/aradi/expenses/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadExpenses(); }
   catch(e){ document.getElementById('ee-err').textContent=e.message; }
 }

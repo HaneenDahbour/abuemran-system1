@@ -602,19 +602,36 @@ async def update_contract(contract_id: int, data: ContractRequest, user=Depends(
     require_access(user)
     if (data.status or "active") not in ALLOWED_CONTRACT_STATUSES:
         raise HTTPException(status_code=400, detail="حالة العقد غير صحيحة")
+    sale_price = validate_amount(data.sale_price, "سعر البيع")
+    down_payment = validate_amount(data.down_payment or 0, "الدفعة الأولى")
+    first_date = parse_date(data.first_installment_date, "تاريخ أول قسط")
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
             row = await conn.fetchrow("""
                 UPDATE aradi_sale_contracts
-                SET contract_number        = $1,
-                    status                 = $2,
-                    notes                  = $3,
+                SET plot_id                = $1,
+                    buyer_id               = $2,
+                    contract_number        = $3,
+                    sale_price             = $4,
+                    down_payment           = $5,
+                    installment_amount     = $6,
+                    installment_count      = $7,
+                    first_installment_date = $8,
+                    status                 = $9,
+                    notes                  = $10,
                     updated_at             = NOW()
-                WHERE id = $4
+                WHERE id = $11
                 RETURNING *
             """,
+                data.plot_id,
+                data.buyer_id,
                 data.contract_number,
+                sale_price,
+                down_payment,
+                round(float(data.installment_amount or 0), 3),
+                int(data.installment_count or 0),
+                first_date,
                 data.status or "active",
                 data.notes,
                 contract_id,
@@ -1023,6 +1040,8 @@ class BuyerPaymentUpdateRequest(BaseModel):
     notes: Optional[str] = None
     payment_date: Optional[str] = None
     method: Optional[str] = None
+    amount: Optional[float] = None
+    payment_type: Optional[str] = None
 
 
 @router.put("/payments/{payment_id}")
@@ -1050,12 +1069,17 @@ async def update_buyer_payment(
             if new_method not in ALLOWED_PAYMENT_METHODS:
                 raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
 
+            new_amount = round(float(data.amount), 3) if data.amount is not None else float(existing["amount"])
+            new_type = data.payment_type or existing["payment_type"]
+            if new_type not in ALLOWED_PAYMENT_TYPES:
+                raise HTTPException(status_code=400, detail="نوع الدفعة غير صحيح")
+
             row = await conn.fetchrow("""
                 UPDATE aradi_buyer_payments
                 SET status=$1, notes=COALESCE($2,notes), payment_date=$3,
-                    method=$4, updated_at=NOW()
-                WHERE id=$5 RETURNING *
-            """, new_status, data.notes, new_date, new_method, payment_id)
+                    method=$4, amount=$5, payment_type=$6, updated_at=NOW()
+                WHERE id=$7 RETURNING *
+            """, new_status, data.notes, new_date, new_method, new_amount, new_type, payment_id)
             await audit(conn, user, "update", "aradi_buyer_payment", payment_id,
                         f"تعديل دفعة رقم {payment_id} → {new_status}")
             return row_to_dict(row)
@@ -1300,10 +1324,13 @@ async def update_investment(
         async with pool.acquire() as conn:
             row = await conn.fetchrow("""
                 UPDATE aradi_investments
-                SET investment_number=$1, capital_amount=$2, profit_amount=$3,
-                    status=$4, notes=$5, updated_at=NOW()
-                WHERE id=$6 RETURNING *
+                SET plot_id=$1, investor_id=$2, investment_number=$3,
+                    capital_amount=$4, profit_amount=$5,
+                    status=$6, notes=$7, updated_at=NOW()
+                WHERE id=$8 RETURNING *
             """,
+                data.plot_id,
+                data.investor_id,
                 data.investment_number,
                 round(float(data.capital_amount), 3),
                 round(float(data.profit_amount or 0), 3),
@@ -1604,6 +1631,7 @@ class InvestorPaymentUpdateRequest(BaseModel):
     notes: Optional[str] = None
     payment_date: Optional[str] = None
     method: Optional[str] = None
+    amount: Optional[float] = None
 
 
 @router.put("/investor-payments/{payment_id}")
@@ -1628,12 +1656,15 @@ async def update_investor_payment(
             new_method = data.method or existing["method"]
             if new_method not in ALLOWED_PAYMENT_METHODS:
                 raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
+            new_amount = round(float(data.amount), 3) if data.amount is not None else float(existing["amount"])
+            if new_amount <= 0:
+                raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
             row = await conn.fetchrow("""
                 UPDATE aradi_investor_payments
                 SET status=$1, notes=COALESCE($2,notes), payment_date=$3,
-                    method=$4, updated_at=NOW()
-                WHERE id=$5 RETURNING *
-            """, new_status, data.notes, new_date, new_method, payment_id)
+                    method=$4, amount=$5, updated_at=NOW()
+                WHERE id=$6 RETURNING *
+            """, new_status, data.notes, new_date, new_method, new_amount, payment_id)
             await audit(conn, user, "update", "aradi_investor_payment", payment_id,
                         f"تعديل دفعة مستثمر رقم {payment_id} → {new_status}")
             return row_to_dict(row)
@@ -1749,6 +1780,12 @@ class CheckUpdateRequest(BaseModel):
     notes: Optional[str] = None
     received_date: Optional[str] = None
     bank_name: Optional[str] = None
+    related_type: Optional[str] = None
+    person_name: Optional[str] = None
+    check_number: Optional[str] = None
+    amount: Optional[float] = None
+    check_date: Optional[str] = None
+    direction: Optional[str] = None
 
 
 @router.put("/checks/{check_id}")
@@ -1767,19 +1804,38 @@ async def update_aradi_check(
             new_status = data.status or existing["status"]
             if new_status not in ALLOWED_CHECK_STATUSES:
                 raise HTTPException(status_code=400, detail="حالة الشيك غير صحيحة")
+            new_direction = data.direction or existing["direction"]
+            if new_direction not in ALLOWED_CHECK_DIRECTIONS:
+                raise HTTPException(status_code=400, detail="اتجاه الشيك غير صحيح")
+            new_rtype = data.related_type or existing["related_type"]
+            if new_rtype not in ALLOWED_CHECK_RELATED_TYPES:
+                raise HTTPException(status_code=400, detail="نوع الشيك غير صحيح")
+            new_amount = round(float(data.amount), 3) if data.amount is not None else float(existing["amount"])
             row = await conn.fetchrow("""
                 UPDATE aradi_checks
                 SET status=$1,
                     notes=COALESCE($2,notes),
                     received_date=COALESCE($3,received_date),
                     bank_name=COALESCE($4,bank_name),
+                    person_name=COALESCE($5,person_name),
+                    check_number=COALESCE($6,check_number),
+                    amount=$7,
+                    check_date=COALESCE($8,check_date),
+                    direction=$9,
+                    related_type=$10,
                     updated_at=NOW()
-                WHERE id=$5 RETURNING *
+                WHERE id=$11 RETURNING *
             """,
                 new_status,
                 data.notes,
                 parse_date(data.received_date, "تاريخ الاستلام"),
                 data.bank_name,
+                data.person_name,
+                data.check_number,
+                new_amount,
+                parse_date(data.check_date, "تاريخ الشيك"),
+                new_direction,
+                new_rtype,
                 check_id,
             )
             await audit(conn, user, "update", "aradi_check", check_id,
@@ -1880,6 +1936,10 @@ class ExpenseUpdateRequest(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
     category: Optional[str] = None
+    plot_id: Optional[int] = None
+    amount: Optional[float] = None
+    expense_date: Optional[str] = None
+    method: Optional[str] = None
 
 
 @router.put("/expenses/{expense_id}")
@@ -1898,14 +1958,24 @@ async def update_aradi_expense(
             new_status = data.status or existing["status"]
             if new_status not in ALLOWED_EXPENSE_STATUSES:
                 raise HTTPException(status_code=400, detail="حالة المصروف غير صحيحة")
+            new_method = data.method or existing["method"]
+            if new_method not in ALLOWED_PAYMENT_METHODS:
+                raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
+            new_amount = round(float(data.amount), 3) if data.amount is not None else float(existing["amount"])
+            new_date = parse_date(data.expense_date, "تاريخ المصروف") or existing["expense_date"]
+            new_plot = data.plot_id if data.plot_id is not None else existing["plot_id"]
             row = await conn.fetchrow("""
                 UPDATE aradi_expenses
                 SET status=$1,
                     notes=COALESCE($2,notes),
                     category=COALESCE($3,category),
+                    amount=$4,
+                    expense_date=$5,
+                    method=$6,
+                    plot_id=$7,
                     updated_at=NOW()
-                WHERE id=$4 RETURNING *
-            """, new_status, data.notes, data.category, expense_id)
+                WHERE id=$8 RETURNING *
+            """, new_status, data.notes, data.category, new_amount, new_date, new_method, new_plot, expense_id)
             await audit(conn, user, "update", "aradi_expense", expense_id,
                         f"تعديل مصروف رقم {expense_id} → {new_status}")
             return row_to_dict(row)
