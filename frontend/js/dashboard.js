@@ -98,6 +98,7 @@ if (typeof fmtDate !== 'function') {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
     return d.toLocaleDateString('ar-JO-u-nu-latn', {
+      weekday: 'long',
       year: 'numeric',
       month: 'short',
       day: 'numeric'
