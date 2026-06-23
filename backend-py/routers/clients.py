@@ -272,6 +272,33 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
         standalone_payments = [p for p in payments if not p["is_invoice_payment"]]
         total_standalone = sum(float(p["amount"] or 0) for p in standalone_payments)
 
+        # جلب أصناف كل فاتورة
+        invoice_ids = [inv["id"] for inv in invoices]
+        items_by_invoice = {}
+        if invoice_ids:
+            all_items = await pool.fetch(
+                """
+                SELECT ii.invoice_id, ii.quantity, ii.unit_price, ii.line_total,
+                       ii.description,
+                       p.name AS product_name, p.unit AS product_unit
+                FROM invoice_items ii
+                LEFT JOIN products p ON p.id = ii.product_id
+                WHERE ii.invoice_id = ANY($1::int[])
+                ORDER BY ii.id
+                """,
+                invoice_ids,
+            )
+            for item in all_items:
+                iid = item["invoice_id"]
+                if iid not in items_by_invoice:
+                    items_by_invoice[iid] = []
+                items_by_invoice[iid].append({
+                    "product_name": item["product_name"] or item["description"] or "",
+                    "quantity": float(item["quantity"] or 0),
+                    "unit_price": float(item["unit_price"] or 0),
+                    "line_total": float(item["line_total"] or 0),
+                })
+
         # بناء قائمة الحركات
         transactions = []
 
@@ -291,6 +318,7 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
                     "description": inv["invoice_number"],
                     "notes": inv["notes"] or "",
                     "payment_method": inv["payment_method"] or "credit",
+                    "items": items_by_invoice.get(inv["id"], []),
                 }
             )
 

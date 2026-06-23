@@ -98,6 +98,7 @@ if (typeof fmtDate !== 'function') {
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
     return d.toLocaleDateString('ar-JO-u-nu-latn', {
+      weekday: 'long',
       year: 'numeric',
       month: 'short',
       day: 'numeric'
@@ -1395,6 +1396,7 @@ function _invoiceActionButtons(inv) {
   let html = '';
 
   if (wfStatus === 'pending') {
+    html += `<button class="btn btn-ghost btn-sm" onclick="printInvoiceFromEncoded(${jsString(encoded)})">🖨️ طباعة</button>`;
     if (isAdmin()) {
       html += `
         <button class="btn btn-success btn-sm" onclick="approveInvoice('${inv.id}')">✅ اعتماد</button>
@@ -1445,23 +1447,23 @@ function showInvoiceDetails(invoiceId) {
 
   // Action buttons for pending invoices — review, fix, then approve from one place
   let actionsHtml = '';
-  if (isPending) {
-    let btns = '';
-    if (isAccountant()) {
-      btns += `<button class="btn btn-primary" onclick="editInvoiceById(${jsString(inv.id)})">✏️ تعديل الفاتورة</button>`;
+  {
+    let btns = `<button class="btn btn-ghost" onclick="closeModal(); printInvoiceById('${Number(inv.id) || 0}')">🖨️ طباعة</button>`;
+    if (isPending) {
+      if (isAccountant()) {
+        btns += `<button class="btn btn-primary" onclick="editInvoiceById(${jsString(inv.id)})">✏️ تعديل الفاتورة</button>`;
+      }
+      if (isAdmin()) {
+        btns += `
+          <button class="btn btn-success" onclick="closeModal(); approveInvoice('${inv.id}')">✅ اعتماد</button>
+          <button class="btn btn-danger"  onclick="closeModal(); rejectInvoiceModal('${inv.id}')">✗ رفض</button>`;
+      }
     }
-    if (isAdmin()) {
-      btns += `
-        <button class="btn btn-success" onclick="closeModal(); approveInvoice('${inv.id}')">✅ اعتماد</button>
-        <button class="btn btn-danger"  onclick="closeModal(); rejectInvoiceModal('${inv.id}')">✗ رفض</button>`;
-    }
-    if (btns) {
-      actionsHtml = `
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:14px;
-                    border-top:1px solid var(--brd)">
-          ${btns}
-        </div>`;
-    }
+    actionsHtml = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:14px;
+                  border-top:1px solid var(--brd)">
+        ${btns}
+      </div>`;
   }
 
   openModal(`
@@ -6501,6 +6503,11 @@ function printStatement(name, data) {
       table{width:100%;border-collapse:collapse}
       th,td{border:1px solid #ccc;padding:10px;text-align:right;font-size:13px}
       th{background:#f0f0f0}
+      .items-row td{border-top:none;padding:4px 10px 10px 10px;background:#fafafa}
+      .items-table{width:auto;margin:0 20px;border:1px solid #ddd;font-size:11px}
+      .items-table th{background:#f5f5f5;padding:5px 8px;font-size:11px}
+      .items-table td{padding:5px 8px;font-size:11px}
+      @media print{body{padding:10px}}
     </style>
   </head><body>
     <div class="header">
@@ -6512,13 +6519,31 @@ function printStatement(name, data) {
     <table>
       <thead><tr><th>التاريخ</th><th>البيان</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead>
       <tbody>
-        ${txs.map(t => `<tr>
-          <td>${fmtDate(t.date)}</td>
-          <td>${escHtml(t.description || (t.type === 'invoice' ? 'فاتورة' : 'مقبوضة'))}</td>
-          <td>${t.type === 'invoice' ? fmt(t.amount) : '—'}</td>
-          <td>${t.type === 'payment' ? fmt(t.amount) : '—'}</td>
-          <td>${fmt(t.running_balance || 0)}</td>
-        </tr>`).join('')}
+        ${txs.map(t => {
+          const items = Array.isArray(t.items) ? t.items : [];
+          let row = `<tr${items.length ? ' style="border-bottom:none"' : ''}>
+            <td>${fmtDate(t.date)}</td>
+            <td>${escHtml(t.description || (t.type === 'invoice' ? 'فاتورة' : 'مقبوضة'))}</td>
+            <td>${t.type === 'invoice' ? fmt(t.amount) : '—'}</td>
+            <td>${t.type === 'payment' ? fmt(t.amount) : '—'}</td>
+            <td>${fmt(t.running_balance || 0)}</td>
+          </tr>`;
+          if (items.length) {
+            row += `<tr class="items-row"><td colspan="5">
+              <table class="items-table">
+                <thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>المجموع</th></tr></thead>
+                <tbody>${items.map((it, i) => `<tr>
+                  <td>${i+1}</td>
+                  <td>${escHtml(it.product_name || '—')}</td>
+                  <td>${Number(it.quantity||0).toFixed(3)}</td>
+                  <td>${Number(it.unit_price||0).toFixed(3)}</td>
+                  <td>${Number(it.line_total||0).toFixed(3)}</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </td></tr>`;
+          }
+          return row;
+        }).join('')}
       </tbody>
     </table>
   </body></html>`);
@@ -6683,6 +6708,10 @@ function printInvoicesList(invoices) {
       th{background:#1a1815;color:white;padding:10px;text-align:right;font-size:12px}
       td{padding:10px;border-bottom:1px solid #eee}
       .total{margin-top:20px;font-size:16px;font-weight:bold}
+      .items-detail td{padding:4px 10px;border-bottom:none;background:#fafafa}
+      .items-sub{width:auto;margin:0 20px;border:1px solid #ddd;font-size:11px}
+      .items-sub th{background:#f0f0f0;padding:5px 8px;font-size:10px;color:#333}
+      .items-sub td{padding:5px 8px;font-size:11px;border-bottom:1px solid #eee}
     </style>
   </head><body>
     <h1>📦 مجموعة أبو عمران — تقرير الفواتير</h1>
@@ -6690,15 +6719,33 @@ function printInvoicesList(invoices) {
     <table>
       <thead><tr><th>#</th><th>رقم الفاتورة</th><th>العميل</th><th>صافي</th><th>ضريبة</th><th>الإجمالي</th><th>التاريخ</th></tr></thead>
       <tbody>
-        ${invoices.map((inv, i) => `<tr>
-          <td>${i + 1}</td>
-          <td><strong>#${escHtml(inv.invoice_number || inv.id)}</strong></td>
-          <td>${escHtml(inv.client_name || '—')}</td>
-          <td>${fmt(inv.net_amount)} د.أ</td>
-          <td>${fmt(inv.tax_amount || 0)} د.أ</td>
-          <td style="font-weight:700">${fmt(inv.total_amount || inv.net_amount)} د.أ</td>
-          <td>${fmtDate(inv.date || inv.invoice_date)}</td>
-        </tr>`).join('')}
+        ${invoices.map((inv, i) => {
+          const items = Array.isArray(inv.items) ? inv.items : [];
+          let row = `<tr>
+            <td>${i + 1}</td>
+            <td><strong>#${escHtml(inv.invoice_number || inv.id)}</strong></td>
+            <td>${escHtml(inv.client_name || '—')}</td>
+            <td>${fmt(inv.net_amount)} د.أ</td>
+            <td>${fmt(inv.tax_amount || 0)} د.أ</td>
+            <td style="font-weight:700">${fmt(inv.total_amount || inv.net_amount)} د.أ</td>
+            <td>${fmtDate(inv.date || inv.invoice_date)}</td>
+          </tr>`;
+          if (items.length) {
+            row += `<tr class="items-detail"><td colspan="7">
+              <table class="items-sub">
+                <thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>المجموع</th></tr></thead>
+                <tbody>${items.map((it, j) => `<tr>
+                  <td>${j+1}</td>
+                  <td>${escHtml(it.product_name || it.description || '—')}</td>
+                  <td>${Number(it.quantity||0).toFixed(3)}</td>
+                  <td>${fmt(it.unit_price||0)} د.أ</td>
+                  <td style="font-weight:700">${fmt(it.line_total||0)} د.أ</td>
+                </tr>`).join('')}</tbody>
+              </table>
+            </td></tr>`;
+          }
+          return row;
+        }).join('')}
       </tbody>
     </table>
     <div class="total">الإجمالي: ${fmt(total)} دينار أردني</div>
@@ -9308,7 +9355,7 @@ async function viewClientStatement(id, name) {
             </tr>
           </thead>
           <tbody>
-            ${txs.length ? txs.map(t => {
+            ${txs.length ? txs.map((t, tIdx) => {
       const isInv = t.type === 'invoice';
       const pm = t.payment_method || '';
       const pmLabel = {
@@ -9320,8 +9367,9 @@ async function viewClientStatement(id, name) {
         : isInv
           ? 'background:#fff9f9'
           : 'background:#edfaf4';
+      const txItems = Array.isArray(t.items) ? t.items : [];
 
-      return `<tr data-tx-type="${t.type}" data-tx-method="${pm}"
+      let row = `<tr data-tx-type="${t.type}" data-tx-method="${pm}"
                           style="border-top:1px solid #f0ede8;${bg}">
                 <td style="padding:10px 12px;color:#9e9a94;white-space:nowrap">
                   ${fmtDate(t.date)}
@@ -9331,7 +9379,10 @@ async function viewClientStatement(id, name) {
           ? `فاتورة #${escHtml(t.description || t.id)}
              <button class="btn btn-ghost btn-sm" title="طباعة الفاتورة بالتفاصيل"
                      style="font-size:10px;padding:1px 7px;margin-right:4px"
-                     onclick="printInvoiceById('${Number(t.id) || 0}')">🖨️</button>`
+                     onclick="printInvoiceById('${Number(t.id) || 0}')">🖨️</button>
+             ${txItems.length ? `<button class="btn btn-ghost btn-sm" title="عرض الأصناف"
+                     style="font-size:10px;padding:1px 7px;margin-right:2px"
+                     onclick="document.getElementById('stmt-items-${tIdx}').classList.toggle('hidden')">📦 أصناف</button>` : ''}`
           : `<span style="color:#057a55">مقبوضة</span>${t.notes
             ? ' — ' + escHtml(
               String(t.notes)
@@ -9365,6 +9416,30 @@ async function viewClientStatement(id, name) {
                   </div>
                 </td>
               </tr>`;
+      if (txItems.length) {
+        row += `<tr id="stmt-items-${tIdx}" class="hidden" data-tx-type="${t.type}" data-tx-method="${pm}"
+                    style="${bg}">
+          <td colspan="6" style="padding:4px 20px 10px">
+            <table style="width:100%;border-collapse:collapse;font-size:11px;border:1px solid #e0ddd8;border-radius:6px;overflow:hidden">
+              <thead><tr style="background:#f0ede8">
+                <th style="padding:5px 8px;text-align:right;font-size:10px">#</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">الصنف</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">الكمية</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">سعر الوحدة</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">المجموع</th>
+              </tr></thead>
+              <tbody>${txItems.map((it, i) => `<tr style="border-top:1px solid #eee">
+                <td style="padding:4px 8px">${i+1}</td>
+                <td style="padding:4px 8px;font-weight:600">${escHtml(it.product_name || '—')}</td>
+                <td style="padding:4px 8px">${Number(it.quantity||0).toFixed(3)}</td>
+                <td style="padding:4px 8px">${fmt(it.unit_price||0)} د.أ</td>
+                <td style="padding:4px 8px;font-weight:700">${fmt(it.line_total||0)} د.أ</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </td>
+        </tr>`;
+      }
+      return row;
     }).join('') : `
               <tr>
                 <td colspan="6"
