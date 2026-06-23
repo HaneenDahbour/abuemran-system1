@@ -3609,6 +3609,7 @@ function calcPurchaseTotal() {
 }
 
 async function savePurchase() {
+  if (window._savingPurchase) return;
   const wrap = document.getElementById('pur-items-wrap');
   if (!wrap) return;
 
@@ -3636,6 +3637,7 @@ async function savePurchase() {
   const autoReceive = document.getElementById('pur_auto_receive')?.checked !== false;
   const supplierId = document.getElementById('pur_supplier').value || null;
 
+  window._savingPurchase = true;
   try {
     const purchase = await API.createPurchase({
       supplier_id: supplierId || null,
@@ -3654,6 +3656,8 @@ async function savePurchase() {
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+  } finally {
+    window._savingPurchase = false;
   }
 }
 
@@ -4006,6 +4010,7 @@ function calcEditPurchaseTotal() {
 }
 
 async function saveEditPurchase() {
+  if (window._savingEditPurchase) return;
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`epi_prod_${i}`);
@@ -4026,6 +4031,7 @@ async function saveEditPurchase() {
 
   const supplierId = document.getElementById('epur_supplier').value || null;
 
+  window._savingEditPurchase = true;
   try {
     await API.updatePurchase(window._editPurchaseId, {
       supplier_id: supplierId || null,
@@ -4039,6 +4045,8 @@ async function saveEditPurchase() {
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+  } finally {
+    window._savingEditPurchase = false;
   }
 }
 
@@ -5815,6 +5823,7 @@ function calcWarehouseTotal() {
 }
 
 async function saveWarehouseInvoice() {
+  if (window._savingWarehouseInvoice) return;
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`wp_prod_${i}`);
@@ -5833,6 +5842,7 @@ async function saveWarehouseInvoice() {
 
   if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
 
+  window._savingWarehouseInvoice = true;
   try {
     await API.createWarehouseInvoice({
       invoice_number: document.getElementById('winv_num').value.trim() || null,
@@ -5848,6 +5858,8 @@ async function saveWarehouseInvoice() {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+  } finally {
+    window._savingWarehouseInvoice = false;
   }
 }
 
@@ -7451,8 +7463,10 @@ function openSupplierPaymentModal(supplierId, supplierName) {
 }
 
 async function saveSupplierPayment(supplierId, supplierName) {
+  if (window._savingSupplierPayment) return;
   const amount = parseFloat(document.getElementById('sp_amount')?.value);
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  window._savingSupplierPayment = true;
   try {
     await API.addSupplierPayment(supplierId, {
       amount,
@@ -7464,6 +7478,7 @@ async function saveSupplierPayment(supplierId, supplierName) {
     closeModal();
     viewSupplierStatement(supplierId, supplierName);
   } catch (e) { toast(e.message, 'error'); }
+  finally { window._savingSupplierPayment = false; }
 }
 
 async function deleteSupPayment(paymentId, supplierId, supplierName) {

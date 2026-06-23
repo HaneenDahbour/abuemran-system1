@@ -136,16 +136,19 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
     )
     purchase_date = parse_purchase_date(data.date)
     notes = clean_text(data.notes)
-    supplier_id = safe_uuid(data.supplier_id) if data.supplier_id else None
-    if data.supplier_id and not supplier_id:
-        raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
+    supplier_id = None
+    if data.supplier_id:
+        try:
+            supplier_id = int(data.supplier_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
 
     pool = await get_pool()
 
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                if data.supplier_id is not None:
+                if supplier_id is not None:
                     supplier_exists = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
                         supplier_id,
@@ -347,9 +350,12 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
         raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
 
     pool = await get_pool()
-    supplier_id = safe_uuid(data.supplier_id) if data.supplier_id else None
-    if data.supplier_id and not supplier_id:
-        raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
+    supplier_id = None
+    if data.supplier_id:
+        try:
+            supplier_id = int(data.supplier_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
 
     try:
         async with pool.acquire() as conn:
@@ -364,7 +370,7 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
                         status_code=404, detail="فاتورة الشراء غير موجودة"
                     )
 
-                if data.supplier_id is not None:
+                if supplier_id is not None:
                     supplier_exists = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
                         supplier_id,
@@ -476,19 +482,13 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
                     purchase_id,
                 )
 
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
-                        VALUES ($1, $2, 'تعديل فاتورة شراء', 'purchase', $3, $4)
-                        """,
-                        user.get("id"),
-                        user.get("full_name") or "مستخدم",
-                        purchase_id,
-                        f"تعديل فاتورة #{invoice_number} — {total:.2f} د.أ",
-                    )
-                except Exception:
-                    pass
+                await insert_audit(
+                    conn,
+                    user,
+                    "تعديل فاتورة شراء",
+                    purchase_id,
+                    f"تعديل فاتورة #{invoice_number} — {total:.2f} د.أ",
+                )
 
                 return row_to_dict(updated)
 
@@ -538,21 +538,13 @@ async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 
-            # Audit is deliberately outside the stock/delete transaction.
-            # A schema mismatch in audit_log must never roll back the deletion.
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
-                    VALUES ($1, $2, 'حذف فاتورة شراء', 'purchase', $3, $4)
-                    """,
-                    user.get("id"),
-                    user.get("full_name") or "مستخدم",
-                    purchase_id,
-                    f"حذف فاتورة شراء #{purchase['invoice_number']}",
-                )
-            except Exception:
-                pass
+            await insert_audit(
+                conn,
+                user,
+                "حذف فاتورة شراء",
+                purchase_id,
+                f"حذف فاتورة شراء #{purchase['invoice_number']}",
+            )
 
             return {"success": True}
 
