@@ -199,6 +199,7 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
                 i.tax_amount,
                 i.payment_method,
                 i.date,
+                i.created_at,
                 i.notes,
                 COALESCE((
                     SELECT SUM(rp.amount)
@@ -315,6 +316,7 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
                     "paid_amount": paid_now,
                     "remaining_amount": remaining,
                     "date": inv["date"].isoformat() if inv["date"] else None,
+                    "created_at": inv["created_at"].isoformat() if inv["created_at"] else None,
                     "description": inv["invoice_number"],
                     "notes": inv["notes"] or "",
                     "payment_method": inv["payment_method"] or "credit",

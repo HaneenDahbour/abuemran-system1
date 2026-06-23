@@ -3889,20 +3889,14 @@ async function viewPurchaseItems(id) {
 }
 
 async function deletePurchase(id) {
-  const lines = [
-    'فاتورة الشراء وكل بنودها',
-    'إذا كانت مستلمة سيتم إرجاع الكميات للمخزون تلقائياً',
-  ];
-  confirmDanger('حذف فاتورة الشراء', lines, async () => {
+  if (!confirm('هل أنت متأكد من حذف فاتورة الشراء؟\nإذا كانت مستلمة سيتم إرجاع الكميات للمخزون تلقائياً.')) return;
   try {
     await API.deletePurchase(id);
-    toast('تم الحذف', 'success');
+    toast('تم حذف فاتورة الشراء', 'success');
     navigateTo('purchases');
   } catch (e) {
-    toast(e.message, 'error');
+    toast(e.message || 'تعذر حذف فاتورة الشراء', 'error');
   }
-  closeModal();
-  });
 }
 
 async function openEditPurchaseModal(purchaseId) {
@@ -6507,6 +6501,7 @@ function printStatement(name, data) {
       .items-table{width:auto;margin:0 20px;border:1px solid #ddd;font-size:11px}
       .items-table th{background:#f5f5f5;padding:5px 8px;font-size:11px}
       .items-table td{padding:5px 8px;font-size:11px}
+      .time{font-size:10px;color:#999}
       @media print{body{padding:10px}}
     </style>
   </head><body>
@@ -6521,8 +6516,12 @@ function printStatement(name, data) {
       <tbody>
         ${txs.map(t => {
           const items = Array.isArray(t.items) ? t.items : [];
+          const pCreatedTime = t.created_at ? new Date(t.created_at) : null;
+          const pTimeStr = pCreatedTime && !isNaN(pCreatedTime.getTime())
+            ? pCreatedTime.toLocaleTimeString('ar-JO-u-nu-latn', { hour: '2-digit', minute: '2-digit' })
+            : '';
           let row = `<tr${items.length ? ' style="border-bottom:none"' : ''}>
-            <td>${fmtDate(t.date)}</td>
+            <td>${fmtDate(t.date)}${t.type === 'invoice' && pTimeStr ? ' <span class="time">' + pTimeStr + '</span>' : ''}</td>
             <td>${escHtml(t.description || (t.type === 'invoice' ? 'فاتورة' : 'مقبوضة'))}</td>
             <td>${t.type === 'invoice' ? fmt(t.amount) : '—'}</td>
             <td>${t.type === 'payment' ? fmt(t.amount) : '—'}</td>
@@ -7262,13 +7261,27 @@ async function viewRecipientStatement(name) {
             </tr>
           </thead>
           <tbody>
-            ${txs.length ? txs.map(t => {
+            ${txs.length ? txs.map((t, tIdx) => {
       const isInv = t.type === 'invoice';
-      return `<tr style="border-top:1px solid #f0ede8;${isInv ? '' : 'background:#f9fff9'}">
-                <td style="padding:10px 12px;color:#9e9a94">${fmtDate(t.date)}</td>
+      const txItems = Array.isArray(t.items) ? t.items : [];
+      const createdTime = t.created_at ? new Date(t.created_at) : null;
+      const timeStr = createdTime && !isNaN(createdTime.getTime())
+        ? createdTime.toLocaleTimeString('ar-JO-u-nu-latn', { hour: '2-digit', minute: '2-digit' })
+        : '';
+      let row = `<tr style="border-top:1px solid #f0ede8;${isInv ? '' : 'background:#f9fff9'}">
+                <td style="padding:10px 12px;color:#9e9a94">
+                  ${fmtDate(t.date)}
+                  ${isInv && timeStr ? `<div style="font-size:10px;color:#b0ada8">${timeStr}</div>` : ''}
+                </td>
                 <td style="padding:10px 12px;font-weight:600">
                   ${isInv
-          ? `فاتورة #${escHtml(t.invoice_number || t.id)} — ${escHtml(t.client_name || '')}`
+          ? `فاتورة #${escHtml(t.invoice_number || t.id)} — ${escHtml(t.client_name || '')}
+             <button class="btn btn-ghost btn-sm" title="طباعة الفاتورة"
+                     style="font-size:10px;padding:1px 7px;margin-right:4px"
+                     onclick="printInvoiceById('${Number(t.id) || 0}')">🖨️</button>
+             ${txItems.length ? `<button class="btn btn-ghost btn-sm" title="عرض الأصناف"
+                     style="font-size:10px;padding:1px 7px;margin-right:2px"
+                     onclick="document.getElementById('recip-items-${tIdx}').classList.toggle('hidden')">📦 أصناف</button>` : ''}`
           : `<span style="color:#057a55">دفعة مقبوضة</span>`}
                 </td>
                 <td style="padding:10px 12px;color:#c21515;font-weight:700">
@@ -7286,12 +7299,39 @@ async function viewRecipientStatement(name) {
           : ''}
                 </td>
               </tr>`;
+      if (txItems.length) {
+        row += `<tr id="recip-items-${tIdx}" class="hidden">
+          <td colspan="6" style="padding:4px 20px 10px;background:#fafaf8">
+            <table style="width:100%;border-collapse:collapse;font-size:11px;border:1px solid #e0ddd8;border-radius:6px;overflow:hidden">
+              <thead><tr style="background:#f0ede8">
+                <th style="padding:5px 8px;text-align:right;font-size:10px">#</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">الصنف</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">الكمية</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">سعر الوحدة</th>
+                <th style="padding:5px 8px;text-align:right;font-size:10px">المجموع</th>
+              </tr></thead>
+              <tbody>${txItems.map((it, i) => `<tr style="border-top:1px solid #eee">
+                <td style="padding:4px 8px">${i+1}</td>
+                <td style="padding:4px 8px;font-weight:600">${escHtml(it.product_name || '—')}</td>
+                <td style="padding:4px 8px">${Number(it.quantity||0).toFixed(3)}</td>
+                <td style="padding:4px 8px">${fmt(it.unit_price||0)} د.أ</td>
+                <td style="padding:4px 8px;font-weight:700">${fmt(it.line_total||0)} د.أ</td>
+              </tr>`).join('')}</tbody>
+            </table>
+          </td>
+        </tr>`;
+      }
+      return row;
     }).join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:#9e9a94">لا توجد حركات</td></tr>`}
           </tbody>
         </table>
       </div>
 
       <div style="display:flex;gap:8px;margin-top:14px">
+        <button class="btn btn-ghost btn-sm"
+          onclick="printRecipientStatement(${jsString(name)}, ${jsString(JSON.stringify(data))})">
+          🖨️ طباعة
+        </button>
         ${isAccountant() ? `
         <button class="btn btn-primary btn-sm"
           onclick="closeModal(); openRecipientPayment(${jsString(name)}, '${txs.find(t => t.client_id)?.client_id || 'null'}')">
@@ -7304,6 +7344,72 @@ async function viewRecipientStatement(name) {
     const el = document.getElementById('recip-stmt-content');
     if (el) el.innerHTML = `<div class="alert alert-danger">${escHtml(e.message)}</div>`;
   }
+}
+
+function printRecipientStatement(name, data) {
+  if (typeof data === 'string') try { data = JSON.parse(data); } catch { data = {}; }
+  const txs = data.transactions || [];
+
+  function buildItemsHtml(items) {
+    if (!items || !items.length) return '';
+    var rows = items.map(function(it, i) {
+      return '<tr><td>' + (i+1) + '</td>'
+        + '<td>' + escHtml(it.product_name || '—') + '</td>'
+        + '<td>' + Number(it.quantity||0).toFixed(3) + '</td>'
+        + '<td>' + Number(it.unit_price||0).toFixed(3) + '</td>'
+        + '<td>' + Number(it.line_total||0).toFixed(3) + '</td></tr>';
+    }).join('');
+    return '<tr class="items-row"><td colspan="5">'
+      + '<table class="items-table"><thead><tr><th>#</th><th>الصنف</th><th>الكمية</th><th>سعر الوحدة</th><th>المجموع</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody></table></td></tr>';
+  }
+
+  var bodyRows = txs.map(function(t) {
+    var isInv = t.type === 'invoice';
+    var items = Array.isArray(t.items) ? t.items : [];
+    var createdTime = t.created_at ? new Date(t.created_at) : null;
+    var timeStr = createdTime && !isNaN(createdTime.getTime())
+      ? createdTime.toLocaleTimeString('ar-JO-u-nu-latn', { hour: '2-digit', minute: '2-digit' })
+      : '';
+    var row = '<tr' + (items.length ? ' style="border-bottom:none"' : '') + '>'
+      + '<td>' + fmtDate(t.date) + (isInv && timeStr ? ' <span class="time">' + timeStr + '</span>' : '') + '</td>'
+      + '<td>' + (isInv ? 'فاتورة #' + escHtml(t.invoice_number || t.id) : 'دفعة مقبوضة') + '</td>'
+      + '<td>' + (isInv ? fmt(t.amount) : '—') + '</td>'
+      + '<td>' + (!isInv ? fmt(t.amount) : '—') + '</td>'
+      + '<td>' + fmt(t.running_balance || 0) + '</td>'
+      + '</tr>';
+    row += buildItemsHtml(items);
+    return row;
+  }).join('');
+
+  var w = window.open('', '_blank');
+  w.document.write('<!DOCTYPE html><html dir="rtl"><head><meta charset="UTF-8">'
+    + '<title>كشف حساب زبون — ' + escHtml(name) + '</title>'
+    + '<style>'
+    + 'body{font-family:Arial,sans-serif;padding:40px;direction:rtl}'
+    + '.header{text-align:center;margin-bottom:30px;border-bottom:2px solid #000;padding-bottom:20px}'
+    + 'table{width:100%;border-collapse:collapse}'
+    + 'th,td{border:1px solid #ccc;padding:10px;text-align:right;font-size:13px}'
+    + 'th{background:#f0f0f0}'
+    + '.items-row td{border-top:none;padding:4px 10px 10px 10px;background:#fafafa}'
+    + '.items-table{width:auto;margin:0 20px;border:1px solid #ddd;font-size:11px}'
+    + '.items-table th{background:#f5f5f5;padding:5px 8px;font-size:11px}'
+    + '.items-table td{padding:5px 8px;font-size:11px}'
+    + '.time{font-size:10px;color:#999}'
+    + '@media print{body{padding:10px}}'
+    + '</style></head><body>'
+    + '<div class="header"><h1>مجموعة أبو عمران التجارية</h1>'
+    + '<h2>كشف حساب — ' + escHtml(name) + '</h2>'
+    + '<p>تاريخ الطباعة: ' + new Date().toLocaleDateString('ar-JO-u-nu-latn') + '</p></div>'
+    + '<div style="display:flex;justify-content:space-between;margin-bottom:16px;font-size:14px">'
+    + '<div><strong>إجمالي الفواتير:</strong> ' + fmt(data.total_invoiced) + ' د.أ</div>'
+    + '<div><strong>المدفوع:</strong> ' + fmt(data.total_paid) + ' د.أ</div>'
+    + '<div><strong>الرصيد:</strong> ' + fmt(data.balance) + ' د.أ</div></div>'
+    + '<table><thead><tr><th>التاريخ</th><th>البيان</th><th>مدين</th><th>دائن</th><th>الرصيد</th></tr></thead>'
+    + '<tbody>' + bodyRows + '</tbody></table>'
+    + '</body></html>');
+  w.document.close();
+  setTimeout(function() { w.print(); }, 500);
 }
 
 function openRecipientPayment(name, clientId) {
@@ -9368,11 +9474,16 @@ async function viewClientStatement(id, name) {
           ? 'background:#fff9f9'
           : 'background:#edfaf4';
       const txItems = Array.isArray(t.items) ? t.items : [];
+      const stmtCreatedTime = t.created_at ? new Date(t.created_at) : null;
+      const stmtTimeStr = stmtCreatedTime && !isNaN(stmtCreatedTime.getTime())
+        ? stmtCreatedTime.toLocaleTimeString('ar-JO-u-nu-latn', { hour: '2-digit', minute: '2-digit' })
+        : '';
 
       let row = `<tr data-tx-type="${t.type}" data-tx-method="${pm}"
                           style="border-top:1px solid #f0ede8;${bg}">
                 <td style="padding:10px 12px;color:#9e9a94;white-space:nowrap">
                   ${fmtDate(t.date)}
+                  ${isInv && stmtTimeStr ? `<div style="font-size:10px;color:#b0ada8">${stmtTimeStr}</div>` : ''}
                 </td>
                 <td style="padding:10px 12px;font-weight:600">
                   ${isInv

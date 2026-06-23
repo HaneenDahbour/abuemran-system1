@@ -232,7 +232,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
 
 
 @router.put("/{purchase_id}/receive")
-async def receive_purchase(purchase_id: UUID, user=Depends(get_current_user)):
+async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     pool = await get_pool()
@@ -343,7 +343,7 @@ async def receive_purchase(purchase_id: UUID, user=Depends(get_current_user)):
 
 
 @router.put("/{purchase_id}")
-async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends(get_current_user)):
+async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     if not data.items:
@@ -499,7 +499,7 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
 
 
 @router.delete("/{purchase_id}")
-async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
+async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     pool = await get_pool()
@@ -538,13 +538,13 @@ async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 
-            await insert_audit(
-                conn,
-                user,
-                "حذف فاتورة شراء",
-                purchase_id,
-                f"حذف فاتورة شراء #{purchase['invoice_number']}",
-            )
+                await insert_audit(
+                    conn,
+                    user,
+                    "حذف فاتورة شراء",
+                    None,
+                    f"حذف فاتورة شراء #{purchase['invoice_number']}",
+                )
 
             return {"success": True}
 
