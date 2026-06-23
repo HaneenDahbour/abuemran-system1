@@ -1276,9 +1276,18 @@ async def get_movements(product_id: UUID, user=Depends(get_current_user)):
     try:
         rows = await pool.fetch(
             """
-            SELECT sm.*, u.full_name AS user_name
+            SELECT sm.*, u.full_name AS user_name,
+                   p.invoice_number AS purchase_invoice,
+                   p.status AS purchase_status,
+                   sup.name AS purchase_supplier,
+                   CASE
+                     WHEN sm.source_type = 'purchase' AND sm.source_id IS NOT NULL AND p.id IS NULL
+                     THEN true ELSE false
+                   END AS orphaned
             FROM stock_movements sm
             LEFT JOIN users u ON u.id = sm.created_by
+            LEFT JOIN purchases p ON sm.source_type = 'purchase' AND sm.source_id = p.id
+            LEFT JOIN suppliers sup ON p.supplier_id = sup.id
             WHERE sm.product_id = $1
             ORDER BY sm.created_at DESC
             LIMIT 100
@@ -1288,6 +1297,48 @@ async def get_movements(product_id: UUID, user=Depends(get_current_user)):
 
         return [row_to_dict(r) for r in rows]
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{product_id}/movements/{movement_id}")
+async def delete_stock_movement(product_id: UUID, movement_id: int, user=Depends(get_current_user)):
+    require_role(user, "admin")
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                movement = await conn.fetchrow(
+                    "SELECT * FROM stock_movements WHERE id=$1 AND product_id=$2",
+                    movement_id, product_id,
+                )
+                if not movement:
+                    raise HTTPException(status_code=404, detail="حركة المخزون غير موجودة")
+
+                qty = float(movement["quantity"] or 0)
+                if movement["type"] == "in":
+                    await conn.execute(
+                        "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
+                        qty, product_id,
+                    )
+                else:
+                    await conn.execute(
+                        "UPDATE products SET current_stock = current_stock + $1 WHERE id = $2",
+                        qty, product_id,
+                    )
+
+                await conn.execute("DELETE FROM stock_movements WHERE id=$1", movement_id)
+
+                updated = await conn.fetchrow("SELECT current_stock FROM products WHERE id=$1", product_id)
+
+                await insert_audit(conn, user, "حذف حركة مخزون",
+                    f"حذف حركة #{movement_id} — كمية {qty}")
+
+                return {"success": True, "new_stock": float(updated["current_stock"] or 0)}
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
