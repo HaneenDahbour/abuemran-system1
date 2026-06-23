@@ -141,6 +141,7 @@ async def recipient_statement(recipient_name: str, user=Depends(get_current_user
                 i.id,
                 i.invoice_number,
                 i.date,
+                i.created_at,
                 i.total_amount,
                 i.payment_method,
                 i.notes,
@@ -156,6 +157,32 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
             """,
             recipient_name,
         )
+
+        invoice_ids = [r["id"] for r in inv_rows]
+        items_by_invoice = {}
+        if invoice_ids:
+            all_items = await pool.fetch(
+                """
+                SELECT ii.invoice_id, ii.quantity, ii.unit_price, ii.line_total,
+                       ii.description,
+                       p.name AS product_name, p.unit AS product_unit
+                FROM invoice_items ii
+                LEFT JOIN products p ON p.id = ii.product_id
+                WHERE ii.invoice_id = ANY($1::int[])
+                ORDER BY ii.id
+                """,
+                invoice_ids,
+            )
+            for item in all_items:
+                iid = item["invoice_id"]
+                if iid not in items_by_invoice:
+                    items_by_invoice[iid] = []
+                items_by_invoice[iid].append({
+                    "product_name": item["product_name"] or item["description"] or "",
+                    "quantity": float(item["quantity"] or 0),
+                    "unit_price": float(item["unit_price"] or 0),
+                    "line_total": float(item["line_total"] or 0),
+                })
 
         manual_pay_rows = await pool.fetch(
     """
@@ -191,6 +218,7 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
 
             d["type"] = "invoice"
             d["amount"] = total
+            d["items"] = items_by_invoice.get(r["id"], [])
             transactions.append(d)
 
             if paid_now > 0:
