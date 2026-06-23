@@ -317,6 +317,36 @@ async def update_plot(plot_id: int, data: PlotRequest, user=Depends(get_current_
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/plots/{plot_id}")
+async def delete_plot(plot_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            contracts = await conn.fetchval(
+                "SELECT COUNT(*) FROM aradi_sale_contracts WHERE plot_id=$1", plot_id
+            )
+            if contracts > 0:
+                raise HTTPException(status_code=400, detail="لا يمكن حذف القطعة لوجود عقود مرتبطة بها")
+            investments = await conn.fetchval(
+                "SELECT COUNT(*) FROM aradi_investments WHERE plot_id=$1", plot_id
+            )
+            if investments > 0:
+                raise HTTPException(status_code=400, detail="لا يمكن حذف القطعة لوجود استثمارات مرتبطة بها")
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_plots WHERE id=$1 RETURNING *", plot_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="القطعة غير موجودة")
+            await audit(conn, user, "delete", "aradi_plot", plot_id,
+                        f"حذف قطعة أرض رقم {row['plot_number']}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════
 # Buyers — المشترون
 # ═══════════════════════════════════════════════════════════════
@@ -391,6 +421,31 @@ async def update_buyer(buyer_id: int, data: BuyerRequest, user=Depends(get_curre
             await audit(conn, user, "update", "aradi_buyer", buyer_id,
                         f"تعديل بيانات المشتري: {row['name']}")
             return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/buyers/{buyer_id}")
+async def delete_buyer(buyer_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            contracts = await conn.fetchval(
+                "SELECT COUNT(*) FROM aradi_sale_contracts WHERE buyer_id=$1", buyer_id
+            )
+            if contracts > 0:
+                raise HTTPException(status_code=400, detail="لا يمكن حذف المشتري لوجود عقود مرتبطة به")
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_buyers WHERE id=$1 RETURNING *", buyer_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="المشتري غير موجود")
+            await audit(conn, user, "delete", "aradi_buyer", buyer_id,
+                        f"حذف المشتري: {row['name']}")
+            return {"ok": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -569,6 +624,50 @@ async def update_contract(contract_id: int, data: ContractRequest, user=Depends(
             await audit(conn, user, "update", "aradi_contract", contract_id,
                         f"تعديل عقد رقم {contract_id}")
             return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/contracts/{contract_id}")
+async def delete_contract(contract_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT * FROM aradi_sale_contracts WHERE id=$1", contract_id
+                )
+                if not row:
+                    raise HTTPException(status_code=404, detail="العقد غير موجود")
+                confirmed = await conn.fetchval(
+                    "SELECT COUNT(*) FROM aradi_buyer_payments WHERE contract_id=$1 AND status='confirmed'",
+                    contract_id,
+                )
+                if confirmed > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="لا يمكن حذف العقد لوجود دفعات مؤكدة مرتبطة به، قم بإلغائها أولاً",
+                    )
+                await conn.execute(
+                    "DELETE FROM aradi_buyer_payments WHERE contract_id=$1", contract_id
+                )
+                await conn.execute(
+                    "DELETE FROM aradi_installments WHERE contract_id=$1", contract_id
+                )
+                await conn.execute(
+                    "DELETE FROM aradi_sale_contracts WHERE id=$1", contract_id
+                )
+                if row["plot_id"]:
+                    await conn.execute(
+                        "UPDATE aradi_plots SET status='available', updated_at=NOW() WHERE id=$1 AND status='sold'",
+                        row["plot_id"],
+                    )
+                await audit(conn, user, "delete", "aradi_contract", contract_id,
+                            f"حذف عقد بيع رقم {row['contract_number'] or contract_id}")
+        return {"ok": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -799,6 +898,36 @@ async def update_installment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/installments/{installment_id}")
+async def delete_installment(installment_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            payments = await conn.fetchval(
+                "SELECT COUNT(*) FROM aradi_buyer_payments WHERE installment_id=$1 AND status='confirmed'",
+                installment_id,
+            )
+            if payments > 0:
+                raise HTTPException(status_code=400, detail="لا يمكن حذف القسط لوجود دفعات مؤكدة مرتبطة به")
+            await conn.execute(
+                "UPDATE aradi_buyer_payments SET installment_id=NULL WHERE installment_id=$1",
+                installment_id,
+            )
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_installments WHERE id=$1 RETURNING *", installment_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="القسط غير موجود")
+            await audit(conn, user, "delete", "aradi_installment", installment_id,
+                        f"حذف قسط رقم {row['installment_number']}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════
 # Buyer Payments — مقبوضات المشترين
 # ═══════════════════════════════════════════════════════════════
@@ -936,6 +1065,26 @@ async def update_buyer_payment(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/payments/{payment_id}")
+async def delete_buyer_payment(payment_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_buyer_payments WHERE id=$1 RETURNING *", payment_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
+            await audit(conn, user, "delete", "aradi_buyer_payment", payment_id,
+                        f"حذف دفعة مشترٍ بمبلغ {float(row['amount'])}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════
 # Investors — المستثمرون
 # ═══════════════════════════════════════════════════════════════
@@ -1009,6 +1158,31 @@ async def update_investor(investor_id: int, data: InvestorRequest, user=Depends(
             await audit(conn, user, "update", "aradi_investor", investor_id,
                         f"تعديل بيانات المستثمر: {row['name']}")
             return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/investors/{investor_id}")
+async def delete_investor(investor_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            investments = await conn.fetchval(
+                "SELECT COUNT(*) FROM aradi_investments WHERE investor_id=$1", investor_id
+            )
+            if investments > 0:
+                raise HTTPException(status_code=400, detail="لا يمكن حذف المستثمر لوجود استثمارات مرتبطة به")
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_investors WHERE id=$1 RETURNING *", investor_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="المستثمر غير موجود")
+            await audit(conn, user, "delete", "aradi_investor", investor_id,
+                        f"حذف المستثمر: {row['name']}")
+            return {"ok": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -1142,6 +1316,57 @@ async def update_investment(
             await audit(conn, user, "update", "aradi_investment", investment_id,
                         f"تعديل استثمار رقم {investment_id}")
             return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/investments/{investment_id}")
+async def delete_investment(investment_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT * FROM aradi_investments WHERE id=$1", investment_id
+                )
+                if not row:
+                    raise HTTPException(status_code=404, detail="الاستثمار غير موجود")
+                confirmed = await conn.fetchval(
+                    "SELECT COUNT(*) FROM aradi_investor_payments WHERE investment_id=$1 AND status='confirmed'",
+                    investment_id,
+                )
+                if confirmed > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="لا يمكن حذف الاستثمار لوجود دفعات مؤكدة مرتبطة به",
+                    )
+                await conn.execute(
+                    "DELETE FROM aradi_investor_payments WHERE investment_id=$1",
+                    investment_id,
+                )
+                await conn.execute(
+                    "DELETE FROM aradi_investor_payouts WHERE investment_id=$1",
+                    investment_id,
+                )
+                await conn.execute(
+                    "DELETE FROM aradi_investments WHERE id=$1", investment_id
+                )
+                if row["plot_id"]:
+                    remaining = await conn.fetchval(
+                        "SELECT COUNT(*) FROM aradi_investments WHERE plot_id=$1 AND id!=$2",
+                        row["plot_id"], investment_id,
+                    )
+                    if remaining == 0:
+                        await conn.execute(
+                            "UPDATE aradi_plots SET status='available', updated_at=NOW() WHERE id=$1 AND status='invested'",
+                            row["plot_id"],
+                        )
+                await audit(conn, user, "delete", "aradi_investment", investment_id,
+                            f"حذف استثمار رقم {row['investment_number'] or investment_id}")
+        return {"ok": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -1283,6 +1508,30 @@ async def update_investor_payout(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/investor-payouts/{payout_id}")
+async def delete_investor_payout(payout_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE aradi_investor_payments SET payout_id=NULL WHERE payout_id=$1",
+                payout_id,
+            )
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_investor_payouts WHERE id=$1 RETURNING *", payout_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="الاستحقاق غير موجود")
+            await audit(conn, user, "delete", "aradi_investor_payout", payout_id,
+                        f"حذف استحقاق رقم {payout_id}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════
 # Investor Payments — مدفوعات للمستثمرين
 # ═══════════════════════════════════════════════════════════════
@@ -1388,6 +1637,26 @@ async def update_investor_payment(
             await audit(conn, user, "update", "aradi_investor_payment", payment_id,
                         f"تعديل دفعة مستثمر رقم {payment_id} → {new_status}")
             return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/investor-payments/{payment_id}")
+async def delete_investor_payment(payment_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_investor_payments WHERE id=$1 RETURNING *", payment_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
+            await audit(conn, user, "delete", "aradi_investor_payment", payment_id,
+                        f"حذف دفعة مستثمر بمبلغ {float(row['amount'])}")
+            return {"ok": True}
     except HTTPException:
         raise
     except Exception as e:
@@ -1522,6 +1791,26 @@ async def update_aradi_check(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/checks/{check_id}")
+async def delete_aradi_check(check_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_checks WHERE id=$1 RETURNING *", check_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="الشيك غير موجود")
+            await audit(conn, user, "delete", "aradi_check", check_id,
+                        f"حذف شيك رقم {row['check_number'] or check_id}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═══════════════════════════════════════════════════════════════
 # Expenses — المصاريف
 # ═══════════════════════════════════════════════════════════════
@@ -1620,6 +1909,26 @@ async def update_aradi_expense(
             await audit(conn, user, "update", "aradi_expense", expense_id,
                         f"تعديل مصروف رقم {expense_id} → {new_status}")
             return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/expenses/{expense_id}")
+async def delete_aradi_expense(expense_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_expenses WHERE id=$1 RETURNING *", expense_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="المصروف غير موجود")
+            await audit(conn, user, "delete", "aradi_expense", expense_id,
+                        f"حذف مصروف بمبلغ {float(row['amount'])}")
+            return {"ok": True}
     except HTTPException:
         raise
     except Exception as e:

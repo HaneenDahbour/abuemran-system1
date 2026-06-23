@@ -298,6 +298,7 @@ function renderPlots(q=''){
           <td style="max-width:150px;font-size:12px;color:var(--tx2)">${esc(r.notes||'')}</td>
           <td><div style="display:flex;gap:6px">
             <button class="btn btn-ghost btn-sm" onclick="showPlotForm(${r.id})">✏️ تعديل</button>
+            <button class="btn btn-danger btn-sm" onclick="deletePlot(${r.id},'${esc(r.plot_number)}')">🗑️ حذف</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد قطع أراضي</td></tr>`}
       </tbody>
@@ -362,6 +363,13 @@ async function savePlot(id){
   }catch(e){ err.textContent=e.message; }
 }
 
+async function deletePlot(id,num){
+  confirm2(`هل تريد حذف القطعة ${num}؟ هذا الإجراء لا يمكن التراجع عنه.`,async()=>{
+    await api(`/aradi/plots/${id}`,{method:'DELETE'});
+    toast('تم حذف القطعة','success'); await loadPlots();
+  });
+}
+
 /* ════════════ BUYERS ════════════ */
 async function loadBuyers(q=''){
   loading();
@@ -393,6 +401,7 @@ function renderBuyers(q=''){
           <td><div style="display:flex;gap:6px">
             <button class="btn btn-ghost btn-sm" onclick="showBuyerForm(${r.id})">✏️</button>
             <button class="btn btn-ghost btn-sm" onclick="nav('contracts');loadContracts('',${r.id})">📋 عقوده</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteBuyer(${r.id},'${esc(r.name)}')">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="5">لا يوجد مشترون</td></tr>`}
       </tbody>
@@ -426,6 +435,13 @@ async function saveBuyer(id){
     else await api('/aradi/buyers',{method:'POST',body:JSON.stringify(body)});
     closeModal(); toast('تم الحفظ','success'); await loadBuyers();
   }catch(e){ err.textContent=e.message; }
+}
+
+async function deleteBuyer(id,name){
+  confirm2(`هل تريد حذف المشتري "${name}"؟`,async()=>{
+    await api(`/aradi/buyers/${id}`,{method:'DELETE'});
+    toast('تم حذف المشتري','success'); await loadBuyers();
+  });
 }
 
 /* ════════════ CONTRACTS ════════════ */
@@ -464,6 +480,7 @@ function renderContracts(q='',buyerId=null){
           <td><div style="display:flex;gap:5px">
             <button class="btn btn-primary btn-sm" onclick="showContractDetail(${r.id})">📋 تفاصيل</button>
             <button class="btn btn-ghost btn-sm" onclick="showContractEditForm(${r.id})">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteContract(${r.id},'${esc(r.contract_number||r.id)}')">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="7">لا توجد عقود</td></tr>`}
       </tbody>
@@ -558,6 +575,13 @@ async function updateContract(id){
     await api(`/aradi/contracts/${id}`,{method:'PUT',body:JSON.stringify(body)});
     closeModal(); toast('تم التعديل','success'); await loadContracts();
   }catch(e){ document.getElementById('ce-err').textContent=e.message; }
+}
+
+async function deleteContract(id,num){
+  confirm2(`هل تريد حذف العقد "${num}"؟ سيتم حذف جميع الأقساط والدفعات غير المؤكدة المرتبطة به.`,async()=>{
+    await api(`/aradi/contracts/${id}`,{method:'DELETE'});
+    toast('تم حذف العقد','success'); await loadContracts();
+  });
 }
 
 async function showContractDetail(id){
@@ -735,10 +759,42 @@ function renderInstallments(rows,filter='all'){
           <td>${cur(r.paid)}</td>
           <td>${cur(r.remaining)}</td>
           <td>${statusBadge(r.computed_status)}</td>
-          <td><button class="btn btn-ghost btn-sm" onclick="showBuyerPayForm(${r.contract_id},${r.id},${r.remaining||r.amount})">💵 دفع</button></td>
+          <td><div style="display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm" onclick="showBuyerPayForm(${r.contract_id},${r.id},${r.remaining||r.amount})">💵 دفع</button>
+            <button class="btn btn-ghost btn-sm" onclick="showInstallmentEdit(${r.id},${r.installment_number},'${r.due_date}',${r.amount},'${esc(r.notes||'')}')">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteInstallment(${r.id},${r.installment_number})">🗑️</button>
+          </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد أقساط</td></tr>`}
       </tbody>
     </table></div>`);
+}
+
+async function showInstallmentEdit(id,num,dueDate,amount,notes){
+  openModal(`
+    <div class="modal-header"><div class="modal-title">تعديل القسط رقم ${num}</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">تاريخ الاستحقاق</label><input class="form-input" type="date" id="ied-date" value="${dueDate||''}"/></div>
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="ied-amt" value="${amount}"/></div>
+    </div>
+    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="ied-notes" value="${esc(notes)}"/></div>
+    <div id="ied-err" class="portal-err"></div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn btn-primary" style="flex:1" onclick="updateInstallment(${id})">💾 حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>`,'440px');
+}
+
+async function updateInstallment(id){
+  const body={due_date:document.getElementById('ied-date').value||null,amount:parseFloat(document.getElementById('ied-amt').value)||null,notes:document.getElementById('ied-notes').value.trim()||null};
+  try{ await api(`/aradi/installments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadInstallments(); }
+  catch(e){ document.getElementById('ied-err').textContent=e.message; }
+}
+
+async function deleteInstallment(id,num){
+  confirm2(`هل تريد حذف القسط رقم ${num}؟`,async()=>{
+    await api(`/aradi/installments/${id}`,{method:'DELETE'});
+    toast('تم حذف القسط','success'); loadInstallments();
+  });
 }
 
 /* ════════════ BUYER PAYMENTS ════════════ */
@@ -763,11 +819,50 @@ async function loadBuyerPayments(){
             <td>${methodLabel(r.method)}</td>
             <td>${statusBadge(r.status)}</td>
             <td style="font-size:12px;color:var(--tx2)">${esc(r.notes||'')}</td>
-            <td>${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="voidBuyerPay(${r.id})">🚫 إلغاء</button>`:''}</td>
+            <td><div style="display:flex;gap:4px">
+              ${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="editBuyerPay(${r.id})">✏️</button>`:''}
+              ${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="voidBuyerPay(${r.id})">🚫 إلغاء</button>`:''}
+              <button class="btn btn-danger btn-sm" onclick="deleteBuyerPay(${r.id})">🗑️</button>
+            </div></td>
           </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد دفعات</td></tr>`}
         </tbody>
       </table></div>`);
   }catch(e){ errPage(e.message); }
+}
+
+async function editBuyerPay(id){
+  const rows=await api('/aradi/payments').catch(()=>[]);
+  const r=rows.find(x=>x.id===id); if(!r) return;
+  openModal(`
+    <div class="modal-header"><div class="modal-title">تعديل الدفعة</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" type="date" id="ebp-date" value="${r.payment_date||''}"/></div>
+      <div class="form-group"><label class="form-label">طريقة الدفع</label>
+        <select class="form-select" id="ebp-meth">${['cash','check','bank_transfer','other'].map(m=>`<option value="${m}" ${r.method===m?'selected':''}>${methodLabel(m)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">الحالة</label>
+      <select class="form-select" id="ebp-stat">${['pending','confirmed','rejected','void'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select>
+    </div>
+    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="ebp-notes" value="${esc(r.notes||'')}"/></div>
+    <div id="ebp-err" class="portal-err"></div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveBuyerPayEdit(${id})">💾 حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>`,'440px');
+}
+
+async function saveBuyerPayEdit(id){
+  const body={payment_date:document.getElementById('ebp-date').value||null,method:document.getElementById('ebp-meth').value,status:document.getElementById('ebp-stat').value,notes:document.getElementById('ebp-notes').value.trim()||null};
+  try{ await api(`/aradi/payments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadBuyerPayments(); }
+  catch(e){ document.getElementById('ebp-err').textContent=e.message; }
+}
+
+async function deleteBuyerPay(id){
+  confirm2('هل تريد حذف هذه الدفعة نهائياً؟',async()=>{
+    await api(`/aradi/payments/${id}`,{method:'DELETE'});
+    toast('تم الحذف','success'); loadBuyerPayments();
+  });
 }
 
 async function showAddPayModal(){
@@ -846,6 +941,7 @@ function renderInvestors(q=''){
           <td style="font-size:12px;color:var(--tx2)">${esc(r.notes||'')}</td>
           <td><div style="display:flex;gap:6px">
             <button class="btn btn-ghost btn-sm" onclick="showInvestorForm(${r.id})">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteInvestor(${r.id},'${esc(r.name)}')">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="5">لا يوجد مستثمرون</td></tr>`}
       </tbody>
@@ -881,6 +977,13 @@ async function saveInvestor(id){
   }catch(e){ err.textContent=e.message; }
 }
 
+async function deleteInvestor(id,name){
+  confirm2(`هل تريد حذف المستثمر "${name}"؟`,async()=>{
+    await api(`/aradi/investors/${id}`,{method:'DELETE'});
+    toast('تم حذف المستثمر','success'); loadInvestors();
+  });
+}
+
 /* ════════════ INVESTMENTS ════════════ */
 async function loadInvestments(){
   loading();
@@ -908,6 +1011,7 @@ async function loadInvestments(){
             <td><div style="display:flex;gap:5px">
               <button class="btn btn-primary btn-sm" onclick="showInvestmentDetail(${r.id})">📋 كشف</button>
               <button class="btn btn-ghost btn-sm" onclick="showInvestmentEdit(${r.id})">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteInvestment(${r.id},'${esc(r.investment_number||r.id)}')">🗑️</button>
             </div></td>
           </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد استثمارات</td></tr>`}
         </tbody>
@@ -1007,6 +1111,13 @@ async function updateInvestment(id,investorId){
   catch(e){ document.getElementById('ie-err').textContent=e.message; }
 }
 
+async function deleteInvestment(id,num){
+  confirm2(`هل تريد حذف الاستثمار "${num}"؟ سيتم حذف جميع الاستحقاقات والدفعات غير المؤكدة المرتبطة به.`,async()=>{
+    await api(`/aradi/investments/${id}`,{method:'DELETE'});
+    toast('تم حذف الاستثمار','success'); loadInvestments();
+  });
+}
+
 /* ════════════ INVESTOR PAYMENTS ════════════ */
 async function loadInvestorPayments(){
   loading();
@@ -1027,11 +1138,50 @@ async function loadInvestorPayments(){
             <td>${methodLabel(r.method)}</td>
             <td>${statusBadge(r.status)}</td>
             <td style="font-size:12px;color:var(--tx2)">${esc(r.notes||'')}</td>
-            <td>${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="voidInvPay(${r.id})">🚫 إلغاء</button>`:''}</td>
+            <td><div style="display:flex;gap:4px">
+              ${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="editInvPay(${r.id})">✏️</button>`:''}
+              ${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="voidInvPay(${r.id})">🚫 إلغاء</button>`:''}
+              <button class="btn btn-danger btn-sm" onclick="deleteInvPay(${r.id})">🗑️</button>
+            </div></td>
           </tr>`).join(''):`<tr class="empty"><td colspan="7">لا توجد دفعات</td></tr>`}
         </tbody>
       </table></div>`);
   }catch(e){ errPage(e.message); }
+}
+
+async function editInvPay(id){
+  const rows=await api('/aradi/investor-payments').catch(()=>[]);
+  const r=rows.find(x=>x.id===id); if(!r) return;
+  openModal(`
+    <div class="modal-header"><div class="modal-title">تعديل دفعة المستثمر</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" type="date" id="eip-date" value="${r.payment_date||''}"/></div>
+      <div class="form-group"><label class="form-label">طريقة الدفع</label>
+        <select class="form-select" id="eip-meth">${['cash','check','bank_transfer','other'].map(m=>`<option value="${m}" ${r.method===m?'selected':''}>${methodLabel(m)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">الحالة</label>
+      <select class="form-select" id="eip-stat">${['pending','confirmed','rejected','void'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select>
+    </div>
+    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="eip-notes" value="${esc(r.notes||'')}"/></div>
+    <div id="eip-err" class="portal-err"></div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveInvPayEdit(${id})">💾 حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>`,'440px');
+}
+
+async function saveInvPayEdit(id){
+  const body={payment_date:document.getElementById('eip-date').value||null,method:document.getElementById('eip-meth').value,status:document.getElementById('eip-stat').value,notes:document.getElementById('eip-notes').value.trim()||null};
+  try{ await api(`/aradi/investor-payments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadInvestorPayments(); }
+  catch(e){ document.getElementById('eip-err').textContent=e.message; }
+}
+
+async function deleteInvPay(id){
+  confirm2('هل تريد حذف هذه الدفعة نهائياً؟',async()=>{
+    await api(`/aradi/investor-payments/${id}`,{method:'DELETE'});
+    toast('تم الحذف','success'); loadInvestorPayments();
+  });
 }
 
 async function showInvestorPayForm(investmentId){
@@ -1126,7 +1276,10 @@ async function loadChecks(){
             <td>${fmtDate(r.received_date)}</td>
             <td>${esc(r.bank_name||'—')}</td>
             <td>${statusBadge(r.status)}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="showCheckEdit(${r.id})">✏️ تحديث</button></td>
+            <td><div style="display:flex;gap:4px">
+              <button class="btn btn-ghost btn-sm" onclick="showCheckEdit(${r.id})">✏️ تحديث</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCheck(${r.id},'${esc(r.check_number||r.id)}')">🗑️</button>
+            </div></td>
           </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد شيكات</td></tr>`}
         </tbody>
       </table></div>`);
@@ -1201,6 +1354,13 @@ async function updateCheck(id){
   catch(e){ document.getElementById('che-err').textContent=e.message; }
 }
 
+async function deleteCheck(id,num){
+  confirm2(`هل تريد حذف الشيك "${num}" نهائياً؟`,async()=>{
+    await api(`/aradi/checks/${id}`,{method:'DELETE'});
+    toast('تم حذف الشيك','success'); loadChecks();
+  });
+}
+
 /* ════════════ EXPENSES ════════════ */
 async function loadExpenses(){
   loading();
@@ -1223,7 +1383,11 @@ async function loadExpenses(){
             <td>${methodLabel(r.method)}</td>
             <td>${statusBadge(r.status)}</td>
             <td style="font-size:12px;color:var(--tx2)">${esc(r.notes||'')}</td>
-            <td>${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="voidExpense(${r.id})">🚫 إلغاء</button>`:''}</td>
+            <td><div style="display:flex;gap:4px">
+              ${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="editExpense(${r.id})">✏️</button>`:''}
+              ${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="voidExpense(${r.id})">🚫 إلغاء</button>`:''}
+              <button class="btn btn-danger btn-sm" onclick="deleteExpense(${r.id})">🗑️</button>
+            </div></td>
           </tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد مصاريف</td></tr>`}
         </tbody>
       </table></div>`);
@@ -1272,6 +1436,38 @@ async function voidExpense(id){
   confirm2('إلغاء هذا المصروف؟',async()=>{
     await api(`/aradi/expenses/${id}`,{method:'PUT',body:JSON.stringify({status:'void'})});
     toast('تم الإلغاء','success'); loadExpenses();
+  });
+}
+
+async function editExpense(id){
+  const rows=await api('/aradi/expenses').catch(()=>[]);
+  const r=rows.find(x=>x.id===id); if(!r) return;
+  openModal(`
+    <div class="modal-header"><div class="modal-title">تعديل المصروف</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">التصنيف</label><input class="form-input" id="ee-cat" value="${esc(r.category||'')}"/></div>
+      <div class="form-group"><label class="form-label">الحالة</label>
+        <select class="form-select" id="ee-stat">${['pending','confirmed','rejected','void'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="ee-notes" value="${esc(r.notes||'')}"/></div>
+    <div id="ee-err" class="portal-err"></div>
+    <div style="display:flex;gap:10px;margin-top:6px">
+      <button class="btn btn-primary" style="flex:1" onclick="saveExpenseEdit(${id})">💾 حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>`,'440px');
+}
+
+async function saveExpenseEdit(id){
+  const body={category:document.getElementById('ee-cat').value.trim()||null,status:document.getElementById('ee-stat').value,notes:document.getElementById('ee-notes').value.trim()||null};
+  try{ await api(`/aradi/expenses/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadExpenses(); }
+  catch(e){ document.getElementById('ee-err').textContent=e.message; }
+}
+
+async function deleteExpense(id){
+  confirm2('هل تريد حذف هذا المصروف نهائياً؟',async()=>{
+    await api(`/aradi/expenses/${id}`,{method:'DELETE'});
+    toast('تم الحذف','success'); loadExpenses();
   });
 }
 
