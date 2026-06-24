@@ -50,10 +50,16 @@ def parse_purchase_date(value: Optional[str]) -> date:
         raise HTTPException(status_code=400, detail="تاريخ فاتورة الشراء غير صحيح")
 
 
+def parse_int_id(val, label="المعرّف"):
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"{label} غير صحيح")
+
+
 async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail: str):
-    # audit_log.entity_id is INTEGER in the live schema while purchases.id is UUID.
-    # Keep the UUID in detail and leave the incompatible legacy column empty.
-    audit_entity_id = None if isinstance(entity_id, UUID) else entity_id
     try:
         await conn.execute(
             """
@@ -63,7 +69,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
             user.get("id"),
             user.get("full_name") or user.get("username") or "مستخدم",
             action,
-            audit_entity_id,
+            entity_id,
             detail,
         )
     except Exception:
@@ -136,16 +142,14 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
     )
     purchase_date = parse_purchase_date(data.date)
     notes = clean_text(data.notes)
-    supplier_id = safe_uuid(data.supplier_id) if data.supplier_id else None
-    if data.supplier_id and not supplier_id:
-        raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
+    supplier_id = parse_int_id(data.supplier_id, "معرّف المورد") if data.supplier_id else None
 
     pool = await get_pool()
 
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                if data.supplier_id is not None:
+                if supplier_id is not None:
                     supplier_exists = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
                         supplier_id,
@@ -229,7 +233,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
 
 
 @router.put("/{purchase_id}/receive")
-async def receive_purchase(purchase_id: UUID, user=Depends(get_current_user)):
+async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     pool = await get_pool()
@@ -252,6 +256,11 @@ async def receive_purchase(purchase_id: UUID, user=Depends(get_current_user)):
                         status_code=400,
                         detail="لا يمكن استلام هذه الفاتورة لأنها ليست معلّقة أو تم استلامها مسبقاً",
                     )
+
+                await conn.execute(
+                    "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
+                    purchase_id,
+                )
 
                 items = await conn.fetch(
                     "SELECT * FROM purchase_items WHERE purchase_id=$1 ORDER BY id ASC",
@@ -340,16 +349,14 @@ async def receive_purchase(purchase_id: UUID, user=Depends(get_current_user)):
 
 
 @router.put("/{purchase_id}")
-async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends(get_current_user)):
+async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     if not data.items:
         raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
 
     pool = await get_pool()
-    supplier_id = safe_uuid(data.supplier_id) if data.supplier_id else None
-    if data.supplier_id and not supplier_id:
-        raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
+    supplier_id = parse_int_id(data.supplier_id, "معرّف المورد") if data.supplier_id else None
 
     try:
         async with pool.acquire() as conn:
@@ -364,7 +371,7 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
                         status_code=404, detail="فاتورة الشراء غير موجودة"
                     )
 
-                if data.supplier_id is not None:
+                if supplier_id is not None:
                     supplier_exists = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM suppliers WHERE id=$1)",
                         supplier_id,
@@ -373,15 +380,18 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
                         raise HTTPException(status_code=400, detail="المورد غير موجود")
 
                 if purchase["status"] == "received":
-                    old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
+                    actual_movements = await conn.fetch(
+                        """SELECT product_id, SUM(quantity) AS total_qty
+                           FROM stock_movements
+                           WHERE source_type='purchase' AND source_id=$1
+                           GROUP BY product_id""",
                         purchase_id,
                     )
-                    for item in old_items:
+                    for mov in actual_movements:
                         await conn.execute(
                             "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
-                            float(item["quantity"] or 0),
-                            item["product_id"],
+                            float(mov["total_qty"] or 0),
+                            mov["product_id"],
                         )
                     await conn.execute(
                         "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
@@ -476,19 +486,13 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
                     purchase_id,
                 )
 
-                try:
-                    await conn.execute(
-                        """
-                        INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
-                        VALUES ($1, $2, 'تعديل فاتورة شراء', 'purchase', $3, $4)
-                        """,
-                        user.get("id"),
-                        user.get("full_name") or "مستخدم",
-                        purchase_id,
-                        f"تعديل فاتورة #{invoice_number} — {total:.2f} د.أ",
-                    )
-                except Exception:
-                    pass
+                await insert_audit(
+                    conn,
+                    user,
+                    "تعديل فاتورة شراء",
+                    purchase_id,
+                    f"تعديل فاتورة #{invoice_number} — {total:.2f} د.أ",
+                )
 
                 return row_to_dict(updated)
 
@@ -499,7 +503,7 @@ async def update_purchase(purchase_id: UUID, data: PurchaseRequest, user=Depends
 
 
 @router.delete("/{purchase_id}")
-async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
+async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
 
     pool = await get_pool()
@@ -518,15 +522,18 @@ async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
                     )
 
                 if purchase["status"] == "received":
-                    old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
+                    actual_movements = await conn.fetch(
+                        """SELECT product_id, SUM(quantity) AS total_qty
+                           FROM stock_movements
+                           WHERE source_type='purchase' AND source_id=$1
+                           GROUP BY product_id""",
                         purchase_id,
                     )
-                    for item in old_items:
+                    for mov in actual_movements:
                         await conn.execute(
                             "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
-                            float(item["quantity"] or 0),
-                            item["product_id"],
+                            float(mov["total_qty"] or 0),
+                            mov["product_id"],
                         )
                     await conn.execute(
                         "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
@@ -538,26 +545,82 @@ async def delete_purchase(purchase_id: UUID, user=Depends(get_current_user)):
                 )
                 await conn.execute("DELETE FROM purchases WHERE id=$1", purchase_id)
 
-            # Audit is deliberately outside the stock/delete transaction.
-            # A schema mismatch in audit_log must never roll back the deletion.
-            try:
-                await conn.execute(
-                    """
-                    INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
-                    VALUES ($1, $2, 'حذف فاتورة شراء', 'purchase', $3, $4)
-                    """,
-                    user.get("id"),
-                    user.get("full_name") or "مستخدم",
-                    purchase_id,
+                await insert_audit(
+                    conn,
+                    user,
+                    "حذف فاتورة شراء",
+                    None,
                     f"حذف فاتورة شراء #{purchase['invoice_number']}",
                 )
-            except Exception:
-                pass
 
             return {"success": True}
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fix-stock")
+async def fix_stock_counts(user=Depends(get_current_user)):
+    """One-time endpoint to deduplicate stock movements and recalculate all product stock."""
+    require_role(user, "admin")
+
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                dupes = await conn.fetch(
+                    """SELECT source_id, product_id, type,
+                              COUNT(*) AS cnt, SUM(quantity) AS total_qty
+                       FROM stock_movements
+                       WHERE source_type = 'purchase'
+                       GROUP BY source_id, product_id, type
+                       HAVING COUNT(*) > 1"""
+                )
+
+                fixed_purchases = set()
+                for dupe in dupes:
+                    sid = dupe["source_id"]
+                    pid = dupe["product_id"]
+
+                    await conn.execute(
+                        """DELETE FROM stock_movements
+                           WHERE id IN (
+                             SELECT id FROM stock_movements
+                             WHERE source_type='purchase'
+                               AND source_id = $1
+                               AND product_id = $2
+                             ORDER BY id
+                             OFFSET 1
+                           )""",
+                        sid,
+                        pid,
+                    )
+                    fixed_purchases.add(sid)
+
+                updated = await conn.fetch(
+                    """UPDATE products p
+                       SET current_stock = COALESCE(sub.net, 0)
+                       FROM (
+                         SELECT product_id,
+                                SUM(CASE WHEN type='in' THEN quantity ELSE -quantity END) AS net
+                         FROM stock_movements
+                         GROUP BY product_id
+                       ) sub
+                       WHERE p.id = sub.product_id
+                         AND p.current_stock != COALESCE(sub.net, 0)
+                       RETURNING p.id, p.name, p.current_stock AS new_stock"""
+                )
+
+                return {
+                    "success": True,
+                    "duplicate_groups_fixed": len(dupes),
+                    "purchases_affected": list(fixed_purchases),
+                    "products_recalculated": [row_to_dict(r) for r in updated],
+                }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

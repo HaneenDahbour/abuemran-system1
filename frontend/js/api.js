@@ -281,6 +281,8 @@
       apiFetch(`/purchases/${encodeURIComponent(String(id))}/receive`, { method: 'PUT' }),
     deletePurchase: id =>
       apiFetch(`/purchases/${encodeURIComponent(String(id))}`, { method: 'DELETE' }),
+    fixStock: () =>
+      apiFetch('/purchases/fix-stock', { method: 'POST' }),
 
     // ── Warehouse Categories ──────────────────────────────────────
     getWarehouseCategories: () => apiFetch('/warehouse-categories'),
