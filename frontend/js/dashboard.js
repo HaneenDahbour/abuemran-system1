@@ -12,6 +12,13 @@ function safeJsonParse(value, fallback = null) {
   }
 }
 
+function normalizeOptionalId(value) {
+  const normalized = String(value ?? '').trim();
+  return (!normalized || ['null', 'undefined', 'nan'].includes(normalized.toLowerCase()))
+    ? null
+    : normalized;
+}
+
 if (typeof getUser !== 'function') {
   function getUser() {
     return safeJsonParse(localStorage.getItem('user'), null);
@@ -8136,6 +8143,7 @@ function openWarehouseRentModal(rentId = null) {
 }
 
 async function saveWarehouseRent(rentId) {
+  rentId = normalizeOptionalId(rentId);
   const name = document.getElementById('wr_name')?.value?.trim();
   const monthly_amount = parseFloat(document.getElementById('wr_amount')?.value);
   const currency = document.getElementById('wr_currency')?.value || 'JOD';
@@ -10045,6 +10053,7 @@ function openChinaInvestorModal(investorId = null) {
 }
 
 async function saveChinaInvestor(investorId) {
+  investorId = normalizeOptionalId(investorId);
   const name = document.getElementById('ci_name')?.value?.trim();
   const phone = document.getElementById('ci_phone')?.value?.trim() || null;
   const notes = document.getElementById('ci_notes')?.value?.trim() || null;
@@ -10287,6 +10296,7 @@ function openChinaSupplierModal(supplierId = null) {
 }
 
 async function saveChinaSupplier(supplierId) {
+  supplierId = normalizeOptionalId(supplierId);
   const name = document.getElementById('cs_name')?.value?.trim();
   const phone = document.getElementById('cs_phone')?.value?.trim() || null;
   const notes = document.getElementById('cs_notes')?.value?.trim() || null;
@@ -10602,8 +10612,9 @@ function openChinaPaymentModal(paymentId = null) {
 }
 
 async function saveChinaPayment(paymentId) {
+  paymentId = normalizeOptionalId(paymentId);
   const supplier_idRaw = document.getElementById('cp_supplier_id')?.value;
-  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
+  const supplier_id = normalizeOptionalId(supplier_idRaw);
   const supplier_name = document.getElementById('cp_supplier')?.value?.trim();
   const amount = parseFloat(document.getElementById('cp_amount')?.value);
   const currency = document.getElementById('cp_currency')?.value || 'JOD';
@@ -10756,13 +10767,14 @@ function openChinaPurchaseModal(purchaseId = null) {
 }
 
 async function saveChinaPurchase(purchaseId) {
+  purchaseId = normalizeOptionalId(purchaseId);
   const item_name = document.getElementById('cpu_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('cpu_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('cpu_amount')?.value);
   const currency = document.getElementById('cpu_currency')?.value || 'JOD';
   const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cpu_rate')?.value);
   const supplier_idRaw = document.getElementById('cpu_supplier_id')?.value;
-  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
+  const supplier_id = normalizeOptionalId(supplier_idRaw);
   const supplier_name = document.getElementById('cpu_supplier')?.value?.trim() || null;
   const purchase_date = document.getElementById('cpu_date')?.value;
   const notes = document.getElementById('cpu_notes')?.value?.trim() || null;
@@ -10905,6 +10917,7 @@ function openChinaSaleModal(saleId = null) {
 }
 
 async function saveChinaSale(saleId) {
+  saleId = normalizeOptionalId(saleId);
   const item_name = document.getElementById('csa_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('csa_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('csa_amount')?.value);
