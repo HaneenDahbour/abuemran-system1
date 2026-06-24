@@ -7329,7 +7329,7 @@ async function viewRecipientStatement(name) {
 
       <div style="display:flex;gap:8px;margin-top:14px">
         <button class="btn btn-ghost btn-sm"
-          onclick="printRecipientStatement(${jsString(name)}, ${jsString(JSON.stringify(data))})">
+          onclick="printRecipientStatementFromEncoded(${jsString(name)}, ${jsString(encodePayload(data))})">
           🖨️ طباعة
         </button>
         ${isAccountant() ? `
@@ -7346,8 +7346,13 @@ async function viewRecipientStatement(name) {
   }
 }
 
+function printRecipientStatementFromEncoded(name, encoded) {
+  const data = decodePayload(encoded);
+  if (!data) { toast('تعذر تجهيز بيانات الطباعة', 'error'); return; }
+  printRecipientStatement(name, data);
+}
+
 function printRecipientStatement(name, data) {
-  if (typeof data === 'string') try { data = JSON.parse(data); } catch { data = {}; }
   const txs = data.transactions || [];
 
   function buildItemsHtml(items) {
