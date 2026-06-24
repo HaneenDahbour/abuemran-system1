@@ -20,6 +20,14 @@ def safe_uuid(val):
         return None
 
 
+def coerce_id(val):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        pass
+    return safe_uuid(val) or val
+
+
 def to_json_value(value):
     if isinstance(value, Decimal):
         return float(value)
@@ -232,8 +240,9 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
 
 
 @router.put("/{purchase_id}/receive")
-async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
+async def receive_purchase(purchase_id: str, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    purchase_id = coerce_id(purchase_id)
 
     pool = await get_pool()
 
@@ -343,8 +352,9 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
 
 
 @router.put("/{purchase_id}")
-async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(get_current_user)):
+async def update_purchase(purchase_id: str, data: PurchaseRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    purchase_id = coerce_id(purchase_id)
 
     if not data.items:
         raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
@@ -499,8 +509,9 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
 
 
 @router.delete("/{purchase_id}")
-async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
+async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    purchase_id = coerce_id(purchase_id)
 
     pool = await get_pool()
 
