@@ -16,6 +16,7 @@ function _lockBtn(btn, text) { if (btn) { btn.disabled = true; btn.dataset.oldTe
 function _unlockBtn(btn) { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.oldText || 'حفظ'; } }
 function _modalBtn() { return document.querySelector('#global-modal .btn-primary'); }
 
+
 function normalizeOptionalId(value) {
   const normalized = String(value ?? '').trim();
   return (!normalized || ['null', 'undefined', 'nan'].includes(normalized.toLowerCase()))
