@@ -239,27 +239,41 @@ def normalize_items(items: List[InvoiceItem]) -> list[dict]:
 
 
 async def delete_auto_payment_for_invoice(conn, invoice_id: int):
-    marker = f"%invoice_id:{invoice_id}%"
+    exact_marker = f"% invoice_id:{invoice_id} |%"
+    end_marker = f"% invoice_id:{invoice_id}"
+    pipe_marker = f"invoice_id:{invoice_id} |%"
+    solo_marker = f"invoice_id:{invoice_id}"
 
     await conn.execute(
         """
         DELETE FROM recipient_payments
         WHERE invoice_id = $1
-           OR COALESCE(notes, '') ILIKE $2
+           OR COALESCE(notes, '') LIKE $2
+           OR COALESCE(notes, '') LIKE $3
+           OR COALESCE(notes, '') LIKE $4
+           OR COALESCE(notes, '') = $5
         """,
         invoice_id,
-        marker,
+        exact_marker,
+        f"%{end_marker}",
+        pipe_marker,
+        solo_marker,
     )
 
-    # legacy cleanup from old client-based payments.
-    # NOTE: the legacy `payments` table has no invoice_id column — match by the
-    # notes marker only, inside a savepoint so a failure (e.g. missing table)
-    # can't abort the main transaction.
     try:
         async with conn.transaction():
             await conn.execute(
-                "DELETE FROM payments WHERE COALESCE(notes, '') ILIKE $1",
-                marker,
+                """
+                DELETE FROM payments
+                WHERE COALESCE(notes, '') LIKE $1
+                   OR COALESCE(notes, '') LIKE $2
+                   OR COALESCE(notes, '') LIKE $3
+                   OR COALESCE(notes, '') = $4
+                """,
+                exact_marker,
+                f"%{end_marker}",
+                pipe_marker,
+                solo_marker,
             )
     except Exception:
         pass

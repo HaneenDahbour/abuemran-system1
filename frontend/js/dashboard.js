@@ -2961,43 +2961,136 @@ function renderPaymentRow(p) {
     </div></td>
   </tr>`;
 }
+
+function directPaymentStatusBadge(status) {
+  if (status === 'approved') return '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">معتمدة</span>';
+  if (status === 'rejected') return '<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">مرفوضة</span>';
+  return '<span style="background:#fff8e1;color:#f57f17;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">بانتظار الموافقة</span>';
+}
+
+function renderDirectPaymentRow(p) {
+  const cleanNotes = (p.notes || '').replace(/\s*\|\s*method:\w+/g, '').replace(/\s*\|\s*invoice_id:\d+/g, '').trim();
+  return `<tr data-dp-id="${p.id}">
+    <td><strong>${escHtml(p.client_name || '—')}</strong></td>
+    <td style="color:var(--gr);font-weight:700">+${fmt(p.amount)} د.أ</td>
+    <td>${payMethodBadge(p.payment_method || 'cash')}</td>
+    <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
+    <td>${directPaymentStatusBadge(p.status)}</td>
+    <td>${escHtml(p.employee_name || '—')}</td>
+    <td>${escHtml(p.approver_name || '—')}</td>
+    <td style="color:var(--tx2);font-size:12px">${escHtml(cleanNotes || '—')}</td>
+    <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${p.status === 'pending' && isAdmin() ? `
+        <button class="btn btn-success btn-sm" onclick="approveDirectPayment('${p.id}')">اعتماد</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectDirectPayment('${p.id}')">رفض</button>` : ''}
+      ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePayment('${p.id}')">🗑️</button>` : ''}
+    </div></td>
+  </tr>`;
+}
+
 async function renderPayments(container) {
-  let payments = [];
-  try { payments = await API.getRecipientPayments() || []; } catch (e) { payments = []; }
+  let recipientPayments = [], directPayments = [];
+  try {
+    [recipientPayments, directPayments] = await Promise.all([
+      API.getRecipientPayments().catch(() => []),
+      API.getPayments().catch(() => []),
+    ]);
+  } catch (e) { recipientPayments = []; directPayments = []; }
+
+  window._paymentsCache = directPayments || [];
+
+  const pending = (directPayments || []).filter(p => p.status === 'pending');
+  const approved = (directPayments || []).filter(p => p.status === 'approved');
+  const rejected = (directPayments || []).filter(p => p.status === 'rejected');
+
+  const activeTab = window._paymentsActiveTab || 'recipient';
+
   container.innerHTML = `
     <div class="page-header">
       <div>
-        <div class="page-title">المقبوضات</div>
-        <div class="page-sub">${payments.length} عملية مسجّلة</div>
+        <div class="page-title">المقبوضات والمدفوعات</div>
+        <div class="page-sub">${(recipientPayments || []).length} مقبوضة — ${(directPayments || []).length} دفعة مباشرة${pending.length ? ` — <span style="color:var(--yl)">${pending.length} بانتظار الموافقة</span>` : ''}</div>
       </div>
       <div style="display:flex; gap:10px">
         ${isAccountant() ? `<button class="btn btn-success" onclick="openRecipientPayment('', null)">+ تسجيل مقبوضة</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="printPaymentsFromEncoded(${jsString(encodePayload(payments))})">🖨️</button>
+        <button class="btn btn-ghost btn-sm" onclick="printPaymentsFromEncoded(${jsString(encodePayload(recipientPayments || []))})">🖨️</button>
       </div>
     </div>
 
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn ${activeTab === 'recipient' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('recipient')">المقبوضات (${(recipientPayments || []).length})</button>
+      <button class="btn ${activeTab === 'pending' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('pending')">بانتظار الموافقة (${pending.length})</button>
+      <button class="btn ${activeTab === 'approved' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('approved')">معتمدة (${approved.length})</button>
+      <button class="btn ${activeTab === 'rejected' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('rejected')">مرفوضة (${rejected.length})</button>
+    </div>
+
+    <div id="payments-tab-content"></div>
+  `;
+
+  renderPaymentsTabContent(activeTab, recipientPayments || [], { pending, approved, rejected });
+}
+
+function switchPaymentsTab(tab) {
+  window._paymentsActiveTab = tab;
+  navigateTo('payments');
+}
+
+function renderPaymentsTabContent(tab, recipientPayments, directGroups) {
+  const el = document.getElementById('payments-tab-content');
+  if (!el) return;
+
+  if (tab === 'recipient') {
+    el.innerHTML = `
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>الزبون / مطلوب من السادة</th><th>المبلغ</th><th>طريقة الدفع</th>
+              <th>التاريخ</th><th>الفاتورة</th><th>سجّلها الموظف</th><th>ملاحظات</th><th>الإجراءات</th>
+            </tr></thead>
+            <tbody id="pay-tbody">
+              ${recipientPayments.length ? recipientPayments.map(renderPaymentRow).join('') : emptyRow('لا توجد مقبوضات', 8)}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const list = directGroups[tab] || [];
+  el.innerHTML = `
     <div class="card" style="padding:0; overflow:hidden">
       <div class="table-wrap">
         <table>
-<thead>
-  <tr>
-    <th>الزبون / مطلوب من السادة</th>
-    <th>المبلغ</th>
-    <th>طريقة الدفع</th>
-    <th>التاريخ</th>
-    <th>الفاتورة</th>
-    <th>سجّلها الموظف</th>
-    <th>ملاحظات</th>
-    <th>الإجراءات</th>
-  </tr>
-</thead>
-          ${payments.length
-      ? payments.map(renderPaymentRow).join('')
-      : emptyRow('لا توجد مقبوضات', 8)}
+          <thead><tr>
+            <th>العميل</th><th>المبلغ</th><th>طريقة الدفع</th>
+            <th>التاريخ</th><th>الحالة</th><th>الموظف</th><th>الموافق</th><th>ملاحظات</th><th>الإجراءات</th>
+          </tr></thead>
+          <tbody id="dp-tbody">
+            ${list.length ? list.map(renderDirectPaymentRow).join('') : emptyRow('لا توجد دفعات', 9)}
+          </tbody>
         </table>
       </div>
-    </div>
-  `;
+    </div>`;
+}
+
+async function approveDirectPayment(id) {
+  if (!confirm('هل تريد اعتماد هذه الدفعة؟')) return;
+  try {
+    await API.approvePayment(id);
+    toast('تم اعتماد الدفعة ✅', 'success');
+    navigateTo('payments');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function rejectDirectPayment(id) {
+  const reason = prompt('سبب الرفض:');
+  if (!reason || !reason.trim()) { toast('سبب الرفض مطلوب', 'error'); return; }
+  try {
+    await API.rejectPayment(id, reason.trim());
+    toast('تم رفض الدفعة', 'success');
+    navigateTo('payments');
+  } catch (e) { toast(e.message, 'error'); }
 }
 async function deleteRecipientPayment(id) {
   const lines = [
@@ -3124,23 +3217,12 @@ async function savePayment() {
     toast('تم تسجيل المقبوضة بنجاح ✅', 'success');
     closeModal();
 
-    // Attach client name from cache
-    result.client_name = (window._clientsCache || []).find(c => String(c.id) === String(result.client_id))?.name || '—';
-    result.payment_method = document.getElementById('pay_method')?.value || 'cash';
-
     if (window._paymentInvoiceId) {
       window._paymentInvoiceId = null;
-      // Refresh the invoice row's paid/remaining amounts
       navigateTo('invoices');
     } else {
-      const tbody = document.getElementById('pay-tbody');
-      if (tbody) {
-        const empty = tbody.querySelector('td[colspan]');
-        if (empty) tbody.innerHTML = '';
-        tbody.insertAdjacentHTML('afterbegin', renderPaymentRow(result));
-        const sub = document.querySelector('.page-sub');
-        if (sub) sub.textContent = `${tbody.children.length} عملية مسجّلة`;
-      }
+      window._paymentsActiveTab = result.status === 'pending' ? 'pending' : 'approved';
+      navigateTo('payments');
     }
   } catch (e) {
     toast(e.message, 'error');
@@ -3152,24 +3234,18 @@ async function deletePayment(id) {
   const lines = [
     `المبلغ: ${p ? fmt(p.amount) + ' د.أ' : '—'}`,
     `العميل: ${p?.client_name || '—'}`,
-    'سيتم حذف هذه المقبوضة نهائياً من سجل المدفوعات',
+    'سيتم حذف هذه الدفعة نهائياً',
   ];
-  confirmDanger('حذف المقبوضة', lines, async () => {
-  const row = document.querySelector(`#pay-tbody tr[data-payment-id="${id}"]`);
-  if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
+  confirmDanger('حذف الدفعة', lines, async () => {
   try {
     await API.deletePayment(id);
     toast('تم الحذف ✅', 'success');
-    if (row) {
-      row.style.transition = 'opacity 0.25s';
-      row.style.opacity = '0';
-      setTimeout(() => row.remove(), 280);
-    }
+    closeModal();
+    navigateTo('payments');
   } catch (e) {
-    if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
     toast(e.message, 'error');
+    closeModal();
   }
-  closeModal();
   });
 }
 
@@ -3199,6 +3275,7 @@ function renderCheckRow(ch) {
 async function renderChecks(container) {
   let checks = [];
   try { checks = await API.getChecks() || []; } catch (e) { checks = []; }
+  window._checksCache = checks;
 
   const today = new Date().toISOString().split('T')[0];
   const pending = checks.filter(c => c.status === 'pending');
