@@ -239,21 +239,44 @@ def normalize_items(items: List[InvoiceItem]) -> list[dict]:
 
 
 async def delete_auto_payment_for_invoice(conn, invoice_id: int):
-    marker = f"%invoice_id:{invoice_id}%"
+    exact_marker = f"% invoice_id:{invoice_id} |%"
+    end_marker = f"% invoice_id:{invoice_id}"
+    pipe_marker = f"invoice_id:{invoice_id} |%"
+    solo_marker = f"invoice_id:{invoice_id}"
 
     await conn.execute(
         """
         DELETE FROM recipient_payments
-        WHERE COALESCE(notes, '') ILIKE $2
-          AND COALESCE(notes, '') ILIKE 'دفعة تلقائية%'
-          AND (invoice_id = $1 OR invoice_id IS NULL)
+        WHERE invoice_id = $1
+           OR COALESCE(notes, '') LIKE $2
+           OR COALESCE(notes, '') LIKE $3
+           OR COALESCE(notes, '') LIKE $4
+           OR COALESCE(notes, '') = $5
         """,
         invoice_id,
-        marker,
+        exact_marker,
+        f"%{end_marker}",
+        pipe_marker,
+        solo_marker,
     )
 
-    # Approved/manual entries in `payments` are independent ledger records.
-    # Keep them intact when invoice details are edited or the invoice is removed.
+    try:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                DELETE FROM payments
+                WHERE COALESCE(notes, '') LIKE $1
+                   OR COALESCE(notes, '') LIKE $2
+                   OR COALESCE(notes, '') LIKE $3
+                   OR COALESCE(notes, '') = $4
+                """,
+                exact_marker,
+                f"%{end_marker}",
+                pipe_marker,
+                solo_marker,
+            )
+    except Exception:
+        pass
 
 async def restore_stock_from_invoice_items(conn, invoice_id: int, user):
     old_items = await conn.fetch(

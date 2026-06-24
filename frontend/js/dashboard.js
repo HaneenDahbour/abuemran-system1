@@ -12,6 +12,11 @@ function safeJsonParse(value, fallback = null) {
   }
 }
 
+function _lockBtn(btn, text) { if (btn) { btn.disabled = true; btn.dataset.oldText = btn.textContent; btn.textContent = text || 'جاري الحفظ...'; } }
+function _unlockBtn(btn) { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.oldText || 'حفظ'; } }
+function _modalBtn() { return document.querySelector('#global-modal .btn-primary'); }
+
+
 function normalizeOptionalId(value) {
   const normalized = String(value ?? '').trim();
   return (!normalized || ['null', 'undefined', 'nan'].includes(normalized.toLowerCase()))
@@ -2957,43 +2962,136 @@ function renderPaymentRow(p) {
     </div></td>
   </tr>`;
 }
+
+function directPaymentStatusBadge(status) {
+  if (status === 'approved') return '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">معتمدة</span>';
+  if (status === 'rejected') return '<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">مرفوضة</span>';
+  return '<span style="background:#fff8e1;color:#f57f17;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">بانتظار الموافقة</span>';
+}
+
+function renderDirectPaymentRow(p) {
+  const cleanNotes = (p.notes || '').replace(/\s*\|\s*method:\w+/g, '').replace(/\s*\|\s*invoice_id:\d+/g, '').trim();
+  return `<tr data-dp-id="${p.id}">
+    <td><strong>${escHtml(p.client_name || '—')}</strong></td>
+    <td style="color:var(--gr);font-weight:700">+${fmt(p.amount)} د.أ</td>
+    <td>${payMethodBadge(p.payment_method || 'cash')}</td>
+    <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
+    <td>${directPaymentStatusBadge(p.status)}</td>
+    <td>${escHtml(p.employee_name || '—')}</td>
+    <td>${escHtml(p.approver_name || '—')}</td>
+    <td style="color:var(--tx2);font-size:12px">${escHtml(cleanNotes || '—')}</td>
+    <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${p.status === 'pending' && isAdmin() ? `
+        <button class="btn btn-success btn-sm" onclick="approveDirectPayment('${p.id}')">اعتماد</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectDirectPayment('${p.id}')">رفض</button>` : ''}
+      ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePayment('${p.id}')">🗑️</button>` : ''}
+    </div></td>
+  </tr>`;
+}
+
 async function renderPayments(container) {
-  let payments = [];
-  try { payments = await API.getRecipientPayments() || []; } catch (e) { payments = []; }
+  let recipientPayments = [], directPayments = [];
+  try {
+    [recipientPayments, directPayments] = await Promise.all([
+      API.getRecipientPayments().catch(() => []),
+      API.getPayments().catch(() => []),
+    ]);
+  } catch (e) { recipientPayments = []; directPayments = []; }
+
+  window._paymentsCache = directPayments || [];
+
+  const pending = (directPayments || []).filter(p => p.status === 'pending');
+  const approved = (directPayments || []).filter(p => p.status === 'approved');
+  const rejected = (directPayments || []).filter(p => p.status === 'rejected');
+
+  const activeTab = window._paymentsActiveTab || 'recipient';
+
   container.innerHTML = `
     <div class="page-header">
       <div>
-        <div class="page-title">المقبوضات</div>
-        <div class="page-sub">${payments.length} عملية مسجّلة</div>
+        <div class="page-title">المقبوضات والمدفوعات</div>
+        <div class="page-sub">${(recipientPayments || []).length} مقبوضة — ${(directPayments || []).length} دفعة مباشرة${pending.length ? ` — <span style="color:var(--yl)">${pending.length} بانتظار الموافقة</span>` : ''}</div>
       </div>
       <div style="display:flex; gap:10px">
         ${isAccountant() ? `<button class="btn btn-success" onclick="openRecipientPayment('', null)">+ تسجيل مقبوضة</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="printPaymentsFromEncoded(${jsString(encodePayload(payments))})">🖨️</button>
+        <button class="btn btn-ghost btn-sm" onclick="printPaymentsFromEncoded(${jsString(encodePayload(recipientPayments || []))})">🖨️</button>
       </div>
     </div>
 
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn ${activeTab === 'recipient' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('recipient')">المقبوضات (${(recipientPayments || []).length})</button>
+      <button class="btn ${activeTab === 'pending' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('pending')">بانتظار الموافقة (${pending.length})</button>
+      <button class="btn ${activeTab === 'approved' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('approved')">معتمدة (${approved.length})</button>
+      <button class="btn ${activeTab === 'rejected' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('rejected')">مرفوضة (${rejected.length})</button>
+    </div>
+
+    <div id="payments-tab-content"></div>
+  `;
+
+  renderPaymentsTabContent(activeTab, recipientPayments || [], { pending, approved, rejected });
+}
+
+function switchPaymentsTab(tab) {
+  window._paymentsActiveTab = tab;
+  navigateTo('payments');
+}
+
+function renderPaymentsTabContent(tab, recipientPayments, directGroups) {
+  const el = document.getElementById('payments-tab-content');
+  if (!el) return;
+
+  if (tab === 'recipient') {
+    el.innerHTML = `
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>الزبون / مطلوب من السادة</th><th>المبلغ</th><th>طريقة الدفع</th>
+              <th>التاريخ</th><th>الفاتورة</th><th>سجّلها الموظف</th><th>ملاحظات</th><th>الإجراءات</th>
+            </tr></thead>
+            <tbody id="pay-tbody">
+              ${recipientPayments.length ? recipientPayments.map(renderPaymentRow).join('') : emptyRow('لا توجد مقبوضات', 8)}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const list = directGroups[tab] || [];
+  el.innerHTML = `
     <div class="card" style="padding:0; overflow:hidden">
       <div class="table-wrap">
         <table>
-<thead>
-  <tr>
-    <th>الزبون / مطلوب من السادة</th>
-    <th>المبلغ</th>
-    <th>طريقة الدفع</th>
-    <th>التاريخ</th>
-    <th>الفاتورة</th>
-    <th>سجّلها الموظف</th>
-    <th>ملاحظات</th>
-    <th>الإجراءات</th>
-  </tr>
-</thead>
-          ${payments.length
-      ? payments.map(renderPaymentRow).join('')
-      : emptyRow('لا توجد مقبوضات', 8)}
+          <thead><tr>
+            <th>العميل</th><th>المبلغ</th><th>طريقة الدفع</th>
+            <th>التاريخ</th><th>الحالة</th><th>الموظف</th><th>الموافق</th><th>ملاحظات</th><th>الإجراءات</th>
+          </tr></thead>
+          <tbody id="dp-tbody">
+            ${list.length ? list.map(renderDirectPaymentRow).join('') : emptyRow('لا توجد دفعات', 9)}
+          </tbody>
         </table>
       </div>
-    </div>
-  `;
+    </div>`;
+}
+
+async function approveDirectPayment(id) {
+  if (!confirm('هل تريد اعتماد هذه الدفعة؟')) return;
+  try {
+    await API.approvePayment(id);
+    toast('تم اعتماد الدفعة ✅', 'success');
+    navigateTo('payments');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function rejectDirectPayment(id) {
+  const reason = prompt('سبب الرفض:');
+  if (!reason || !reason.trim()) { toast('سبب الرفض مطلوب', 'error'); return; }
+  try {
+    await API.rejectPayment(id, reason.trim());
+    toast('تم رفض الدفعة', 'success');
+    navigateTo('payments');
+  } catch (e) { toast(e.message, 'error'); }
 }
 async function deleteRecipientPayment(id) {
   const lines = [
@@ -3120,23 +3218,12 @@ async function savePayment() {
     toast('تم تسجيل المقبوضة بنجاح ✅', 'success');
     closeModal();
 
-    // Attach client name from cache
-    result.client_name = (window._clientsCache || []).find(c => String(c.id) === String(result.client_id))?.name || '—';
-    result.payment_method = document.getElementById('pay_method')?.value || 'cash';
-
     if (window._paymentInvoiceId) {
       window._paymentInvoiceId = null;
-      // Refresh the invoice row's paid/remaining amounts
       navigateTo('invoices');
     } else {
-      const tbody = document.getElementById('pay-tbody');
-      if (tbody) {
-        const empty = tbody.querySelector('td[colspan]');
-        if (empty) tbody.innerHTML = '';
-        tbody.insertAdjacentHTML('afterbegin', renderPaymentRow(result));
-        const sub = document.querySelector('.page-sub');
-        if (sub) sub.textContent = `${tbody.children.length} عملية مسجّلة`;
-      }
+      window._paymentsActiveTab = result.status === 'pending' ? 'pending' : 'approved';
+      navigateTo('payments');
     }
   } catch (e) {
     toast(e.message, 'error');
@@ -3148,24 +3235,18 @@ async function deletePayment(id) {
   const lines = [
     `المبلغ: ${p ? fmt(p.amount) + ' د.أ' : '—'}`,
     `العميل: ${p?.client_name || '—'}`,
-    'سيتم حذف هذه المقبوضة نهائياً من سجل المدفوعات',
+    'سيتم حذف هذه الدفعة نهائياً',
   ];
-  confirmDanger('حذف المقبوضة', lines, async () => {
-  const row = document.querySelector(`#pay-tbody tr[data-payment-id="${id}"]`);
-  if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
+  confirmDanger('حذف الدفعة', lines, async () => {
   try {
     await API.deletePayment(id);
     toast('تم الحذف ✅', 'success');
-    if (row) {
-      row.style.transition = 'opacity 0.25s';
-      row.style.opacity = '0';
-      setTimeout(() => row.remove(), 280);
-    }
+    closeModal();
+    navigateTo('payments');
   } catch (e) {
-    if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
     toast(e.message, 'error');
+    closeModal();
   }
-  closeModal();
   });
 }
 
@@ -3195,6 +3276,7 @@ function renderCheckRow(ch) {
 async function renderChecks(container) {
   let checks = [];
   try { checks = await API.getChecks() || []; } catch (e) { checks = []; }
+  window._checksCache = checks;
 
   const today = new Date().toISOString().split('T')[0];
   const pending = checks.filter(c => c.status === 'pending');
@@ -3706,7 +3788,7 @@ function openQuickAddSupplierInPurchase() {
         <input class="form-input" id="qs_phone" placeholder="اختياري">
       </div>
       <div style="display:flex;gap:10px;margin-top:8px">
-        <button class="btn btn-primary" style="flex:1" onclick="saveQuickSupplier()">إضافة</button>
+        <button class="btn btn-primary" style="flex:1" id="btn-save-quick-supplier" onclick="saveQuickSupplier()">إضافة</button>
         <button class="btn btn-ghost" onclick="document.getElementById('quick_supplier_overlay').remove()">إلغاء</button>
       </div>
     </div>
@@ -3716,13 +3798,14 @@ function openQuickAddSupplierInPurchase() {
 }
 
 async function saveQuickSupplier() {
+  const btn = document.getElementById('btn-save-quick-supplier');
   const name = document.getElementById('qs_name')?.value?.trim();
   if (!name) { toast('الاسم مطلوب', 'error'); return; }
   const phone = document.getElementById('qs_phone')?.value?.trim() || null;
+  _lockBtn(btn, 'جاري الإضافة...');
   try {
     const newSupplier = await API.createSupplier({ name, phone });
     document.getElementById('quick_supplier_overlay')?.remove();
-    // Add new supplier to cache and dropdown
     if (!window._suppliersCache) window._suppliersCache = [];
     window._suppliersCache.push(newSupplier);
     const sel = document.getElementById('pur_supplier');
@@ -3736,6 +3819,7 @@ async function saveQuickSupplier() {
     toast(`تم إضافة المورد "${name}" ✅`, 'success');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -3787,7 +3871,7 @@ async function openQuickAddProductInPurchase(rowIdx, prefix) {
         </div>
       </div>
       <div style="display:flex;gap:10px;margin-top:12px">
-        <button class="btn btn-primary" style="flex:1" onclick="saveQuickProduct('${rowIdx}', '${prefix}')">إضافة الصنف</button>
+        <button class="btn btn-primary" style="flex:1" id="btn-save-quick-product" onclick="saveQuickProduct('${rowIdx}', '${prefix}')">إضافة الصنف</button>
         <button class="btn btn-ghost" onclick="document.getElementById('quick_product_overlay').remove()">إلغاء</button>
       </div>
     </div>
@@ -3807,6 +3891,7 @@ function toggleNewCategoryFields() {
 }
 
 async function saveQuickProduct(rowIdx, prefix) {
+  const btn = document.getElementById('btn-save-quick-product');
   const name = document.getElementById('qp_name')?.value?.trim();
   if (!name) { toast('اسم الصنف مطلوب', 'error'); return; }
 
@@ -3819,6 +3904,7 @@ async function saveQuickProduct(rowIdx, prefix) {
     const catName = document.getElementById('qp_cat_name')?.value?.trim();
     if (!catName) { toast('اسم الفئة مطلوب', 'error'); return; }
     const catIcon = document.getElementById('qp_cat_icon')?.value?.trim() || '📦';
+    _lockBtn(btn, 'جاري الإضافة...');
     try {
       const newCat = await API.createWarehouseCategory({ name: catName, icon: catIcon });
       categoryId = newCat.id;
@@ -3827,12 +3913,14 @@ async function saveQuickProduct(rowIdx, prefix) {
       toast(`تم إنشاء الفئة "${catName}" ✅`, 'success');
     } catch (e) {
       toast(`خطأ في إنشاء الفئة: ${e.message}`, 'error');
+      _unlockBtn(btn);
       return;
     }
   }
 
   if (!categoryId) { toast('اختر فئة أو أنشئ فئة جديدة', 'error'); return; }
 
+  _lockBtn(btn, 'جاري الإضافة...');
   try {
     const newProduct = await API.createProduct({
       name,
@@ -3862,6 +3950,7 @@ async function saveQuickProduct(rowIdx, prefix) {
     toast(`تم إضافة الصنف "${name}" ✅`, 'success');
   } catch (e) {
     toast(`خطأ في إنشاء الصنف: ${e.message}`, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4022,6 +4111,7 @@ function calcEditPurchaseTotal() {
 }
 
 async function saveEditPurchase() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`epi_prod_${i}`);
@@ -4038,7 +4128,7 @@ async function saveEditPurchase() {
     }
   }
 
-  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
+  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); _unlockBtn(btn); return; }
 
   const supplierId = document.getElementById('epur_supplier').value || null;
 
@@ -4055,6 +4145,7 @@ async function saveEditPurchase() {
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4778,8 +4869,9 @@ function openCategoryModal() {
 }
 
 async function saveCategory() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('cat_name').value.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.createWarehouseCategory({
@@ -4792,6 +4884,7 @@ async function saveCategory() {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4966,8 +5059,9 @@ function openEditCategoryModal(id) {
 }
 
 async function saveEditCategory(id) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('ecat_name').value.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.updateWarehouseCategory(id, {
@@ -4980,6 +5074,7 @@ async function saveEditCategory(id) {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 /* ── Add/Edit Product Modal ───────────────────────────────── */
@@ -5831,6 +5926,7 @@ function calcWarehouseTotal() {
 }
 
 async function saveWarehouseInvoice() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`wp_prod_${i}`);
@@ -5847,7 +5943,7 @@ async function saveWarehouseInvoice() {
     }
   }
 
-  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
+  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.createWarehouseInvoice({
@@ -5864,6 +5960,7 @@ async function saveWarehouseInvoice() {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -6135,6 +6232,7 @@ function openUserModal() {
 }
 
 async function saveUser() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('nu_name').value.trim();
   const username = document.getElementById('nu_user').value.trim();
   const password = document.getElementById('nu_pass').value;
@@ -6143,11 +6241,13 @@ async function saveUser() {
 
   if (!name || !username || !password) {
     toast('يرجى ملء جميع الحقول', 'error');
+    _unlockBtn(btn);
     return;
   }
 
   if ((role === 'shop_manager' || role === 'shop_employee') && !shopIdVal) {
     toast('اختر المحل المرتبط بهذا الحساب', 'error');
+    _unlockBtn(btn);
     return;
   }
 
@@ -6162,6 +6262,7 @@ async function saveUser() {
     navigateTo('users');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -7493,8 +7594,9 @@ function openSupplierPaymentModal(supplierId, supplierName) {
 }
 
 async function saveSupplierPayment(supplierId, supplierName) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const amount = parseFloat(document.getElementById('sp_amount')?.value);
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
   try {
     await API.addSupplierPayment(supplierId, {
       amount,
@@ -7505,7 +7607,7 @@ async function saveSupplierPayment(supplierId, supplierName) {
     toast('تم تسجيل الدفعة ✅', 'success');
     closeModal();
     viewSupplierStatement(supplierId, supplierName);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 async function deleteSupPayment(paymentId, supplierId, supplierName) {
@@ -7623,10 +7725,11 @@ function openExpenseModal() {
 }
 
 async function saveExpense() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const amount = parseFloat(document.getElementById('exp_amount')?.value);
   const description = document.getElementById('exp_desc')?.value?.trim();
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (!description) { toast('الوصف مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
+  if (!description) { toast('الوصف مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.addCashboxExpense({
       amount,
@@ -7636,7 +7739,7 @@ async function saveExpense() {
     toast('تم تسجيل المصروف ✅', 'success');
     closeModal();
     navigateTo('cashbox');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openAddSupplierModal() {
@@ -7661,14 +7764,15 @@ function openAddSupplierModal() {
 }
 
 async function saveNewSupplier() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('ns_name')?.value?.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.createSupplier({ name, phone: document.getElementById('ns_phone')?.value || null });
     toast('تم إضافة المورد ✅', 'success');
     closeModal();
     navigateTo('purchases');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openEditSupplierModal(s) {
@@ -7693,15 +7797,16 @@ function openEditSupplierModal(s) {
 }
 
 async function saveEditSupplier(id) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('es_name')?.value?.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.updateSupplier(id, { name, phone: document.getElementById('es_phone')?.value || null });
     toast('تم تحديث المورد ✅', 'success');
     window._suppliersCache = null;
     closeModal();
     navigateTo('purchases');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openEditSupplierById(id) {
@@ -8143,19 +8248,20 @@ function openWarehouseRentModal(rentId = null) {
 }
 
 async function saveWarehouseRent(rentId) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   rentId = normalizeOptionalId(rentId);
   const name = document.getElementById('wr_name')?.value?.trim();
   const monthly_amount = parseFloat(document.getElementById('wr_amount')?.value);
   const currency = document.getElementById('wr_currency')?.value || 'JOD';
-  const startMonthVal = document.getElementById('wr_start_month')?.value; // YYYY-MM
+  const startMonthVal = document.getElementById('wr_start_month')?.value;
   const notes = document.getElementById('wr_notes')?.value?.trim() || null;
 
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
-  if (!monthly_amount || monthly_amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
+  if (!monthly_amount || monthly_amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
 
   const payload = { name, monthly_amount, currency, notes };
   if (!rentId) {
-    if (!startMonthVal) { toast('شهر البدء مطلوب', 'error'); return; }
+    if (!startMonthVal) { toast('شهر البدء مطلوب', 'error'); _unlockBtn(btn); return; }
     payload.start_month = `${startMonthVal}-01`;
   }
 
@@ -8170,6 +8276,7 @@ async function saveWarehouseRent(rentId) {
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -10046,19 +10153,21 @@ function openChinaInvestorModal(investorId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestor('${investorId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-investor" onclick="saveChinaInvestor('${investorId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaInvestor(investorId) {
+  const btn = document.getElementById('btn-save-china-investor');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   investorId = normalizeOptionalId(investorId);
   const name = document.getElementById('ci_name')?.value?.trim();
   const phone = document.getElementById('ci_phone')?.value?.trim() || null;
   const notes = document.getElementById('ci_notes')?.value?.trim() || null;
 
-  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     if (investorId) {
@@ -10071,6 +10180,7 @@ async function saveChinaInvestor(investorId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10174,19 +10284,21 @@ function openChinaInvestorTransactionModal(investorId) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestorTransaction('${investorId}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-inv-tx" onclick="saveChinaInvestorTransaction('${investorId}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaInvestorTransaction(investorId) {
+  const btn = document.getElementById('btn-save-china-inv-tx');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   const type = document.getElementById('cit_type')?.value;
   const amount = parseFloat(document.getElementById('cit_amount')?.value);
   const trans_date = document.getElementById('cit_date')?.value;
   const notes = document.getElementById('cit_notes')?.value?.trim() || null;
 
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     await API.createChinaInvestorTransaction(investorId, { type, amount, trans_date, notes });
@@ -10197,6 +10309,7 @@ async function saveChinaInvestorTransaction(investorId) {
     openChinaInvestorDetails(investorId);
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10289,19 +10402,21 @@ function openChinaSupplierModal(supplierId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSupplier('${supplierId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-supplier" onclick="saveChinaSupplier('${supplierId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaSupplier(supplierId) {
+  const btn = document.getElementById('btn-save-china-supplier');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   supplierId = normalizeOptionalId(supplierId);
   const name = document.getElementById('cs_name')?.value?.trim();
   const phone = document.getElementById('cs_phone')?.value?.trim() || null;
   const notes = document.getElementById('cs_notes')?.value?.trim() || null;
 
-  if (!name) { toast('اسم المورد مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المورد مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     if (supplierId) {
@@ -10315,6 +10430,7 @@ async function saveChinaSupplier(supplierId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10605,13 +10721,15 @@ function openChinaPaymentModal(paymentId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment('${paymentId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-payment" onclick="saveChinaPayment('${paymentId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaPayment(paymentId) {
+  const btn = document.getElementById('btn-save-china-payment');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   paymentId = normalizeOptionalId(paymentId);
   const supplier_idRaw = document.getElementById('cp_supplier_id')?.value;
   const supplier_id = normalizeOptionalId(supplier_idRaw);
@@ -10622,9 +10740,9 @@ async function saveChinaPayment(paymentId) {
   const payment_date = document.getElementById('cp_date')?.value;
   const notes = document.getElementById('cp_notes')?.value?.trim() || null;
 
-  if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   const payload = { supplier_id, supplier_name, amount, currency, exchange_rate, payment_date, notes };
 
@@ -10639,6 +10757,7 @@ async function saveChinaPayment(paymentId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10760,13 +10879,15 @@ function openChinaPurchaseModal(purchaseId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase('${purchaseId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-purchase" onclick="saveChinaPurchase('${purchaseId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaPurchase(purchaseId) {
+  const btn = document.getElementById('btn-save-china-purchase');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   purchaseId = normalizeOptionalId(purchaseId);
   const item_name = document.getElementById('cpu_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('cpu_qty')?.value) || 1;
@@ -10779,9 +10900,9 @@ async function saveChinaPurchase(purchaseId) {
   const purchase_date = document.getElementById('cpu_date')?.value;
   const notes = document.getElementById('cpu_notes')?.value?.trim() || null;
 
-  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   const payload = { item_name, quantity, amount, currency, exchange_rate, supplier_id, supplier_name, purchase_date, notes };
 
@@ -10796,6 +10917,7 @@ async function saveChinaPurchase(purchaseId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10910,13 +11032,15 @@ function openChinaSaleModal(saleId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale('${saleId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-sale" onclick="saveChinaSale('${saleId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaSale(saleId) {
+  const btn = document.getElementById('btn-save-china-sale');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   saleId = normalizeOptionalId(saleId);
   const item_name = document.getElementById('csa_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('csa_qty')?.value) || 1;
@@ -10927,9 +11051,9 @@ async function saveChinaSale(saleId) {
   const sale_date = document.getElementById('csa_date')?.value;
   const notes = document.getElementById('csa_notes')?.value?.trim() || null;
 
-  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   const payload = { item_name, quantity, amount, currency, exchange_rate, buyer_name, sale_date, notes };
 
@@ -10944,6 +11068,7 @@ async function saveChinaSale(saleId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -11157,7 +11282,7 @@ async function openCategoryInvestmentsModal(categoryId) {
                   ${fmt(remaining)} د.أ
                 </td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap;min-width:80px">
-                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}')" title="حفظ">💾</button>
+                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}', this)" title="حفظ">💾</button>
                   ${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm('${categoryId}', '${inv.id}', '${s.investor_id}')" title="حذف">🗑️</button>` : ''}
                 </td>
               </tr>`;
@@ -11195,12 +11320,13 @@ function openAddInvestmentForm(categoryId) {
         <label class="form-label" style="font-size:12px">المدفوع (د.أ)</label>
         <input class="form-input" type="number" step="0.001" min="0" id="new_inv_paid" value="0" style="font-size:13px;border-color:var(--gr)">
       </div>
-      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null)" style="align-self:flex-end">إضافة</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null, this)" style="align-self:flex-end">إضافة</button>
     </div>
   `;
 }
 
-async function saveCategoryInvestment(categoryId, investorId) {
+async function saveCategoryInvestment(categoryId, investorId, btnEl) {
+  _lockBtn(btnEl, 'جاري...');
   let id = investorId;
   let amount, paid_amount;
 
@@ -11211,10 +11337,10 @@ async function saveCategoryInvestment(categoryId, investorId) {
     id = document.getElementById('new_inv_investor')?.value;
     amount = parseFloat(document.getElementById('new_inv_amount')?.value || 0);
     paid_amount = parseFloat(document.getElementById('new_inv_paid')?.value || 0);
-    if (!id) { toast('اختر مستثمراً', 'error'); return; }
+    if (!id) { toast('اختر مستثمراً', 'error'); _unlockBtn(btnEl); return; }
   }
 
-  if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btnEl); return; }
 
   try {
     await API.setCategoryInvestment(categoryId, { investor_id: Number(id), amount, paid_amount });
@@ -11226,6 +11352,7 @@ async function saveCategoryInvestment(categoryId, investorId) {
     }
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btnEl);
   }
 }
 
@@ -11426,19 +11553,20 @@ function removeInvContribRow(idx) {
 }
 
 async function saveInvestorFull() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const investorId = window._invEditId || null;
   const name = document.getElementById('wi_name')?.value?.trim();
   const phone = document.getElementById('wi_phone')?.value?.trim() || null;
   const notes = document.getElementById('wi_notes')?.value?.trim() || null;
-  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); _unlockBtn(btn); return; }
 
   const amount = parseFloat(document.getElementById('wi_total_contribution')?.value || 0);
   const paidAmount = parseFloat(document.getElementById('wi_total_paid')?.value || 0);
-  if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); return; }
-  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); return; }
+  if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); _unlockBtn(btn); return; }
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); _unlockBtn(btn); return; }
   const selectedCategoryIds = [...document.querySelectorAll('#inv_category_checks .inv-category-check:checked')]
     .map(el => Number(el.value));
-  if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); return; }
+  if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); _unlockBtn(btn); return; }
 
   try {
     let finalId = investorId;
@@ -11466,6 +11594,7 @@ async function saveInvestorFull() {
     navigateTo('investors');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 

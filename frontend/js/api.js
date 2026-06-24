@@ -184,6 +184,8 @@
       apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}/approve`, { method: 'POST', body: JSON.stringify({}) }),
     rejectPayment: (id, reason) =>
       apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }),
+    updatePayment: (id, data) =>
+      apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deletePayment: id =>
       apiFetch(`/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 

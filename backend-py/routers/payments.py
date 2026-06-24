@@ -82,7 +82,7 @@ SELECT p.*,
          ELSE 'cash'
        END AS payment_method
 FROM payments p
-JOIN clients c ON p.client_id = c.id
+LEFT JOIN clients c ON p.client_id = c.id
 LEFT JOIN users e ON p.submitted_by = e.id
 LEFT JOIN users a ON p.approved_by = a.id
 """
@@ -366,6 +366,93 @@ async def reject_payment(
         raise HTTPException(status_code=500, detail="خطأ في السيرفر")
 
 
+class UpdatePaymentRequest(BaseModel):
+    amount: Optional[float] = None
+    payment_method: Optional[str] = None
+    payment_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.put("/{payment_id}")
+async def update_payment(
+    payment_id: int, data: UpdatePaymentRequest, user=Depends(get_current_user)
+):
+    require_role(user, "admin", "accountant")
+
+    pool = await get_pool()
+
+    try:
+        existing = await pool.fetchrow(
+            "SELECT * FROM payments WHERE id=$1", payment_id
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
+
+        amount = float(data.amount) if data.amount is not None else float(existing["amount"])
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+
+        method = normalize_payment_method(data.payment_method) if data.payment_method else None
+        payment_date = parse_payment_date(data.payment_date) if data.payment_date else existing["payment_date"]
+
+        notes = existing["notes"] or ""
+        if data.notes is not None:
+            base = clean_text(data.notes) or ""
+            existing_parts = [p.strip() for p in notes.split("|")]
+            meta_parts = [p for p in existing_parts if p.startswith("invoice_id:") or p.startswith("method:")]
+            new_parts = [base] if base else []
+            if method:
+                meta_parts = [p for p in meta_parts if not p.startswith("method:")]
+                meta_parts.append(f"method:{method}")
+            elif not any(p.startswith("method:") for p in meta_parts):
+                meta_parts.append("method:cash")
+            new_parts.extend(meta_parts)
+            notes = " | ".join(new_parts)
+        elif method:
+            parts = [p.strip() for p in notes.split("|")]
+            parts = [p for p in parts if not p.startswith("method:")]
+            parts.append(f"method:{method}")
+            notes = " | ".join(parts)
+
+        row = await pool.fetchrow(
+            """
+            UPDATE payments
+            SET amount=$1, notes=$2, payment_date=$3
+            WHERE id=$4
+            RETURNING *
+            """,
+            amount,
+            notes,
+            payment_date,
+            payment_id,
+        )
+
+        try:
+            await pool.execute(
+                """
+                INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
+                VALUES ($1,$2,$3,'payment',$4,$5)
+                """,
+                user.get("id"),
+                user.get("full_name") or user.get("username") or "مستخدم",
+                "تعديل دفعة",
+                payment_id,
+                f"{amount:.3f} د.أ",
+            )
+        except Exception:
+            pass
+
+        out = row_to_dict(row)
+        if method:
+            out["payment_method"] = method
+        return out
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"خطأ في السيرفر: {str(e)}")
+
+
 @router.delete("/{payment_id}")
 async def delete_payment(payment_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
@@ -375,12 +462,27 @@ async def delete_payment(payment_id: int, user=Depends(get_current_user)):
 
     try:
         deleted = await pool.fetchrow(
-            "DELETE FROM payments WHERE id=$1 RETURNING id",
+            "DELETE FROM payments WHERE id=$1 RETURNING *",
             payment_id,
         )
 
         if not deleted:
             raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
+
+        try:
+            await pool.execute(
+                """
+                INSERT INTO audit_log (user_id, user_name, action, entity_type, entity_id, detail)
+                VALUES ($1,$2,$3,'payment',$4,$5)
+                """,
+                user.get("id"),
+                user.get("full_name") or user.get("username") or "مستخدم",
+                "حذف دفعة",
+                payment_id,
+                f"{float(deleted['amount']):.3f} د.أ — client_id:{deleted['client_id']}",
+            )
+        except Exception:
+            pass
 
         return {"success": True}
 
