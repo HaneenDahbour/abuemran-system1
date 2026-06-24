@@ -3,6 +3,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 from typing import Optional
+from uuid import UUID
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,9 @@ def load_functions(path, names, extra=None):
 INVOICES_PATH = ROOT / "backend-py" / "routers" / "invoices.py"
 CLIENTS_PATH = ROOT / "backend-py" / "routers" / "clients.py"
 EXPENSES_PATH = ROOT / "backend-py" / "routers" / "expenses.py"
+CHINA_PATH = ROOT / "backend-py" / "routers" / "china.py"
+DASHBOARD_PATH = ROOT / "frontend" / "js" / "dashboard.js"
+API_PATH = ROOT / "frontend" / "js" / "api.js"
 
 
 class FakeConn:
@@ -48,6 +52,33 @@ class FakePayrollPool:
 
 
 class WorkflowIntegrityTests(unittest.TestCase):
+    def test_china_ids_accept_integer_and_uuid_but_reject_null_text(self):
+        ns = load_functions(CHINA_PATH, {"coerce_id"}, {"UUID": UUID})
+        coerce_id = ns["coerce_id"]
+        uuid_value = "c4732974-7fa6-4aa5-a2c1-5c01653dda1c"
+        self.assertEqual(coerce_id("12"), 12)
+        self.assertEqual(coerce_id(uuid_value), UUID(uuid_value))
+        for invalid in ("", "null", "undefined", "not-an-id"):
+            with self.assertRaises(HTTPException):
+                coerce_id(invalid)
+
+    def test_new_record_modal_ids_are_normalized_before_crud_selection(self):
+        source = DASHBOARD_PATH.read_text(encoding="utf-8-sig")
+        self.assertIn("function normalizeOptionalId(value)", source)
+        for function_name in (
+            "saveWarehouseRent", "saveChinaInvestor", "saveChinaSupplier",
+            "saveChinaPayment", "saveChinaPurchase", "saveChinaSale",
+        ):
+            start = source.index(f"async function {function_name}")
+            body = source[start:start + 500]
+            self.assertIn("normalizeOptionalId(", body, function_name)
+
+    def test_china_api_uses_uuid_safe_id_validation(self):
+        source = API_PATH.read_text(encoding="utf-8-sig")
+        china_api = source[source.index("// ── China Section"):source.index("// ── Warehouse Rent")]
+        self.assertIn("requireValidId", china_api)
+        self.assertNotIn("requireId(", china_api)
+
     def test_payment_calculation(self):
         ns = load_functions(INVOICES_PATH, {"money3", "calculate_payment"})
         calculate = ns["calculate_payment"]

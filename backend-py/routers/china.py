@@ -1,6 +1,7 @@
 from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,7 +18,25 @@ def to_val(v):
         return float(v)
     if isinstance(v, (date, datetime)):
         return v.isoformat()
+    if isinstance(v, UUID):
+        return str(v)
     return v
+
+
+def coerce_id(value):
+    """Accept the integer IDs used by the original schema and UUID IDs safely."""
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() in {"null", "undefined", "nan"}:
+        raise HTTPException(status_code=400, detail="المعرّف غير صحيح")
+    try:
+        return int(normalized)
+    except ValueError:
+        try:
+            return UUID(normalized)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="المعرّف غير صحيح")
 
 
 def row_to_dict(row):
@@ -100,7 +119,7 @@ class ChinaSupplierIn(BaseModel):
 
 class PaymentIn(BaseModel):
     supplier_name: str
-    supplier_id: Optional[int] = None
+    supplier_id: Optional[str] = None
     amount: float
     currency: Optional[str] = "JOD"
     exchange_rate: Optional[float] = 1
@@ -116,7 +135,7 @@ class PurchaseIn(BaseModel):
     exchange_rate: Optional[float] = 1
     purchase_date: Optional[str] = None
     supplier_name: Optional[str] = None
-    supplier_id: Optional[int] = None
+    supplier_id: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -178,8 +197,9 @@ async def create_investor(data: InvestorIn, user=Depends(get_current_user)):
 
 
 @router.put("/investors/{investor_id}")
-async def update_investor(investor_id: int, data: InvestorIn, user=Depends(get_current_user)):
+async def update_investor(investor_id: str, data: InvestorIn, user=Depends(get_current_user)):
     require_china_access(user)
+    investor_id = coerce_id(investor_id)
 
     name = (data.name or "").strip()
     if not name:
@@ -205,8 +225,9 @@ async def update_investor(investor_id: int, data: InvestorIn, user=Depends(get_c
 
 
 @router.delete("/investors/{investor_id}")
-async def delete_investor(investor_id: int, user=Depends(get_current_user)):
+async def delete_investor(investor_id: str, user=Depends(get_current_user)):
     require_role(user, "admin")
+    investor_id = coerce_id(investor_id)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -223,8 +244,9 @@ async def delete_investor(investor_id: int, user=Depends(get_current_user)):
 # ── Investor transactions ────────────────────────────────────
 
 @router.get("/investors/{investor_id}/transactions")
-async def list_investor_transactions(investor_id: int, user=Depends(get_current_user)):
+async def list_investor_transactions(investor_id: str, user=Depends(get_current_user)):
     require_china_access(user)
+    investor_id = coerce_id(investor_id)
     pool = await get_pool()
 
     rows = await pool.fetch(
@@ -242,8 +264,9 @@ async def list_investor_transactions(investor_id: int, user=Depends(get_current_
 
 
 @router.post("/investors/{investor_id}/transactions")
-async def create_investor_transaction(investor_id: int, data: InvestorTransactionIn, user=Depends(get_current_user)):
+async def create_investor_transaction(investor_id: str, data: InvestorTransactionIn, user=Depends(get_current_user)):
     require_china_access(user)
+    investor_id = coerce_id(investor_id)
 
     if data.type not in ("contribution", "return", "profit_share"):
         raise HTTPException(status_code=400, detail="نوع الحركة غير صحيح")
@@ -283,8 +306,9 @@ async def create_investor_transaction(investor_id: int, data: InvestorTransactio
 
 
 @router.delete("/transactions/{transaction_id}")
-async def delete_investor_transaction(transaction_id: int, user=Depends(get_current_user)):
+async def delete_investor_transaction(transaction_id: str, user=Depends(get_current_user)):
     require_role(user, "admin")
+    transaction_id = coerce_id(transaction_id)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -350,8 +374,9 @@ async def create_china_supplier(data: ChinaSupplierIn, user=Depends(get_current_
 
 
 @router.put("/suppliers/{supplier_id}")
-async def update_china_supplier(supplier_id: int, data: ChinaSupplierIn, user=Depends(get_current_user)):
+async def update_china_supplier(supplier_id: str, data: ChinaSupplierIn, user=Depends(get_current_user)):
     require_china_access(user)
+    supplier_id = coerce_id(supplier_id)
 
     name = (data.name or "").strip()
     if not name:
@@ -384,8 +409,9 @@ async def update_china_supplier(supplier_id: int, data: ChinaSupplierIn, user=De
 
 
 @router.delete("/suppliers/{supplier_id}")
-async def delete_china_supplier(supplier_id: int, user=Depends(get_current_user)):
+async def delete_china_supplier(supplier_id: str, user=Depends(get_current_user)):
     require_role(user, "admin")
+    supplier_id = coerce_id(supplier_id)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -400,8 +426,9 @@ async def delete_china_supplier(supplier_id: int, user=Depends(get_current_user)
 
 
 @router.get("/suppliers/{supplier_id}/statement")
-async def china_supplier_statement(supplier_id: int, user=Depends(get_current_user)):
+async def china_supplier_statement(supplier_id: str, user=Depends(get_current_user)):
     require_china_access(user)
+    supplier_id = coerce_id(supplier_id)
     pool = await get_pool()
 
     supplier = await pool.fetchrow("SELECT * FROM china_suppliers WHERE id=$1", supplier_id)
@@ -488,6 +515,7 @@ async def create_payment(data: PaymentIn, user=Depends(get_current_user)):
     currency = parse_currency(data.currency)
     exchange_rate = parse_exchange_rate(data.exchange_rate, currency)
     amount_jod = round(data.amount * exchange_rate, 3)
+    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -500,7 +528,7 @@ async def create_payment(data: PaymentIn, user=Depends(get_current_user)):
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING *
                 """,
-                supplier_name, data.supplier_id, data.amount, currency, exchange_rate, amount_jod,
+                supplier_name, supplier_id, data.amount, currency, exchange_rate, amount_jod,
                 parse_date(data.payment_date),
                 (data.notes or "").strip() or None, user.get("id"),
             )
@@ -512,8 +540,9 @@ async def create_payment(data: PaymentIn, user=Depends(get_current_user)):
 
 
 @router.put("/payments/{payment_id}")
-async def update_payment(payment_id: int, data: PaymentIn, user=Depends(get_current_user)):
+async def update_payment(payment_id: str, data: PaymentIn, user=Depends(get_current_user)):
     require_china_access(user)
+    payment_id = coerce_id(payment_id)
 
     supplier_name = (data.supplier_name or "").strip()
     if not supplier_name:
@@ -525,6 +554,7 @@ async def update_payment(payment_id: int, data: PaymentIn, user=Depends(get_curr
     currency = parse_currency(data.currency)
     exchange_rate = parse_exchange_rate(data.exchange_rate, currency)
     amount_jod = round(data.amount * exchange_rate, 3)
+    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -537,7 +567,7 @@ async def update_payment(payment_id: int, data: PaymentIn, user=Depends(get_curr
                 WHERE id=$9
                 RETURNING *
                 """,
-                supplier_name, data.supplier_id, data.amount, currency, exchange_rate, amount_jod,
+                supplier_name, supplier_id, data.amount, currency, exchange_rate, amount_jod,
                 parse_date(data.payment_date), (data.notes or "").strip() or None,
                 payment_id,
             )
@@ -551,8 +581,9 @@ async def update_payment(payment_id: int, data: PaymentIn, user=Depends(get_curr
 
 
 @router.delete("/payments/{payment_id}")
-async def delete_payment(payment_id: int, user=Depends(get_current_user)):
+async def delete_payment(payment_id: str, user=Depends(get_current_user)):
     require_role(user, "admin")
+    payment_id = coerce_id(payment_id)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -597,6 +628,7 @@ async def create_purchase(data: PurchaseIn, user=Depends(get_current_user)):
     currency = parse_currency(data.currency)
     exchange_rate = parse_exchange_rate(data.exchange_rate, currency)
     amount_jod = round(data.amount * exchange_rate, 3)
+    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -611,7 +643,7 @@ async def create_purchase(data: PurchaseIn, user=Depends(get_current_user)):
                 """,
                 item_name, data.quantity or 1, data.amount, currency, exchange_rate, amount_jod,
                 parse_date(data.purchase_date),
-                (data.supplier_name or "").strip() or None, data.supplier_id,
+                (data.supplier_name or "").strip() or None, supplier_id,
                 (data.notes or "").strip() or None,
                 user.get("id"),
             )
@@ -623,8 +655,9 @@ async def create_purchase(data: PurchaseIn, user=Depends(get_current_user)):
 
 
 @router.put("/purchases/{purchase_id}")
-async def update_purchase(purchase_id: int, data: PurchaseIn, user=Depends(get_current_user)):
+async def update_purchase(purchase_id: str, data: PurchaseIn, user=Depends(get_current_user)):
     require_china_access(user)
+    purchase_id = coerce_id(purchase_id)
 
     item_name = (data.item_name or "").strip()
     if not item_name:
@@ -636,6 +669,7 @@ async def update_purchase(purchase_id: int, data: PurchaseIn, user=Depends(get_c
     currency = parse_currency(data.currency)
     exchange_rate = parse_exchange_rate(data.exchange_rate, currency)
     amount_jod = round(data.amount * exchange_rate, 3)
+    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -650,7 +684,7 @@ async def update_purchase(purchase_id: int, data: PurchaseIn, user=Depends(get_c
                 """,
                 item_name, data.quantity or 1, data.amount, currency, exchange_rate, amount_jod,
                 parse_date(data.purchase_date),
-                (data.supplier_name or "").strip() or None, data.supplier_id,
+                (data.supplier_name or "").strip() or None, supplier_id,
                 (data.notes or "").strip() or None,
                 purchase_id,
             )
@@ -664,8 +698,9 @@ async def update_purchase(purchase_id: int, data: PurchaseIn, user=Depends(get_c
 
 
 @router.delete("/purchases/{purchase_id}")
-async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
+async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
     require_role(user, "admin")
+    purchase_id = coerce_id(purchase_id)
 
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -735,8 +770,9 @@ async def create_sale(data: SaleIn, user=Depends(get_current_user)):
 
 
 @router.put("/sales/{sale_id}")
-async def update_sale(sale_id: int, data: SaleIn, user=Depends(get_current_user)):
+async def update_sale(sale_id: str, data: SaleIn, user=Depends(get_current_user)):
     require_china_access(user)
+    sale_id = coerce_id(sale_id)
 
     item_name = (data.item_name or "").strip()
     if not item_name:
@@ -775,8 +811,9 @@ async def update_sale(sale_id: int, data: SaleIn, user=Depends(get_current_user)
 
 
 @router.delete("/sales/{sale_id}")
-async def delete_sale(sale_id: int, user=Depends(get_current_user)):
+async def delete_sale(sale_id: str, user=Depends(get_current_user)):
     require_role(user, "admin")
+    sale_id = coerce_id(sale_id)
 
     pool = await get_pool()
     async with pool.acquire() as conn:

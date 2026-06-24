@@ -319,40 +319,40 @@
     createChinaInvestor: data =>
       apiFetch('/china/investors', { method: 'POST', body: JSON.stringify(data) }),
     updateChinaInvestor: (id, data) =>
-      apiFetch(`/china/investors/${requireId(id, 'معرّف المستثمر')}`, { method: 'PUT', body: JSON.stringify(data) }),
+      apiFetch(`/china/investors/${requireValidId(id, 'معرّف المستثمر')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaInvestor: id =>
-      apiFetch(`/china/investors/${requireId(id, 'معرّف المستثمر')}`, { method: 'DELETE' }),
+      apiFetch(`/china/investors/${requireValidId(id, 'معرّف المستثمر')}`, { method: 'DELETE' }),
 
     getChinaInvestorTransactions: investorId =>
-      apiFetch(`/china/investors/${requireId(investorId, 'معرّف المستثمر')}/transactions`),
+      apiFetch(`/china/investors/${requireValidId(investorId, 'معرّف المستثمر')}/transactions`),
     createChinaInvestorTransaction: (investorId, data) =>
-      apiFetch(`/china/investors/${requireId(investorId, 'معرّف المستثمر')}/transactions`, { method: 'POST', body: JSON.stringify(data) }),
+      apiFetch(`/china/investors/${requireValidId(investorId, 'معرّف المستثمر')}/transactions`, { method: 'POST', body: JSON.stringify(data) }),
     deleteChinaInvestorTransaction: id =>
-      apiFetch(`/china/transactions/${requireId(id, 'معرّف الحركة')}`, { method: 'DELETE' }),
+      apiFetch(`/china/transactions/${requireValidId(id, 'معرّف الحركة')}`, { method: 'DELETE' }),
 
     getChinaPayments: () => apiFetch('/china/payments'),
     createChinaPayment: data =>
       apiFetch('/china/payments', { method: 'POST', body: JSON.stringify(data) }),
     updateChinaPayment: (id, data) =>
-      apiFetch(`/china/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'PUT', body: JSON.stringify(data) }),
+      apiFetch(`/china/payments/${requireValidId(id, 'معرّف الدفعة')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaPayment: id =>
-      apiFetch(`/china/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
+      apiFetch(`/china/payments/${requireValidId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 
     getChinaPurchases: () => apiFetch('/china/purchases'),
     createChinaPurchase: data =>
       apiFetch('/china/purchases', { method: 'POST', body: JSON.stringify(data) }),
     updateChinaPurchase: (id, data) =>
-      apiFetch(`/china/purchases/${requireId(id, 'معرّف عملية الشراء')}`, { method: 'PUT', body: JSON.stringify(data) }),
+      apiFetch(`/china/purchases/${requireValidId(id, 'معرّف عملية الشراء')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaPurchase: id =>
-      apiFetch(`/china/purchases/${requireId(id, 'معرّف عملية الشراء')}`, { method: 'DELETE' }),
+      apiFetch(`/china/purchases/${requireValidId(id, 'معرّف عملية الشراء')}`, { method: 'DELETE' }),
 
     getChinaSales: () => apiFetch('/china/sales'),
     createChinaSale: data =>
       apiFetch('/china/sales', { method: 'POST', body: JSON.stringify(data) }),
     updateChinaSale: (id, data) =>
-      apiFetch(`/china/sales/${requireId(id, 'معرّف عملية البيع')}`, { method: 'PUT', body: JSON.stringify(data) }),
+      apiFetch(`/china/sales/${requireValidId(id, 'معرّف عملية البيع')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaSale: id =>
-      apiFetch(`/china/sales/${requireId(id, 'معرّف عملية البيع')}`, { method: 'DELETE' }),
+      apiFetch(`/china/sales/${requireValidId(id, 'معرّف عملية البيع')}`, { method: 'DELETE' }),
 
     getChinaSummary: () => apiFetch('/china/summary'),
 
@@ -361,11 +361,11 @@
     createChinaSupplier: data =>
       apiFetch('/china/suppliers', { method: 'POST', body: JSON.stringify(data) }),
     updateChinaSupplier: (id, data) =>
-      apiFetch(`/china/suppliers/${requireId(id, 'معرّف المورد')}`, { method: 'PUT', body: JSON.stringify(data) }),
+      apiFetch(`/china/suppliers/${requireValidId(id, 'معرّف المورد')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteChinaSupplier: id =>
-      apiFetch(`/china/suppliers/${requireId(id, 'معرّف المورد')}`, { method: 'DELETE' }),
+      apiFetch(`/china/suppliers/${requireValidId(id, 'معرّف المورد')}`, { method: 'DELETE' }),
     getChinaSupplierStatement: id =>
-      apiFetch(`/china/suppliers/${requireId(id, 'معرّف المورد')}/statement`),
+      apiFetch(`/china/suppliers/${requireValidId(id, 'معرّف المورد')}/statement`),
 
     // ── Warehouse Rent (إيجار المستودع) ─────────────────────────────
     getWarehouseRents: () => apiFetch('/expenses/warehouse-rents'),
