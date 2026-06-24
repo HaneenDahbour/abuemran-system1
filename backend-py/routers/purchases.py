@@ -388,15 +388,18 @@ async def update_purchase(purchase_id: str, data: PurchaseRequest, user=Depends(
                         raise HTTPException(status_code=400, detail="المورد غير موجود")
 
                 if purchase["status"] == "received":
-                    old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
-                        purchase_id,
+                    actual_movements = await conn.fetch(
+                        """SELECT product_id, SUM(quantity) AS total_qty
+                           FROM stock_movements
+                           WHERE source_type='purchase' AND source_id::text = $1
+                           GROUP BY product_id""",
+                        str(purchase_id),
                     )
-                    for item in old_items:
+                    for mov in actual_movements:
                         await conn.execute(
                             "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
-                            float(item["quantity"] or 0),
-                            item["product_id"],
+                            float(mov["total_qty"] or 0),
+                            mov["product_id"],
                         )
                     await conn.execute(
                         "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
@@ -528,15 +531,18 @@ async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
                     )
 
                 if purchase["status"] == "received":
-                    old_items = await conn.fetch(
-                        "SELECT * FROM purchase_items WHERE purchase_id=$1",
-                        purchase_id,
+                    actual_movements = await conn.fetch(
+                        """SELECT product_id, SUM(quantity) AS total_qty
+                           FROM stock_movements
+                           WHERE source_type='purchase' AND source_id::text = $1
+                           GROUP BY product_id""",
+                        str(purchase_id),
                     )
-                    for item in old_items:
+                    for mov in actual_movements:
                         await conn.execute(
                             "UPDATE products SET current_stock = GREATEST(0, current_stock - $1) WHERE id = $2",
-                            float(item["quantity"] or 0),
-                            item["product_id"],
+                            float(mov["total_qty"] or 0),
+                            mov["product_id"],
                         )
                     await conn.execute(
                         "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
@@ -560,6 +566,70 @@ async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
 
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fix-stock")
+async def fix_stock_counts(user=Depends(get_current_user)):
+    """One-time endpoint to recalculate all product stock from actual movements."""
+    require_role(user, "admin")
+
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                dupes = await conn.fetch(
+                    """SELECT source_id::text AS sid, product_id, type,
+                              COUNT(*) AS cnt, SUM(quantity) AS total_qty
+                       FROM stock_movements
+                       WHERE source_type = 'purchase'
+                       GROUP BY source_id::text, product_id, type
+                       HAVING COUNT(*) > 1"""
+                )
+
+                fixed_purchases = set()
+                for dupe in dupes:
+                    sid = dupe["sid"]
+                    pid = dupe["product_id"]
+
+                    await conn.execute(
+                        """DELETE FROM stock_movements
+                           WHERE id IN (
+                             SELECT id FROM stock_movements
+                             WHERE source_type='purchase'
+                               AND source_id::text = $1
+                               AND product_id = $2
+                             ORDER BY id
+                             OFFSET 1
+                           )""",
+                        sid,
+                        pid,
+                    )
+                    fixed_purchases.add(sid)
+
+                updated = await conn.fetch(
+                    """UPDATE products p
+                       SET current_stock = COALESCE(sub.net, 0)
+                       FROM (
+                         SELECT product_id,
+                                SUM(CASE WHEN type='in' THEN quantity ELSE -quantity END) AS net
+                         FROM stock_movements
+                         GROUP BY product_id
+                       ) sub
+                       WHERE p.id = sub.product_id
+                         AND p.current_stock != COALESCE(sub.net, 0)
+                       RETURNING p.id, p.name, p.current_stock AS new_stock"""
+                )
+
+                return {
+                    "success": True,
+                    "duplicate_groups_fixed": len(dupes),
+                    "purchases_affected": list(fixed_purchases),
+                    "products_recalculated": [row_to_dict(r) for r in updated],
+                }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

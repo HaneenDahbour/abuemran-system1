@@ -3413,6 +3413,7 @@ async function renderPurchases(container) {
         </div>
         ${isAccountant() ? `<button class="btn btn-primary" onclick="openPurchaseModal()">+ فاتورة شراء</button>` : ''}
         ${isAccountant() ? `<button class="btn btn-ghost" onclick="openAddSupplierModal()">+ مورد جديد</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-ghost" onclick="fixPurchaseStock()" style="color:var(--rd)">🔧 إصلاح المخزون</button>` : ''}
       </div>
     </div>
 
@@ -3478,6 +3479,21 @@ async function renderPurchases(container) {
       </div>
     </div>
   `;
+}
+
+async function fixPurchaseStock() {
+  if (!confirm('سيتم إصلاح أرصدة المخزون وحذف الحركات المكررة. متأكد؟')) return;
+  try {
+    const res = await API.fixPurchaseStock();
+    const dupes = res.duplicate_groups_fixed || 0;
+    const prods = (res.products_recalculated || []).length;
+    showToast(dupes || prods
+      ? `تم الإصلاح: ${dupes} مجموعة مكررة، ${prods} صنف تم تعديل رصيده`
+      : 'لا توجد مشاكل — المخزون سليم ✅', 'success');
+    navigate('purchases');
+  } catch (e) {
+    showToast('فشل الإصلاح: ' + (e.message || e), 'error');
+  }
 }
 
 function openPurchaseModal() {
