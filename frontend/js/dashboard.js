@@ -1423,7 +1423,8 @@ function _invoiceActionButtons(inv) {
     html += `<button class="btn btn-ghost btn-sm" onclick="printInvoiceFromEncoded(${jsString(encoded)})">🖨️ طباعة</button>`;
     if (isAccountant()) {
       html += `
-<button class="btn btn-success btn-sm" onclick="openRecipientPayment(${jsString(getInvoiceRecipientName(inv) || inv.recipient_name || '')}, null)">💰 قبض</button>        <button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
+${inv.client_id ? `<button class="btn btn-success btn-sm" onclick="openPaymentModal('${inv.client_id}', '${inv.id}')">💰 قبض للفاتورة</button>` : ''}
+<button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
       `;
     }
     if (isAdmin()) {
@@ -1549,9 +1550,9 @@ function openInvoiceModal(invoice = null) {
   // Pending invoices: paid_amount is always 0 until approval — the amount the
   // employee recorded lives in initial_paid_amount. Use it so editing a pending
   // invoice doesn't silently wipe the recorded payment.
-  const paid = (invoice?.status || 'approved') === 'pending'
-    ? Number(invoice?.initial_paid_amount || 0)
-    : Number(invoice?.paid_amount || 0);
+  // Editing changes only the invoice's original automatic payment. Later
+  // manual receipts are separate ledger entries and must never be collapsed.
+  const paid = Number(invoice?.initial_paid_amount || 0);
   const recipient = invoice?.recipient_name ||
     String(invoice?.notes || '').match(/المطلوب من السادة:\s*([^|]+)/)?.[1]?.trim() || '';
   const cleanNotes = (invoice?.notes || '')
@@ -2934,6 +2935,7 @@ async function doRejectInvoice(id) {
 }
 
 function renderPaymentRow(p) {
+  const encoded = encodePayload(p);
   return `<tr data-payment-id="${p.id}">
     <td><strong>${escHtml(p.recipient_name || '—')}</strong></td>
     <td style="color:var(--gr);font-weight:700">+${fmt(p.amount)} د.أ</td>
@@ -2942,7 +2944,10 @@ function renderPaymentRow(p) {
     <td>${escHtml(p.invoice_number || '—')}</td>
     <td>${escHtml(p.employee_name || '—')}</td>
     <td style="color:var(--tx2);font-size:12px">${escHtml(p.notes || '—')}</td>
-    <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${p.id}')">🗑️</button>` : ''}</td>
+    <td><div style="display:flex;gap:6px">
+      ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openEditRecipientPayment(${jsString(encoded)})">✏️</button>` : ''}
+      ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${p.id}')">🗑️</button>` : ''}
+    </div></td>
   </tr>`;
 }
 async function renderPayments(container) {
@@ -7204,7 +7209,7 @@ async function viewRecipientStatement(name) {
                   ${fmt(Math.abs(t.running_balance))} د.أ
                 </td>
                 <td style="padding:10px 12px">
-                  ${!isInv && isAdmin()
+                  ${!isInv && t.source === 'manual_recipient_payment' && isAdmin()
           ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${t.id}', ${jsString(name)})">🗑️</button>`
           : ''}
                 </td>
@@ -7230,6 +7235,7 @@ async function viewRecipientStatement(name) {
 }
 
 function openRecipientPayment(name, clientId) {
+  window._editingRecipientPayment = null;
   const hasClient = name && String(name).trim();
   const clientOpts = (window._clientsCache || [])
     .map(c => `<option value="${c.id}" data-name="${escHtml(c.name)}" ${c.id == clientId ? 'selected' : ''}>${escHtml(c.name)}</option>`)
@@ -7289,6 +7295,23 @@ function openRecipientPayment(name, clientId) {
   `);
 }
 
+function openEditRecipientPayment(encoded) {
+  const payment = decodePayload(encoded);
+  if (!payment) { toast('تعذر تحميل المقبوضة', 'error'); return; }
+  openRecipientPayment(payment.recipient_name || '', payment.client_id || null);
+  window._editingRecipientPayment = payment;
+  const amount = document.getElementById('rp_amount');
+  const method = document.getElementById('rp_method');
+  const dateEl = document.getElementById('rp_date');
+  const notes = document.getElementById('rp_notes');
+  if (amount) amount.value = payment.amount || '';
+  if (method) method.value = payment.payment_method || 'cash';
+  if (dateEl) dateEl.value = String(payment.payment_date || '').split('T')[0];
+  if (notes) notes.value = payment.notes || '';
+  const title = document.querySelector('#global-modal .modal-title');
+  if (title) title.textContent = '✏️ تعديل المقبوضة';
+}
+
 async function saveRecipientPayment() {
   const name = document.getElementById('rp_name')?.value?.trim() || '';
   const clientId = document.getElementById('rp_client_id')?.value || null;
@@ -7301,15 +7324,23 @@ async function saveRecipientPayment() {
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
 
   try {
-    await API.createRecipientPayment({
+    const payload = {
       recipient_name: name,
       client_id: clientId ? Number(clientId) : null,
+      invoice_id: window._editingRecipientPayment?.invoice_id || null,
       amount,
       payment_method: document.getElementById('rp_method')?.value || 'cash',
       payment_date: document.getElementById('rp_date')?.value,
       notes: document.getElementById('rp_notes')?.value || null,
-    });
-    toast('تم تسجيل المقبوضة ✅', 'success');
+    };
+    if (window._editingRecipientPayment?.id) {
+      await API.updateRecipientPayment(window._editingRecipientPayment.id, payload);
+      toast('تم تعديل المقبوضة ✅', 'success');
+    } else {
+      await API.createRecipientPayment(payload);
+      toast('تم تسجيل المقبوضة ✅', 'success');
+    }
+    window._editingRecipientPayment = null;
     closeModal();
     window._clientsCache = null;
     navigateTo('payments');
@@ -7688,6 +7719,7 @@ function applyAdvancesToSalaries(salaries, advances) {
   const result = (salaries || []).map(s => ({
     ...s,
     advance_applied: 0,
+    cash_paid: s.status === 'paid' ? Number(s.salary_amount || 0) : 0,
     effective_remaining: s.status === 'paid' ? 0 : Number(s.salary_amount || 0),
     effective_status: s.status === 'paid' ? 'paid' : 'pending',
   }));
@@ -7700,7 +7732,7 @@ function applyAdvancesToSalaries(salaries, advances) {
   });
 
   result
-    .filter(s => s.status !== 'paid' && s.employee_user_id)
+    .filter(s => s.employee_user_id)
     .sort((a, b) => String(a.salary_month || '').localeCompare(String(b.salary_month || '')) || Number(a.id) - Number(b.id))
     .forEach(s => {
       const key = String(s.employee_user_id);
@@ -7708,8 +7740,11 @@ function applyAdvancesToSalaries(salaries, advances) {
       const amount = Number(s.salary_amount || 0);
       const applied = Math.min(available, amount);
       s.advance_applied = applied;
-      s.effective_remaining = Math.max(amount - applied, 0);
-      s.effective_status = applied >= amount ? 'covered_by_advance' : applied > 0 ? 'partial' : 'pending';
+      s.cash_paid = s.status === 'paid' ? Math.max(amount - applied, 0) : 0;
+      s.effective_remaining = s.status === 'paid' ? 0 : Math.max(amount - applied, 0);
+      s.effective_status = s.status === 'paid'
+        ? 'paid'
+        : applied >= amount ? 'covered_by_advance' : applied > 0 ? 'partial' : 'pending';
       balances.set(key, Math.max(available - applied, 0));
     });
 
@@ -7741,6 +7776,7 @@ async function renderExpenses(container) {
   const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
   const totalAdvances = advances.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalSalaryCash = salaries.reduce((s, e) => s + Number(e.cash_paid || 0), 0);
 
   container.innerHTML = `
     <div class="page-header">
@@ -7777,7 +7813,7 @@ async function renderExpenses(container) {
       <div class="metric-card blue">
         <div class="metric-icon">💸</div>
         <div class="metric-label">إجمالي الصرف</div>
-        <div class="metric-value">${fmt(totalExpenses + totalSalaries + totalAdvances)}</div>
+        <div class="metric-value">${fmt(totalExpenses + totalSalaryCash + totalAdvances)}</div>
         <div class="metric-sub">دينار أردني</div>
       </div>
     </div>
@@ -8980,7 +9016,7 @@ async function renderEmployees(container) {
               <div style="font-size:11px;color:var(--tx3)">${roleLabel(emp.role)}</div>
             </div>
             <button class="btn btn-ghost btn-sm"
-                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
+                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, shop_id: emp.shop_id || null, permissions: emp.permissions ?? null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
             ${emp.id !== getUser()?.id
       ? `<button class="btn btn-danger btn-sm"
                    onclick="deleteEmployee('${emp.id}', ${jsString(emp.full_name)})">🗑️</button>`

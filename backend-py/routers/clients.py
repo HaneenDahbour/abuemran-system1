@@ -1,5 +1,6 @@
 ﻿from decimal import Decimal
 from datetime import date, datetime
+import math
 from typing import Optional
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from pydantic import BaseModel
 
 from config.db import get_pool
 from middleware.auth import get_current_user
-from middleware.roles import require_role
+from middleware.roles import require_permission, require_role
 
 router = APIRouter()
 
@@ -66,8 +67,30 @@ class ClientRequest(BaseModel):
     phone: Optional[str] = None
 
 
+def require_client_access(user, client_id: Optional[int] = None):
+    if user.get("role") == "client":
+        if client_id is not None and int(user.get("client_id") or 0) != int(client_id):
+            raise HTTPException(status_code=403, detail="لا يمكنك الوصول إلى بيانات عميل آخر")
+        return
+    require_permission(user, "clients")
+
+
+def validate_client_fields(data: ClientRequest):
+    credit_limit = float(data.credit_limit or 0)
+    if not math.isfinite(credit_limit) or credit_limit < 0:
+        raise HTTPException(status_code=400, detail="حد الائتمان غير صحيح")
+    department = data.department or "porcelain"
+    if department not in ("porcelain", "egyptian", "shoes"):
+        raise HTTPException(status_code=400, detail="قسم العميل غير صحيح")
+    risk_level = data.risk_level or "low"
+    if risk_level not in ("low", "medium", "high"):
+        raise HTTPException(status_code=400, detail="مستوى المخاطر غير صحيح")
+    return credit_limit, department, risk_level
+
+
 @router.get("")
 async def get_clients(user=Depends(get_current_user)):
+    require_client_access(user)
     pool = await get_pool()
 
     try:
@@ -133,6 +156,7 @@ async def get_clients(user=Depends(get_current_user)):
 
 @router.get("/{client_id}")
 async def get_client(client_id: int, user=Depends(get_current_user)):
+    require_client_access(user, client_id)
     pool = await get_pool()
 
     try:
@@ -177,6 +201,7 @@ async def get_client(client_id: int, user=Depends(get_current_user)):
 
 @router.get("/{client_id}/statement")
 async def get_client_statement(client_id: int, user=Depends(get_current_user)):
+    require_client_access(user, client_id)
     pool = await get_pool()
 
     try:
@@ -204,6 +229,12 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
                     SELECT SUM(rp.amount)
                     FROM recipient_payments rp
                     WHERE rp.invoice_id = i.id
+                ), 0)
+                + COALESCE((
+                    SELECT SUM(p.amount)
+                    FROM payments p
+                    WHERE p.invoice_id = i.id
+                      AND p.status = 'approved'
                 ), 0) AS paid_from_invoice
             FROM invoices i
             WHERE i.client_id = $1
@@ -362,12 +393,14 @@ async def get_client_statement(client_id: int, user=Depends(get_current_user)):
 @router.post("")
 async def create_client(data: ClientRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "clients")
 
     name = clean_text(data.name)
     phone = clean_text(data.phone)
 
     if not name:
         raise HTTPException(status_code=400, detail="اسم العميل مطلوب")
+    credit_limit, department, risk_level = validate_client_fields(data)
 
     pool = await get_pool()
 
@@ -375,7 +408,7 @@ async def create_client(data: ClientRequest, user=Depends(get_current_user)):
         async with pool.acquire() as conn:
             async with conn.transaction():
                 duplicate = await conn.fetchrow(
-                    "SELECT id FROM clients WHERE LOWER(name) = LOWER($1) LIMIT 1",
+                    "SELECT id FROM clients WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) LIMIT 1",
                     name,
                 )
 
@@ -391,9 +424,9 @@ async def create_client(data: ClientRequest, user=Depends(get_current_user)):
                     RETURNING *
                     """,
                     name,
-                    data.department or "porcelain",
-                    float(data.credit_limit or 0),
-                    data.risk_level or "low",
+                    department,
+                    credit_limit,
+                    risk_level,
                     phone,
                 )
 
@@ -414,12 +447,14 @@ async def update_client(
     client_id: int, data: ClientRequest, user=Depends(get_current_user)
 ):
     require_role(user, "admin", "accountant")
+    require_permission(user, "clients")
 
     name = clean_text(data.name)
     phone = clean_text(data.phone)
 
     if not name:
         raise HTTPException(status_code=400, detail="اسم العميل مطلوب")
+    credit_limit, department, risk_level = validate_client_fields(data)
 
     pool = await get_pool()
 
@@ -434,6 +469,19 @@ async def update_client(
                 if not existing:
                     raise HTTPException(status_code=404, detail="العميل غير موجود")
 
+                duplicate = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                      SELECT 1 FROM clients
+                      WHERE id<>$1 AND LOWER(TRIM(name))=LOWER(TRIM($2))
+                    )
+                    """,
+                    client_id,
+                    name,
+                )
+                if duplicate:
+                    raise HTTPException(status_code=409, detail="عميل بهذا الاسم موجود مسبقاً")
+
                 row = await conn.fetchrow(
                     """
                     UPDATE clients
@@ -446,9 +494,9 @@ async def update_client(
                     RETURNING *
                     """,
                     name,
-                    data.department or "porcelain",
-                    float(data.credit_limit or 0),
-                    data.risk_level or "low",
+                    department,
+                    credit_limit,
+                    risk_level,
                     phone,
                     client_id,
                 )
@@ -468,6 +516,7 @@ async def update_client(
 @router.delete("/{client_id}")
 async def delete_client(client_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "clients")
 
     pool = await get_pool()
 
@@ -503,6 +552,7 @@ async def delete_client(client_id: int, user=Depends(get_current_user)):
                         FROM invoice_items ii
                         JOIN invoices i ON i.id = ii.invoice_id
                         WHERE ii.invoice_id = ANY($1::int[])
+                          AND COALESCE(i.status, 'approved') = 'approved'
                         """,
                         invoice_ids,
                     )
