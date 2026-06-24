@@ -40,31 +40,29 @@ async def get_stats(user=Depends(get_current_user)):
         row = await pool.fetchrow("""
                 WITH approved_inv AS (
                     SELECT
-                        COALESCE(SUM(total_amount), 0) AS total_sales,
-                        COALESCE(SUM(COALESCE(initial_paid_amount, 0)), 0) AS invoice_paid,
-                        COALESCE(SUM(
-                            GREATEST(
-                                COALESCE(total_amount, 0) - COALESCE(initial_paid_amount, 0),
-                                0
-                            )
-                        ), 0) AS invoice_remaining
+                        COALESCE(SUM(total_amount), 0) AS total_sales
                     FROM invoices
-                    WHERE COALESCE(status, '') = 'approved'
+                    WHERE COALESCE(NULLIF(status, ''), 'approved') = 'approved'
                 ),
-                extra_payments AS (
+                all_payments AS (
                     SELECT
-                        COALESCE(SUM(amount), 0) AS extra_paid
-                    FROM recipient_payments
+                        COALESCE(SUM(rp.amount), 0)
+                        + COALESCE((
+                            SELECT SUM(p.amount)
+                            FROM payments p
+                            WHERE p.status = 'approved'
+                        ), 0) AS total_paid
+                    FROM recipient_payments rp
                 )
                 SELECT
                     approved_inv.total_sales AS total_sales,
 
                     GREATEST(
-                        approved_inv.invoice_remaining - extra_payments.extra_paid,
+                        approved_inv.total_sales - all_payments.total_paid,
                         0
                     ) AS total_debts,
 
-                    approved_inv.invoice_paid + extra_payments.extra_paid AS total_payments,
+                    all_payments.total_paid AS total_payments,
 
                     (SELECT COUNT(*) FROM checks WHERE due_date = CURRENT_DATE AND status='pending')
                         AS today_checks,
@@ -88,7 +86,7 @@ async def get_stats(user=Depends(get_current_user)):
                      ) cf
                     ) AS total_profit
 
-                FROM approved_inv, extra_payments
+                FROM approved_inv, all_payments
             """)
         return row_to_dict(row)
 
@@ -123,8 +121,8 @@ async def get_cashbox(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
     pool = await get_pool()
     try:
-        # كل النقد الواصل من العملاء (معتمد)
-        cash_in_row = await pool.fetchrow("""
+        # كل النقد الواصل من العملاء (معتمد) — من جدول المقبوضات القديم
+        cash_in_legacy = await pool.fetchrow("""
             SELECT COALESCE(SUM(p.amount), 0) AS total
             FROM payments p
             WHERE p.status = 'approved'
@@ -134,6 +132,13 @@ async def get_cashbox(user=Depends(get_current_user)):
                 OR p.payment_method = 'cash'
                 OR p.payment_method = 'check'
               )
+            """)
+
+        # النقد الواصل من جدول مقبوضات الزبائن (نقد + شيك)
+        cash_in_recipient = await pool.fetchrow("""
+            SELECT COALESCE(SUM(rp.amount), 0) AS total
+            FROM recipient_payments rp
+            WHERE rp.payment_method IN ('cash', 'check')
             """)
 
         # كل المدفوع للموردين
@@ -146,7 +151,7 @@ async def get_cashbox(user=Depends(get_current_user)):
             "SELECT COALESCE(SUM(amount), 0) AS total FROM cashbox_expenses"
         )
 
-        total_in = float(cash_in_row["total"] or 0)
+        total_in = float(cash_in_legacy["total"] or 0) + float(cash_in_recipient["total"] or 0)
         total_suppliers = float(cash_out_suppliers["total"] or 0)
         total_expenses = float(cash_out_expenses["total"] or 0)
         balance = total_in - total_suppliers - total_expenses
@@ -167,6 +172,17 @@ async def get_cashbox(user=Depends(get_current_user)):
                 OR p.payment_method = 'check'
               )
             ORDER BY p.payment_date DESC
+            LIMIT 30
+            """)
+
+        recipient_client_payments = await pool.fetch("""
+            SELECT rp.id, rp.amount, rp.payment_date AS date,
+                   COALESCE(rp.recipient_name, 'زبون') AS description,
+                   'client_payment' AS type,
+                   rp.notes
+            FROM recipient_payments rp
+            WHERE rp.payment_method IN ('cash', 'check')
+            ORDER BY rp.payment_date DESC
             LIMIT 30
             """)
 
@@ -201,6 +217,7 @@ async def get_cashbox(user=Depends(get_current_user)):
 
         transactions = (
             [to_d(r) for r in client_payments]
+            + [to_d(r) for r in recipient_client_payments]
             + [to_d(r) for r in supplier_payments]
             + [to_d(r) for r in expenses]
         )

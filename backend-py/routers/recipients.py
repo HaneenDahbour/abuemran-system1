@@ -200,7 +200,7 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
     WHERE LOWER(TRIM(rp.recipient_name)) = LOWER(TRIM($1))
       AND (
         rp.invoice_id IS NULL
-        OR COALESCE(i.status, '') = 'approved'
+        OR COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
       )
     ORDER BY rp.payment_date ASC, rp.id ASC
     """,
@@ -214,23 +214,11 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
             d = row_to_dict(r)
 
             total = float(d["total_amount"] or 0)
-            paid_now = float(d.get("paid_amount") or 0)
 
             d["type"] = "invoice"
             d["amount"] = total
             d["items"] = items_by_invoice.get(r["id"], [])
             transactions.append(d)
-
-            if paid_now > 0:
-                transactions.append({
-                    "id": f"invoice-paid-{d['id']}",
-                    "type": "payment",
-                    "source": "invoice_paid_amount",
-                    "amount": paid_now,
-                    "date": d.get("date"),
-                    "notes": f"مدفوع داخل الفاتورة #{d.get('invoice_number') or d.get('id')}",
-                    "invoice_number": d.get("invoice_number"),
-                })
 
 
 
