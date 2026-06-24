@@ -146,10 +146,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
     notes = clean_text(data.notes)
     supplier_id = None
     if data.supplier_id:
-        try:
-            supplier_id = int(data.supplier_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
+        supplier_id = coerce_id(data.supplier_id)
 
     pool = await get_pool()
 
@@ -362,10 +359,7 @@ async def update_purchase(purchase_id: str, data: PurchaseRequest, user=Depends(
     pool = await get_pool()
     supplier_id = None
     if data.supplier_id:
-        try:
-            supplier_id = int(data.supplier_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="معرّف المورد غير صحيح")
+        supplier_id = coerce_id(data.supplier_id)
 
     try:
         async with pool.acquire() as conn:
