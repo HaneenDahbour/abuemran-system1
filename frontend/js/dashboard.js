@@ -12,6 +12,17 @@ function safeJsonParse(value, fallback = null) {
   }
 }
 
+function _lockBtn(btn, text) { if (btn) { btn.disabled = true; btn.dataset.oldText = btn.textContent; btn.textContent = text || 'جاري الحفظ...'; } }
+function _unlockBtn(btn) { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.oldText || 'حفظ'; } }
+function _modalBtn() { return document.querySelector('#global-modal .btn-primary'); }
+
+function normalizeOptionalId(value) {
+  const normalized = String(value ?? '').trim();
+  return (!normalized || ['null', 'undefined', 'nan'].includes(normalized.toLowerCase()))
+    ? null
+    : normalized;
+}
+
 if (typeof getUser !== 'function') {
   function getUser() {
     return safeJsonParse(localStorage.getItem('user'), null);
@@ -1423,7 +1434,8 @@ function _invoiceActionButtons(inv) {
     html += `<button class="btn btn-ghost btn-sm" onclick="printInvoiceFromEncoded(${jsString(encoded)})">🖨️ طباعة</button>`;
     if (isAccountant()) {
       html += `
-<button class="btn btn-success btn-sm" onclick="openRecipientPayment(${jsString(getInvoiceRecipientName(inv) || inv.recipient_name || '')}, null)">💰 قبض</button>        <button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
+${inv.client_id ? `<button class="btn btn-success btn-sm" onclick="openPaymentModal('${inv.client_id}', '${inv.id}')">💰 قبض للفاتورة</button>` : ''}
+<button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
       `;
     }
     if (isAdmin()) {
@@ -1549,9 +1561,9 @@ function openInvoiceModal(invoice = null) {
   // Pending invoices: paid_amount is always 0 until approval — the amount the
   // employee recorded lives in initial_paid_amount. Use it so editing a pending
   // invoice doesn't silently wipe the recorded payment.
-  const paid = (invoice?.status || 'approved') === 'pending'
-    ? Number(invoice?.initial_paid_amount || 0)
-    : Number(invoice?.paid_amount || 0);
+  // Editing changes only the invoice's original automatic payment. Later
+  // manual receipts are separate ledger entries and must never be collapsed.
+  const paid = Number(invoice?.initial_paid_amount || 0);
   const recipient = invoice?.recipient_name ||
     String(invoice?.notes || '').match(/المطلوب من السادة:\s*([^|]+)/)?.[1]?.trim() || '';
   const cleanNotes = (invoice?.notes || '')
@@ -2934,6 +2946,7 @@ async function doRejectInvoice(id) {
 }
 
 function renderPaymentRow(p) {
+  const encoded = encodePayload(p);
   return `<tr data-payment-id="${p.id}">
     <td><strong>${escHtml(p.recipient_name || '—')}</strong></td>
     <td style="color:var(--gr);font-weight:700">+${fmt(p.amount)} د.أ</td>
@@ -2942,7 +2955,10 @@ function renderPaymentRow(p) {
     <td>${escHtml(p.invoice_number || '—')}</td>
     <td>${escHtml(p.employee_name || '—')}</td>
     <td style="color:var(--tx2);font-size:12px">${escHtml(p.notes || '—')}</td>
-    <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${p.id}')">🗑️</button>` : ''}</td>
+    <td><div style="display:flex;gap:6px">
+      ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openEditRecipientPayment(${jsString(encoded)})">✏️</button>` : ''}
+      ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${p.id}')">🗑️</button>` : ''}
+    </div></td>
   </tr>`;
 }
 async function renderPayments(container) {
@@ -3694,7 +3710,7 @@ function openQuickAddSupplierInPurchase() {
         <input class="form-input" id="qs_phone" placeholder="اختياري">
       </div>
       <div style="display:flex;gap:10px;margin-top:8px">
-        <button class="btn btn-primary" style="flex:1" onclick="saveQuickSupplier()">إضافة</button>
+        <button class="btn btn-primary" style="flex:1" id="btn-save-quick-supplier" onclick="saveQuickSupplier()">إضافة</button>
         <button class="btn btn-ghost" onclick="document.getElementById('quick_supplier_overlay').remove()">إلغاء</button>
       </div>
     </div>
@@ -3704,13 +3720,14 @@ function openQuickAddSupplierInPurchase() {
 }
 
 async function saveQuickSupplier() {
+  const btn = document.getElementById('btn-save-quick-supplier');
   const name = document.getElementById('qs_name')?.value?.trim();
   if (!name) { toast('الاسم مطلوب', 'error'); return; }
   const phone = document.getElementById('qs_phone')?.value?.trim() || null;
+  _lockBtn(btn, 'جاري الإضافة...');
   try {
     const newSupplier = await API.createSupplier({ name, phone });
     document.getElementById('quick_supplier_overlay')?.remove();
-    // Add new supplier to cache and dropdown
     if (!window._suppliersCache) window._suppliersCache = [];
     window._suppliersCache.push(newSupplier);
     const sel = document.getElementById('pur_supplier');
@@ -3724,6 +3741,7 @@ async function saveQuickSupplier() {
     toast(`تم إضافة المورد "${name}" ✅`, 'success');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -3775,7 +3793,7 @@ async function openQuickAddProductInPurchase(rowIdx, prefix) {
         </div>
       </div>
       <div style="display:flex;gap:10px;margin-top:12px">
-        <button class="btn btn-primary" style="flex:1" onclick="saveQuickProduct('${rowIdx}', '${prefix}')">إضافة الصنف</button>
+        <button class="btn btn-primary" style="flex:1" id="btn-save-quick-product" onclick="saveQuickProduct('${rowIdx}', '${prefix}')">إضافة الصنف</button>
         <button class="btn btn-ghost" onclick="document.getElementById('quick_product_overlay').remove()">إلغاء</button>
       </div>
     </div>
@@ -3795,6 +3813,7 @@ function toggleNewCategoryFields() {
 }
 
 async function saveQuickProduct(rowIdx, prefix) {
+  const btn = document.getElementById('btn-save-quick-product');
   const name = document.getElementById('qp_name')?.value?.trim();
   if (!name) { toast('اسم الصنف مطلوب', 'error'); return; }
 
@@ -3807,6 +3826,7 @@ async function saveQuickProduct(rowIdx, prefix) {
     const catName = document.getElementById('qp_cat_name')?.value?.trim();
     if (!catName) { toast('اسم الفئة مطلوب', 'error'); return; }
     const catIcon = document.getElementById('qp_cat_icon')?.value?.trim() || '📦';
+    _lockBtn(btn, 'جاري الإضافة...');
     try {
       const newCat = await API.createWarehouseCategory({ name: catName, icon: catIcon });
       categoryId = newCat.id;
@@ -3815,12 +3835,14 @@ async function saveQuickProduct(rowIdx, prefix) {
       toast(`تم إنشاء الفئة "${catName}" ✅`, 'success');
     } catch (e) {
       toast(`خطأ في إنشاء الفئة: ${e.message}`, 'error');
+      _unlockBtn(btn);
       return;
     }
   }
 
   if (!categoryId) { toast('اختر فئة أو أنشئ فئة جديدة', 'error'); return; }
 
+  _lockBtn(btn, 'جاري الإضافة...');
   try {
     const newProduct = await API.createProduct({
       name,
@@ -3850,6 +3872,7 @@ async function saveQuickProduct(rowIdx, prefix) {
     toast(`تم إضافة الصنف "${name}" ✅`, 'success');
   } catch (e) {
     toast(`خطأ في إنشاء الصنف: ${e.message}`, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4010,6 +4033,7 @@ function calcEditPurchaseTotal() {
 }
 
 async function saveEditPurchase() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`epi_prod_${i}`);
@@ -4026,7 +4050,7 @@ async function saveEditPurchase() {
     }
   }
 
-  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
+  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); _unlockBtn(btn); return; }
 
   const supplierId = document.getElementById('epur_supplier').value || null;
 
@@ -4043,6 +4067,7 @@ async function saveEditPurchase() {
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4766,8 +4791,9 @@ function openCategoryModal() {
 }
 
 async function saveCategory() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('cat_name').value.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.createWarehouseCategory({
@@ -4780,6 +4806,7 @@ async function saveCategory() {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4954,8 +4981,9 @@ function openEditCategoryModal(id) {
 }
 
 async function saveEditCategory(id) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('ecat_name').value.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.updateWarehouseCategory(id, {
@@ -4968,6 +4996,7 @@ async function saveEditCategory(id) {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 /* ── Add/Edit Product Modal ───────────────────────────────── */
@@ -5819,6 +5848,7 @@ function calcWarehouseTotal() {
 }
 
 async function saveWarehouseInvoice() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`wp_prod_${i}`);
@@ -5835,7 +5865,7 @@ async function saveWarehouseInvoice() {
     }
   }
 
-  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
+  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.createWarehouseInvoice({
@@ -5852,6 +5882,7 @@ async function saveWarehouseInvoice() {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -6123,6 +6154,7 @@ function openUserModal() {
 }
 
 async function saveUser() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('nu_name').value.trim();
   const username = document.getElementById('nu_user').value.trim();
   const password = document.getElementById('nu_pass').value;
@@ -6131,11 +6163,13 @@ async function saveUser() {
 
   if (!name || !username || !password) {
     toast('يرجى ملء جميع الحقول', 'error');
+    _unlockBtn(btn);
     return;
   }
 
   if ((role === 'shop_manager' || role === 'shop_employee') && !shopIdVal) {
     toast('اختر المحل المرتبط بهذا الحساب', 'error');
+    _unlockBtn(btn);
     return;
   }
 
@@ -6150,6 +6184,7 @@ async function saveUser() {
     navigateTo('users');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -7204,7 +7239,7 @@ async function viewRecipientStatement(name) {
                   ${fmt(Math.abs(t.running_balance))} د.أ
                 </td>
                 <td style="padding:10px 12px">
-                  ${!isInv && isAdmin()
+                  ${!isInv && t.source === 'manual_recipient_payment' && isAdmin()
           ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${t.id}', ${jsString(name)})">🗑️</button>`
           : ''}
                 </td>
@@ -7230,6 +7265,7 @@ async function viewRecipientStatement(name) {
 }
 
 function openRecipientPayment(name, clientId) {
+  window._editingRecipientPayment = null;
   const hasClient = name && String(name).trim();
   const clientOpts = (window._clientsCache || [])
     .map(c => `<option value="${c.id}" data-name="${escHtml(c.name)}" ${c.id == clientId ? 'selected' : ''}>${escHtml(c.name)}</option>`)
@@ -7289,6 +7325,23 @@ function openRecipientPayment(name, clientId) {
   `);
 }
 
+function openEditRecipientPayment(encoded) {
+  const payment = decodePayload(encoded);
+  if (!payment) { toast('تعذر تحميل المقبوضة', 'error'); return; }
+  openRecipientPayment(payment.recipient_name || '', payment.client_id || null);
+  window._editingRecipientPayment = payment;
+  const amount = document.getElementById('rp_amount');
+  const method = document.getElementById('rp_method');
+  const dateEl = document.getElementById('rp_date');
+  const notes = document.getElementById('rp_notes');
+  if (amount) amount.value = payment.amount || '';
+  if (method) method.value = payment.payment_method || 'cash';
+  if (dateEl) dateEl.value = String(payment.payment_date || '').split('T')[0];
+  if (notes) notes.value = payment.notes || '';
+  const title = document.querySelector('#global-modal .modal-title');
+  if (title) title.textContent = '✏️ تعديل المقبوضة';
+}
+
 async function saveRecipientPayment() {
   const name = document.getElementById('rp_name')?.value?.trim() || '';
   const clientId = document.getElementById('rp_client_id')?.value || null;
@@ -7301,15 +7354,23 @@ async function saveRecipientPayment() {
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
 
   try {
-    await API.createRecipientPayment({
+    const payload = {
       recipient_name: name,
       client_id: clientId ? Number(clientId) : null,
+      invoice_id: window._editingRecipientPayment?.invoice_id || null,
       amount,
       payment_method: document.getElementById('rp_method')?.value || 'cash',
       payment_date: document.getElementById('rp_date')?.value,
       notes: document.getElementById('rp_notes')?.value || null,
-    });
-    toast('تم تسجيل المقبوضة ✅', 'success');
+    };
+    if (window._editingRecipientPayment?.id) {
+      await API.updateRecipientPayment(window._editingRecipientPayment.id, payload);
+      toast('تم تعديل المقبوضة ✅', 'success');
+    } else {
+      await API.createRecipientPayment(payload);
+      toast('تم تسجيل المقبوضة ✅', 'success');
+    }
+    window._editingRecipientPayment = null;
     closeModal();
     window._clientsCache = null;
     navigateTo('payments');
@@ -7455,8 +7516,9 @@ function openSupplierPaymentModal(supplierId, supplierName) {
 }
 
 async function saveSupplierPayment(supplierId, supplierName) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const amount = parseFloat(document.getElementById('sp_amount')?.value);
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
   try {
     await API.addSupplierPayment(supplierId, {
       amount,
@@ -7467,7 +7529,7 @@ async function saveSupplierPayment(supplierId, supplierName) {
     toast('تم تسجيل الدفعة ✅', 'success');
     closeModal();
     viewSupplierStatement(supplierId, supplierName);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 async function deleteSupPayment(paymentId, supplierId, supplierName) {
@@ -7585,10 +7647,11 @@ function openExpenseModal() {
 }
 
 async function saveExpense() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const amount = parseFloat(document.getElementById('exp_amount')?.value);
   const description = document.getElementById('exp_desc')?.value?.trim();
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (!description) { toast('الوصف مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
+  if (!description) { toast('الوصف مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.addCashboxExpense({
       amount,
@@ -7598,7 +7661,7 @@ async function saveExpense() {
     toast('تم تسجيل المصروف ✅', 'success');
     closeModal();
     navigateTo('cashbox');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openAddSupplierModal() {
@@ -7623,14 +7686,15 @@ function openAddSupplierModal() {
 }
 
 async function saveNewSupplier() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('ns_name')?.value?.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.createSupplier({ name, phone: document.getElementById('ns_phone')?.value || null });
     toast('تم إضافة المورد ✅', 'success');
     closeModal();
     navigateTo('purchases');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openEditSupplierModal(s) {
@@ -7655,15 +7719,16 @@ function openEditSupplierModal(s) {
 }
 
 async function saveEditSupplier(id) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('es_name')?.value?.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.updateSupplier(id, { name, phone: document.getElementById('es_phone')?.value || null });
     toast('تم تحديث المورد ✅', 'success');
     window._suppliersCache = null;
     closeModal();
     navigateTo('purchases');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openEditSupplierById(id) {
@@ -7688,6 +7753,7 @@ function applyAdvancesToSalaries(salaries, advances) {
   const result = (salaries || []).map(s => ({
     ...s,
     advance_applied: 0,
+    cash_paid: s.status === 'paid' ? Number(s.salary_amount || 0) : 0,
     effective_remaining: s.status === 'paid' ? 0 : Number(s.salary_amount || 0),
     effective_status: s.status === 'paid' ? 'paid' : 'pending',
   }));
@@ -7700,7 +7766,7 @@ function applyAdvancesToSalaries(salaries, advances) {
   });
 
   result
-    .filter(s => s.status !== 'paid' && s.employee_user_id)
+    .filter(s => s.employee_user_id)
     .sort((a, b) => String(a.salary_month || '').localeCompare(String(b.salary_month || '')) || Number(a.id) - Number(b.id))
     .forEach(s => {
       const key = String(s.employee_user_id);
@@ -7708,8 +7774,11 @@ function applyAdvancesToSalaries(salaries, advances) {
       const amount = Number(s.salary_amount || 0);
       const applied = Math.min(available, amount);
       s.advance_applied = applied;
-      s.effective_remaining = Math.max(amount - applied, 0);
-      s.effective_status = applied >= amount ? 'covered_by_advance' : applied > 0 ? 'partial' : 'pending';
+      s.cash_paid = s.status === 'paid' ? Math.max(amount - applied, 0) : 0;
+      s.effective_remaining = s.status === 'paid' ? 0 : Math.max(amount - applied, 0);
+      s.effective_status = s.status === 'paid'
+        ? 'paid'
+        : applied >= amount ? 'covered_by_advance' : applied > 0 ? 'partial' : 'pending';
       balances.set(key, Math.max(available - applied, 0));
     });
 
@@ -7741,6 +7810,7 @@ async function renderExpenses(container) {
   const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
   const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
   const totalAdvances = advances.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalSalaryCash = salaries.reduce((s, e) => s + Number(e.cash_paid || 0), 0);
 
   container.innerHTML = `
     <div class="page-header">
@@ -7777,7 +7847,7 @@ async function renderExpenses(container) {
       <div class="metric-card blue">
         <div class="metric-icon">💸</div>
         <div class="metric-label">إجمالي الصرف</div>
-        <div class="metric-value">${fmt(totalExpenses + totalSalaries + totalAdvances)}</div>
+        <div class="metric-value">${fmt(totalExpenses + totalSalaryCash + totalAdvances)}</div>
         <div class="metric-sub">دينار أردني</div>
       </div>
     </div>
@@ -8100,18 +8170,20 @@ function openWarehouseRentModal(rentId = null) {
 }
 
 async function saveWarehouseRent(rentId) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
+  rentId = normalizeOptionalId(rentId);
   const name = document.getElementById('wr_name')?.value?.trim();
   const monthly_amount = parseFloat(document.getElementById('wr_amount')?.value);
   const currency = document.getElementById('wr_currency')?.value || 'JOD';
-  const startMonthVal = document.getElementById('wr_start_month')?.value; // YYYY-MM
+  const startMonthVal = document.getElementById('wr_start_month')?.value;
   const notes = document.getElementById('wr_notes')?.value?.trim() || null;
 
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
-  if (!monthly_amount || monthly_amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
+  if (!monthly_amount || monthly_amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
 
   const payload = { name, monthly_amount, currency, notes };
   if (!rentId) {
-    if (!startMonthVal) { toast('شهر البدء مطلوب', 'error'); return; }
+    if (!startMonthVal) { toast('شهر البدء مطلوب', 'error'); _unlockBtn(btn); return; }
     payload.start_month = `${startMonthVal}-01`;
   }
 
@@ -8126,6 +8198,7 @@ async function saveWarehouseRent(rentId) {
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -8980,7 +9053,7 @@ async function renderEmployees(container) {
               <div style="font-size:11px;color:var(--tx3)">${roleLabel(emp.role)}</div>
             </div>
             <button class="btn btn-ghost btn-sm"
-                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
+                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, shop_id: emp.shop_id || null, permissions: emp.permissions ?? null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
             ${emp.id !== getUser()?.id
       ? `<button class="btn btn-danger btn-sm"
                    onclick="deleteEmployee('${emp.id}', ${jsString(emp.full_name)})">🗑️</button>`
@@ -10002,18 +10075,21 @@ function openChinaInvestorModal(investorId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestor('${investorId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-investor" onclick="saveChinaInvestor('${investorId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaInvestor(investorId) {
+  const btn = document.getElementById('btn-save-china-investor');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  investorId = normalizeOptionalId(investorId);
   const name = document.getElementById('ci_name')?.value?.trim();
   const phone = document.getElementById('ci_phone')?.value?.trim() || null;
   const notes = document.getElementById('ci_notes')?.value?.trim() || null;
 
-  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     if (investorId) {
@@ -10026,6 +10102,7 @@ async function saveChinaInvestor(investorId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10129,19 +10206,21 @@ function openChinaInvestorTransactionModal(investorId) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestorTransaction('${investorId}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-inv-tx" onclick="saveChinaInvestorTransaction('${investorId}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaInvestorTransaction(investorId) {
+  const btn = document.getElementById('btn-save-china-inv-tx');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   const type = document.getElementById('cit_type')?.value;
   const amount = parseFloat(document.getElementById('cit_amount')?.value);
   const trans_date = document.getElementById('cit_date')?.value;
   const notes = document.getElementById('cit_notes')?.value?.trim() || null;
 
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     await API.createChinaInvestorTransaction(investorId, { type, amount, trans_date, notes });
@@ -10152,6 +10231,7 @@ async function saveChinaInvestorTransaction(investorId) {
     openChinaInvestorDetails(investorId);
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10244,18 +10324,21 @@ function openChinaSupplierModal(supplierId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSupplier('${supplierId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-supplier" onclick="saveChinaSupplier('${supplierId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaSupplier(supplierId) {
+  const btn = document.getElementById('btn-save-china-supplier');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  supplierId = normalizeOptionalId(supplierId);
   const name = document.getElementById('cs_name')?.value?.trim();
   const phone = document.getElementById('cs_phone')?.value?.trim() || null;
   const notes = document.getElementById('cs_notes')?.value?.trim() || null;
 
-  if (!name) { toast('اسم المورد مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المورد مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     if (supplierId) {
@@ -10269,6 +10352,7 @@ async function saveChinaSupplier(supplierId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10559,15 +10643,18 @@ function openChinaPaymentModal(paymentId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment('${paymentId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-payment" onclick="saveChinaPayment('${paymentId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaPayment(paymentId) {
+  const btn = document.getElementById('btn-save-china-payment');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  paymentId = normalizeOptionalId(paymentId);
   const supplier_idRaw = document.getElementById('cp_supplier_id')?.value;
-  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
+  const supplier_id = normalizeOptionalId(supplier_idRaw);
   const supplier_name = document.getElementById('cp_supplier')?.value?.trim();
   const amount = parseFloat(document.getElementById('cp_amount')?.value);
   const currency = document.getElementById('cp_currency')?.value || 'JOD';
@@ -10575,9 +10662,9 @@ async function saveChinaPayment(paymentId) {
   const payment_date = document.getElementById('cp_date')?.value;
   const notes = document.getElementById('cp_notes')?.value?.trim() || null;
 
-  if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   const payload = { supplier_id, supplier_name, amount, currency, exchange_rate, payment_date, notes };
 
@@ -10592,6 +10679,7 @@ async function saveChinaPayment(paymentId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10713,27 +10801,30 @@ function openChinaPurchaseModal(purchaseId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase('${purchaseId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-purchase" onclick="saveChinaPurchase('${purchaseId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaPurchase(purchaseId) {
+  const btn = document.getElementById('btn-save-china-purchase');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  purchaseId = normalizeOptionalId(purchaseId);
   const item_name = document.getElementById('cpu_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('cpu_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('cpu_amount')?.value);
   const currency = document.getElementById('cpu_currency')?.value || 'JOD';
   const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cpu_rate')?.value);
   const supplier_idRaw = document.getElementById('cpu_supplier_id')?.value;
-  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
+  const supplier_id = normalizeOptionalId(supplier_idRaw);
   const supplier_name = document.getElementById('cpu_supplier')?.value?.trim() || null;
   const purchase_date = document.getElementById('cpu_date')?.value;
   const notes = document.getElementById('cpu_notes')?.value?.trim() || null;
 
-  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   const payload = { item_name, quantity, amount, currency, exchange_rate, supplier_id, supplier_name, purchase_date, notes };
 
@@ -10748,6 +10839,7 @@ async function saveChinaPurchase(purchaseId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10862,13 +10954,16 @@ function openChinaSaleModal(saleId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale('${saleId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-sale" onclick="saveChinaSale('${saleId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaSale(saleId) {
+  const btn = document.getElementById('btn-save-china-sale');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  saleId = normalizeOptionalId(saleId);
   const item_name = document.getElementById('csa_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('csa_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('csa_amount')?.value);
@@ -10878,9 +10973,9 @@ async function saveChinaSale(saleId) {
   const sale_date = document.getElementById('csa_date')?.value;
   const notes = document.getElementById('csa_notes')?.value?.trim() || null;
 
-  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   const payload = { item_name, quantity, amount, currency, exchange_rate, buyer_name, sale_date, notes };
 
@@ -10895,6 +10990,7 @@ async function saveChinaSale(saleId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -11108,7 +11204,7 @@ async function openCategoryInvestmentsModal(categoryId) {
                   ${fmt(remaining)} د.أ
                 </td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap;min-width:80px">
-                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}')" title="حفظ">💾</button>
+                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}', this)" title="حفظ">💾</button>
                   ${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm('${categoryId}', '${inv.id}', '${s.investor_id}')" title="حذف">🗑️</button>` : ''}
                 </td>
               </tr>`;
@@ -11146,12 +11242,13 @@ function openAddInvestmentForm(categoryId) {
         <label class="form-label" style="font-size:12px">المدفوع (د.أ)</label>
         <input class="form-input" type="number" step="0.001" min="0" id="new_inv_paid" value="0" style="font-size:13px;border-color:var(--gr)">
       </div>
-      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null)" style="align-self:flex-end">إضافة</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null, this)" style="align-self:flex-end">إضافة</button>
     </div>
   `;
 }
 
-async function saveCategoryInvestment(categoryId, investorId) {
+async function saveCategoryInvestment(categoryId, investorId, btnEl) {
+  _lockBtn(btnEl, 'جاري...');
   let id = investorId;
   let amount, paid_amount;
 
@@ -11162,10 +11259,10 @@ async function saveCategoryInvestment(categoryId, investorId) {
     id = document.getElementById('new_inv_investor')?.value;
     amount = parseFloat(document.getElementById('new_inv_amount')?.value || 0);
     paid_amount = parseFloat(document.getElementById('new_inv_paid')?.value || 0);
-    if (!id) { toast('اختر مستثمراً', 'error'); return; }
+    if (!id) { toast('اختر مستثمراً', 'error'); _unlockBtn(btnEl); return; }
   }
 
-  if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btnEl); return; }
 
   try {
     await API.setCategoryInvestment(categoryId, { investor_id: Number(id), amount, paid_amount });
@@ -11177,6 +11274,7 @@ async function saveCategoryInvestment(categoryId, investorId) {
     }
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btnEl);
   }
 }
 
@@ -11377,19 +11475,20 @@ function removeInvContribRow(idx) {
 }
 
 async function saveInvestorFull() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const investorId = window._invEditId || null;
   const name = document.getElementById('wi_name')?.value?.trim();
   const phone = document.getElementById('wi_phone')?.value?.trim() || null;
   const notes = document.getElementById('wi_notes')?.value?.trim() || null;
-  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); _unlockBtn(btn); return; }
 
   const amount = parseFloat(document.getElementById('wi_total_contribution')?.value || 0);
   const paidAmount = parseFloat(document.getElementById('wi_total_paid')?.value || 0);
-  if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); return; }
-  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); return; }
+  if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); _unlockBtn(btn); return; }
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); _unlockBtn(btn); return; }
   const selectedCategoryIds = [...document.querySelectorAll('#inv_category_checks .inv-category-check:checked')]
     .map(el => Number(el.value));
-  if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); return; }
+  if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); _unlockBtn(btn); return; }
 
   try {
     let finalId = investorId;
@@ -11417,6 +11516,7 @@ async function saveInvestorFull() {
     navigateTo('investors');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
