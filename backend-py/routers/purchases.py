@@ -262,6 +262,11 @@ async def receive_purchase(purchase_id: str, user=Depends(get_current_user)):
                         detail="لا يمكن استلام هذه الفاتورة لأنها ليست معلّقة أو تم استلامها مسبقاً",
                     )
 
+                await conn.execute(
+                    "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
+                    str(purchase_id),
+                )
+
                 items = await conn.fetch(
                     "SELECT * FROM purchase_items WHERE purchase_id=$1 ORDER BY id ASC",
                     purchase_id,
@@ -394,8 +399,8 @@ async def update_purchase(purchase_id: str, data: PurchaseRequest, user=Depends(
                             item["product_id"],
                         )
                     await conn.execute(
-                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
-                        purchase_id,
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
+                        str(purchase_id),
                     )
 
                 await conn.execute(
@@ -534,8 +539,8 @@ async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
                             item["product_id"],
                         )
                     await conn.execute(
-                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
-                        purchase_id,
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
+                        str(purchase_id),
                     )
 
                 await conn.execute(
