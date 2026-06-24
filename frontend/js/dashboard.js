@@ -3413,7 +3413,7 @@ async function renderPurchases(container) {
         </div>
         ${isAccountant() ? `<button class="btn btn-primary" onclick="openPurchaseModal()">+ فاتورة شراء</button>` : ''}
         ${isAccountant() ? `<button class="btn btn-ghost" onclick="openAddSupplierModal()">+ مورد جديد</button>` : ''}
-        ${isAdmin() ? `<button class="btn btn-ghost" onclick="fixPurchaseStock()" style="color:var(--rd)">🔧 إصلاح المخزون</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-ghost" onclick="recoverStock()" style="color:var(--gr)">🔄 استرجاع المخزون</button>` : ''}
       </div>
     </div>
 
@@ -3486,13 +3486,27 @@ async function fixPurchaseStock() {
   try {
     const res = await API.fixPurchaseStock();
     const dupes = res.duplicate_groups_fixed || 0;
-    const prods = (res.products_recalculated || []).length;
+    const prods = (res.products_adjusted || []).length;
     showToast(dupes || prods
       ? `تم الإصلاح: ${dupes} مجموعة مكررة، ${prods} صنف تم تعديل رصيده`
       : 'لا توجد مشاكل — المخزون سليم ✅', 'success');
     navigate('purchases');
   } catch (e) {
     showToast('فشل الإصلاح: ' + (e.message || e), 'error');
+  }
+}
+
+async function recoverStock() {
+  if (!confirm('سيتم استرجاع أرصدة المخزون السالبة إلى الصفر. متأكد؟')) return;
+  try {
+    const res = await API.recoverStock();
+    const count = res.products_recovered || 0;
+    showToast(count
+      ? `تم استرجاع ${count} صنف — تم تصحيح الأرصدة السالبة`
+      : 'لا توجد أرصدة سالبة — المخزون سليم ✅', 'success');
+    navigate('purchases');
+  } catch (e) {
+    showToast('فشل الاسترجاع: ' + (e.message || e), 'error');
   }
 }
 
