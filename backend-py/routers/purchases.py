@@ -572,7 +572,7 @@ async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
 
 @router.post("/fix-stock")
 async def fix_stock_counts(user=Depends(get_current_user)):
-    """One-time endpoint to recalculate all product stock from actual movements."""
+    """Deduplicate purchase movements and adjust stock for removed duplicates only."""
     require_role(user, "admin")
 
     pool = await get_pool()
@@ -589,10 +589,23 @@ async def fix_stock_counts(user=Depends(get_current_user)):
                        HAVING COUNT(*) > 1"""
                 )
 
+                if not dupes:
+                    return {
+                        "success": True,
+                        "duplicate_groups_fixed": 0,
+                        "products_adjusted": [],
+                    }
+
                 fixed_purchases = set()
+                adjustments = {}
+
                 for dupe in dupes:
                     sid = dupe["sid"]
                     pid = dupe["product_id"]
+                    cnt = dupe["cnt"]
+                    total_qty = float(dupe["total_qty"] or 0)
+                    keep_qty = total_qty / cnt
+                    removed_qty = total_qty - keep_qty
 
                     await conn.execute(
                         """DELETE FROM stock_movements
@@ -609,9 +622,48 @@ async def fix_stock_counts(user=Depends(get_current_user)):
                     )
                     fixed_purchases.add(sid)
 
+                    if pid not in adjustments:
+                        adjustments[pid] = 0.0
+                    adjustments[pid] += removed_qty
+
+                adjusted = []
+                for pid, removed_qty in adjustments.items():
+                    if removed_qty > 0:
+                        row = await conn.fetchrow(
+                            """UPDATE products
+                               SET current_stock = GREATEST(0, current_stock - $1)
+                               WHERE id = $2
+                               RETURNING id, name, current_stock AS new_stock""",
+                            removed_qty,
+                            pid,
+                        )
+                        if row:
+                            adjusted.append(row_to_dict(row))
+
+                return {
+                    "success": True,
+                    "duplicate_groups_fixed": len(dupes),
+                    "purchases_affected": list(fixed_purchases),
+                    "products_adjusted": adjusted,
+                }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/recover-stock")
+async def recover_stock(user=Depends(get_current_user)):
+    """Recover stock after bad recalculation — recalculate from movements with floor of 0."""
+    require_role(user, "admin")
+
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
                 updated = await conn.fetch(
                     """UPDATE products p
-                       SET current_stock = COALESCE(sub.net, 0)
+                       SET current_stock = GREATEST(0, COALESCE(sub.net, 0))
                        FROM (
                          SELECT product_id,
                                 SUM(CASE WHEN type='in' THEN quantity ELSE -quantity END) AS net
@@ -619,15 +671,24 @@ async def fix_stock_counts(user=Depends(get_current_user)):
                          GROUP BY product_id
                        ) sub
                        WHERE p.id = sub.product_id
-                         AND p.current_stock != COALESCE(sub.net, 0)
+                         AND p.current_stock < 0
                        RETURNING p.id, p.name, p.current_stock AS new_stock"""
                 )
 
+                no_movements = await conn.fetch(
+                    """UPDATE products
+                       SET current_stock = 0
+                       WHERE current_stock < 0
+                         AND id NOT IN (SELECT DISTINCT product_id FROM stock_movements)
+                       RETURNING id, name, current_stock AS new_stock"""
+                )
+
+                all_fixed = [row_to_dict(r) for r in updated] + [row_to_dict(r) for r in no_movements]
+
                 return {
                     "success": True,
-                    "duplicate_groups_fixed": len(dupes),
-                    "purchases_affected": list(fixed_purchases),
-                    "products_recalculated": [row_to_dict(r) for r in updated],
+                    "products_recovered": len(all_fixed),
+                    "details": all_fixed,
                 }
 
     except Exception as e:
