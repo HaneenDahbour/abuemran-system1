@@ -3609,6 +3609,7 @@ function calcPurchaseTotal() {
 }
 
 async function savePurchase() {
+  if (window._savingPurchase) return;
   const wrap = document.getElementById('pur-items-wrap');
   if (!wrap) return;
 
@@ -3636,6 +3637,7 @@ async function savePurchase() {
   const autoReceive = document.getElementById('pur_auto_receive')?.checked !== false;
   const supplierId = document.getElementById('pur_supplier').value || null;
 
+  window._savingPurchase = true;
   try {
     const purchase = await API.createPurchase({
       supplier_id: supplierId || null,
@@ -3654,6 +3656,8 @@ async function savePurchase() {
     navigateTo('purchases');
   } catch (e) {
     toast(e.message, 'error');
+  } finally {
+    window._savingPurchase = false;
   }
 }
 
