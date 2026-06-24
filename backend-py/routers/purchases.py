@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional, List
 from uuid import UUID
@@ -50,6 +50,17 @@ def parse_purchase_date(value: Optional[str]) -> date:
         raise HTTPException(status_code=400, detail="تاريخ فاتورة الشراء غير صحيح")
 
 
+def coerce_id(val):
+    """Convert to int if possible, otherwise UUID — matches whatever the live DB uses."""
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        pass
+    return safe_uuid(val) or val
+
+
 def parse_int_id(val, label="المعرّف"):
     if val is None:
         return None
@@ -59,7 +70,8 @@ def parse_int_id(val, label="المعرّف"):
         raise HTTPException(status_code=400, detail=f"{label} غير صحيح")
 
 
-async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail: str):
+async def insert_audit(conn, user, action: str, entity_id, detail: str):
+    audit_entity_id = entity_id if isinstance(entity_id, int) else None
     try:
         await conn.execute(
             """
@@ -69,7 +81,7 @@ async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail
             user.get("id"),
             user.get("full_name") or user.get("username") or "مستخدم",
             action,
-            entity_id,
+            audit_entity_id,
             detail,
         )
     except Exception:
@@ -142,7 +154,7 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
     )
     purchase_date = parse_purchase_date(data.date)
     notes = clean_text(data.notes)
-    supplier_id = parse_int_id(data.supplier_id, "معرّف المورد") if data.supplier_id else None
+    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
 
     pool = await get_pool()
 
@@ -233,8 +245,9 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
 
 
 @router.put("/{purchase_id}/receive")
-async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
+async def receive_purchase(purchase_id: str, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    purchase_id = coerce_id(purchase_id)
 
     pool = await get_pool()
 
@@ -258,8 +271,8 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
                     )
 
                 await conn.execute(
-                    "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
-                    purchase_id,
+                    "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
+                    str(purchase_id),
                 )
 
                 items = await conn.fetch(
@@ -349,14 +362,15 @@ async def receive_purchase(purchase_id: int, user=Depends(get_current_user)):
 
 
 @router.put("/{purchase_id}")
-async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(get_current_user)):
+async def update_purchase(purchase_id: str, data: PurchaseRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    purchase_id = coerce_id(purchase_id)
 
     if not data.items:
         raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
 
     pool = await get_pool()
-    supplier_id = parse_int_id(data.supplier_id, "معرّف المورد") if data.supplier_id else None
+    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
 
     try:
         async with pool.acquire() as conn:
@@ -383,9 +397,9 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                     actual_movements = await conn.fetch(
                         """SELECT product_id, SUM(quantity) AS total_qty
                            FROM stock_movements
-                           WHERE source_type='purchase' AND source_id=$1
+                           WHERE source_type='purchase' AND source_id::text = $1
                            GROUP BY product_id""",
-                        purchase_id,
+                        str(purchase_id),
                     )
                     for mov in actual_movements:
                         await conn.execute(
@@ -394,8 +408,8 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
                             mov["product_id"],
                         )
                     await conn.execute(
-                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
-                        purchase_id,
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
+                        str(purchase_id),
                     )
 
                 await conn.execute(
@@ -503,8 +517,9 @@ async def update_purchase(purchase_id: int, data: PurchaseRequest, user=Depends(
 
 
 @router.delete("/{purchase_id}")
-async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
+async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    purchase_id = coerce_id(purchase_id)
 
     pool = await get_pool()
 
@@ -525,9 +540,9 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                     actual_movements = await conn.fetch(
                         """SELECT product_id, SUM(quantity) AS total_qty
                            FROM stock_movements
-                           WHERE source_type='purchase' AND source_id=$1
+                           WHERE source_type='purchase' AND source_id::text = $1
                            GROUP BY product_id""",
-                        purchase_id,
+                        str(purchase_id),
                     )
                     for mov in actual_movements:
                         await conn.execute(
@@ -536,8 +551,8 @@ async def delete_purchase(purchase_id: int, user=Depends(get_current_user)):
                             mov["product_id"],
                         )
                     await conn.execute(
-                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id=$1",
-                        purchase_id,
+                        "DELETE FROM stock_movements WHERE source_type='purchase' AND source_id::text = $1",
+                        str(purchase_id),
                     )
 
                 await conn.execute(
