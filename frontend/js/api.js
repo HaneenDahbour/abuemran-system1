@@ -309,6 +309,8 @@
       apiFetch(`/recipients/${encodeURIComponent(name)}/statement`),
     createRecipientPayment: data =>
       apiFetch('/recipients/payments', { method: 'POST', body: JSON.stringify(data) }),
+    updateRecipientPayment: (id, data) =>
+      apiFetch(`/recipients/payments/${requireId(id, 'معرّف المقبوضة')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteRecipientPayment: id =>
       apiFetch(`/recipients/payments/${requireId(id, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 

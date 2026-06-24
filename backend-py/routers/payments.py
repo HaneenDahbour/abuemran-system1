@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from config.db import get_pool
 from middleware.auth import get_current_user
-from middleware.roles import require_role
+from middleware.roles import require_permission, require_role
 
 router = APIRouter()
 
@@ -90,6 +90,8 @@ LEFT JOIN users a ON p.approved_by = a.id
 
 @router.get("")
 async def get_payments(user=Depends(get_current_user)):
+    if user.get("role") not in ("client", "employee"):
+        require_permission(user, "payments")
     pool = await get_pool()
 
     try:
@@ -125,6 +127,7 @@ async def get_payments(user=Depends(get_current_user)):
 @router.post("")
 async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant", "employee")
+    require_permission(user, "payments")
 
     if not data.client_id:
         raise HTTPException(status_code=400, detail="العميل مطلوب")
@@ -163,23 +166,28 @@ async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
                     raise HTTPException(status_code=400, detail="العميل غير موجود")
 
                 if data.invoice_id:
-                    invoice_exists = await conn.fetchval(
+                    invoice = await conn.fetchrow(
                         """
-                        SELECT EXISTS(
-                          SELECT 1
-                          FROM invoices
-                          WHERE id=$1 AND client_id=$2
-                        )
+                        SELECT i.total_amount,
+                               COALESCE((SELECT SUM(rp.amount) FROM recipient_payments rp WHERE rp.invoice_id=i.id),0)
+                               + COALESCE((SELECT SUM(p2.amount) FROM payments p2 WHERE p2.invoice_id=i.id AND p2.status='approved'),0)
+                                 AS paid_amount
+                        FROM invoices i
+                        WHERE i.id=$1 AND i.client_id=$2
+                          AND COALESCE(i.status, 'approved')='approved'
                         """,
                         data.invoice_id,
                         data.client_id,
                     )
 
-                    if not invoice_exists:
+                    if not invoice:
                         raise HTTPException(
                             status_code=400,
-                            detail="الفاتورة غير موجودة أو لا تتبع هذا العميل",
+                            detail="الفاتورة غير موجودة أو غير معتمدة أو لا تتبع هذا العميل",
                         )
+                    outstanding = round(float(invoice["total_amount"] or 0) - float(invoice["paid_amount"] or 0), 3)
+                    if amount > outstanding:
+                        raise HTTPException(status_code=400, detail=f"المبلغ أكبر من باقي الفاتورة ({outstanding:.3f})")
 
                 new_payment = await conn.fetchrow(
                     """
@@ -243,41 +251,61 @@ async def create_payment(data: PaymentRequest, user=Depends(get_current_user)):
 @router.post("/{payment_id}/approve")
 async def approve_payment(payment_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "payments")
 
     pool = await get_pool()
 
     try:
-        payment = await pool.fetchrow(
-            """
-            UPDATE payments
-            SET status='approved',
-                approved_by=$1,
-                approved_at=NOW()
-            WHERE id=$2 AND status='pending'
-            RETURNING *
-            """,
-            user.get("id"),
-            payment_id,
-        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                pending = await conn.fetchrow(
+                    "SELECT * FROM payments WHERE id=$1 AND status='pending' FOR UPDATE",
+                    payment_id,
+                )
+                if not pending:
+                    raise HTTPException(
+                        status_code=404, detail="الدفعة غير موجودة أو تمت معالجتها مسبقاً"
+                    )
+                if pending["invoice_id"]:
+                    invoice = await conn.fetchrow(
+                        "SELECT total_amount FROM invoices WHERE id=$1 FOR UPDATE",
+                        pending["invoice_id"],
+                    )
+                    if not invoice:
+                        raise HTTPException(status_code=400, detail="الفاتورة المرتبطة غير موجودة")
+                    paid = float(await conn.fetchval(
+                        """
+                        SELECT
+                          COALESCE((SELECT SUM(rp.amount) FROM recipient_payments rp WHERE rp.invoice_id=$1),0)
+                          + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id=$1 AND p.status='approved'),0)
+                        """,
+                        pending["invoice_id"],
+                    ) or 0)
+                    outstanding = round(float(invoice["total_amount"] or 0) - paid, 3)
+                    if float(pending["amount"] or 0) > outstanding:
+                        raise HTTPException(status_code=400, detail=f"المبلغ أكبر من باقي الفاتورة ({outstanding:.3f})")
 
-        if not payment:
-            raise HTTPException(
-                status_code=404, detail="الدفعة غير موجودة أو تمت معالجتها مسبقاً"
-            )
-
-        try:
-            await pool.execute(
-                """
-                INSERT INTO notifications (user_id, message, type)
-                VALUES ($1, $2, 'approved')
-                """,
-                payment["submitted_by"],
-                f"âœ“ اعتمد المدير دفعتك بقيمة {payment['amount']} د.أ",
-            )
-        except Exception:
-            pass
-
-        return row_to_dict(payment)
+                payment = await conn.fetchrow(
+                    """
+                    UPDATE payments
+                    SET status='approved', approved_by=$1, approved_at=NOW()
+                    WHERE id=$2
+                    RETURNING *
+                    """,
+                    user.get("id"), payment_id,
+                )
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO notifications (user_id, message, type)
+                        VALUES ($1, $2, 'approved')
+                        """,
+                        payment["submitted_by"],
+                        f"âœ“ اعتمد المدير دفعتك بقيمة {payment['amount']} د.أ",
+                    )
+                except Exception:
+                    pass
+                return row_to_dict(payment)
 
     except HTTPException:
         raise
@@ -290,6 +318,7 @@ async def reject_payment(
     payment_id: int, data: RejectPaymentRequest, user=Depends(get_current_user)
 ):
     require_role(user, "admin")
+    require_permission(user, "payments")
 
     if not data.reason or not data.reason.strip():
         raise HTTPException(status_code=400, detail="سبب الرفض مطلوب")
@@ -340,6 +369,7 @@ async def reject_payment(
 @router.delete("/{payment_id}")
 async def delete_payment(payment_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "payments")
 
     pool = await get_pool()
 

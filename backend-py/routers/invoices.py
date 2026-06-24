@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from config.db import get_pool
 from middleware.auth import get_current_user
-from middleware.roles import require_role
+from middleware.roles import require_permission, require_role
 
 router = APIRouter()
 
@@ -244,25 +244,16 @@ async def delete_auto_payment_for_invoice(conn, invoice_id: int):
     await conn.execute(
         """
         DELETE FROM recipient_payments
-        WHERE invoice_id = $1
-           OR COALESCE(notes, '') ILIKE $2
+        WHERE COALESCE(notes, '') ILIKE $2
+          AND COALESCE(notes, '') ILIKE 'دفعة تلقائية%'
+          AND (invoice_id = $1 OR invoice_id IS NULL)
         """,
         invoice_id,
         marker,
     )
 
-    # legacy cleanup from old client-based payments.
-    # NOTE: the legacy `payments` table has no invoice_id column — match by the
-    # notes marker only, inside a savepoint so a failure (e.g. missing table)
-    # can't abort the main transaction.
-    try:
-        async with conn.transaction():
-            await conn.execute(
-                "DELETE FROM payments WHERE COALESCE(notes, '') ILIKE $1",
-                marker,
-            )
-    except Exception:
-        pass
+    # Approved/manual entries in `payments` are independent ledger records.
+    # Keep them intact when invoice details are edited or the invoice is removed.
 
 async def restore_stock_from_invoice_items(conn, invoice_id: int, user):
     old_items = await conn.fetch(
@@ -498,10 +489,21 @@ async def get_invoices(user=Depends(get_current_user)):
     pool = await get_pool()
     try:
         role = user.get("role")
-        paid_sq = """COALESCE((
-            SELECT SUM(rp.amount) FROM recipient_payments rp
-            WHERE rp.invoice_id = inv.id
-        ), 0)"""
+        if role not in ("client", "employee", "admin", "accountant"):
+            raise HTTPException(status_code=403, detail="غير مسموح بعرض الفواتير")
+        if role != "client":
+            require_permission(user, "invoices")
+        paid_sq = """
+            COALESCE((
+                SELECT SUM(rp.amount) FROM recipient_payments rp
+                WHERE rp.invoice_id = inv.id
+            ), 0)
+            +
+            COALESCE((
+                SELECT SUM(p.amount) FROM payments p
+                WHERE p.invoice_id = inv.id AND p.status = 'approved'
+            ), 0)
+        """
 
         base_select = f"""
             SELECT
@@ -554,11 +556,14 @@ async def get_invoices(user=Depends(get_current_user)):
 
         return result
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"خطأ في جلب الفواتير: {str(e)}")
 @router.post("")
 async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant", "employee")
+    require_permission(user, "invoices")
 
     recipient_name = clean_text(data.recipient_name)
     if not recipient_name:
@@ -695,6 +700,7 @@ async def update_invoice(
     invoice_id: int, data: InvoiceRequest, user=Depends(get_current_user)
 ):
     require_role(user, "admin", "accountant")
+    require_permission(user, "invoices")
 
     recipient_name = clean_text(data.recipient_name)
     if not recipient_name:
@@ -775,6 +781,42 @@ async def update_invoice(
                 # If client_id exists, check it. If null, recipient_name is enough.
                 if data.client_id:
                     await ensure_client_exists(conn, data.client_id)
+
+                if existing["client_id"] != data.client_id:
+                    linked_manual_payments = await conn.fetchval(
+                        """
+                        SELECT
+                          (SELECT COUNT(*) FROM recipient_payments rp
+                           WHERE rp.invoice_id=$1
+                             AND COALESCE(rp.notes, '') NOT ILIKE 'دفعة تلقائية%')
+                          +
+                          (SELECT COUNT(*) FROM payments p WHERE p.invoice_id=$1)
+                        """,
+                        invoice_id,
+                    )
+                    if int(linked_manual_payments or 0) > 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="لا يمكن تغيير العميل بعد تسجيل مقبوضات يدوية على الفاتورة",
+                        )
+
+                manual_paid = float(await conn.fetchval(
+                    """
+                    SELECT
+                      COALESCE((SELECT SUM(rp.amount) FROM recipient_payments rp
+                                WHERE rp.invoice_id=$1
+                                  AND COALESCE(rp.notes, '') NOT ILIKE 'دفعة تلقائية%'), 0)
+                      +
+                      COALESCE((SELECT SUM(p.amount) FROM payments p
+                                WHERE p.invoice_id=$1 AND p.status='approved'), 0)
+                    """,
+                    invoice_id,
+                ) or 0)
+                if money3(manual_paid + paid) > total:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"لا يمكن تخفيض الفاتورة عن المقبوض المسجل ({money3(manual_paid + paid):.3f})",
+                    )
 
                 # If invoice is already approved, undo old effects first.
                 # Old effects = old stock deduction + old automatic payment.
@@ -896,6 +938,7 @@ async def update_invoice(
 @router.post("/{invoice_id}/approve")
 async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "invoices")
 
     pool = await get_pool()
 
@@ -1040,6 +1083,7 @@ async def approve_invoice(invoice_id: int, user=Depends(get_current_user)):
 @router.post("/{invoice_id}/reject")
 async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "invoices")
 
     reason = str(data.get("reason") or "").strip()
     if not reason:
@@ -1066,14 +1110,17 @@ async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_u
                         detail="يمكن رفض وحذف الفواتير المعلّقة فقط",
                     )
 
-                # Pending invoice did not touch stock, so safe delete
-                await conn.execute(
-                    "DELETE FROM invoice_items WHERE invoice_id=$1",
-                    invoice_id,
-                )
-
-                await conn.execute(
-                    "DELETE FROM invoices WHERE id=$1",
+                # Pending invoices have no stock/payment side effects. Preserve the
+                # record and its items so rejection remains auditable and reviewable.
+                updated = await conn.fetchrow(
+                    """
+                    UPDATE invoices
+                    SET status='rejected',
+                        notes=CONCAT_WS(' | ', NULLIF(notes, ''), 'سبب الرفض: ' || $1)
+                    WHERE id=$2
+                    RETURNING *
+                    """,
+                    reason,
                     invoice_id,
                 )
 
@@ -1084,7 +1131,7 @@ async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_u
                         VALUES ($1, $2, 'rejected')
                         """,
                         invoice["created_by"],
-                        f"✗ رُفضت فاتورتك #{invoice['invoice_number']} وتم حذفها — السبب: {reason}",
+                        f"✗ رُفضت فاتورتك #{invoice['invoice_number']} — السبب: {reason}",
                     )
                 except Exception:
                     pass
@@ -1092,16 +1139,16 @@ async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_u
                 await insert_audit(
                     conn,
                     user,
-                    "رفض وحذف فاتورة",
+                    "رفض فاتورة",
                     invoice_id,
-                    f"رفض وحذف فاتورة #{invoice['invoice_number']} — السبب: {reason}",
+                    f"رفض فاتورة #{invoice['invoice_number']} — السبب: {reason}",
                 )
 
-                return {
-                    "success": True,
-                    "deleted": True,
-                    "message": "تم رفض الفاتورة وحذفها لأنها كانت معلّقة",
-                }
+                out = enrich_invoice(row_to_dict(updated))
+                out["paid_amount"] = 0
+                out["rejection_reason"] = reason
+                out["items"] = await fetch_invoice_items(conn, invoice_id)
+                return out
 
     except HTTPException:
         raise
@@ -1110,6 +1157,7 @@ async def reject_invoice(invoice_id: int, data: dict, user=Depends(get_current_u
 @router.delete("/{invoice_id}")
 async def delete_invoice(invoice_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "invoices")
 
     pool = await get_pool()
 
