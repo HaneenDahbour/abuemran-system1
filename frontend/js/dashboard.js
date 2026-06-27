@@ -7712,6 +7712,57 @@ function applyAdvancesToSalaries(salaries, advances) {
   return result;
 }
 
+function _buildExpenseTableRows(list) {
+  if (!list.length) return emptyRow('لا توجد مصاريف', 6);
+  return list.map(e => `
+    <tr>
+      <td>${fmtDate(e.expense_date)}</td>
+      <td><strong>${escHtml(e.name || e.description || '—')}</strong></td>
+      <td>${escHtml(e.category || '—')}</td>
+      <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
+      <td>${escHtml(e.notes || '—')}</td>
+      <td><div style="display:flex;gap:6px">
+        ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editExpenseById('${e.id}')">✏️</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense('${e.id}')">🗑️</button>` : ''}
+      </div></td>
+    </tr>
+  `).join('');
+}
+
+function _buildExpenseCategorySection(id, list, label, color) {
+  const total = list.reduce((s, e) => s + Number(e.amount || 0), 0);
+  return `
+    <div id="${id}" style="display:none">
+      <div class="metrics-grid" style="margin-bottom:14px">
+        <div class="metric-card ${color}">
+          <div class="metric-icon">📋</div>
+          <div class="metric-label">إجمالي ${label}</div>
+          <div class="metric-value">${fmt(total)}</div>
+          <div class="metric-sub">دينار أردني</div>
+        </div>
+        <div class="metric-card blue">
+          <div class="metric-icon">#</div>
+          <div class="metric-label">عدد العمليات</div>
+          <div class="metric-value">${list.length}</div>
+          <div class="metric-sub">عملية</div>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th><th>اسم المصروف</th>
+                <th>التصنيف</th><th>المبلغ</th><th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>${_buildExpenseTableRows(list)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
 async function renderExpenses(container) {
   let expenses = [], salaries = [], advances = [], warehouseRents = [];
   try {
@@ -7734,7 +7785,16 @@ async function renderExpenses(container) {
   window._advancesCache = advances || [];
   window._warehouseRentsCache = warehouseRents || [];
 
-  const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const fixedExp  = expenses.filter(e => e.expense_type === 'fixed');
+  const dailyExp  = expenses.filter(e => e.expense_type === 'daily' || (!e.expense_type));
+  const monthlyExp = expenses.filter(e => e.expense_type === 'monthly');
+  const otherExp  = expenses.filter(e => e.expense_type === 'other');
+
+  const totalFixed   = fixedExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalDaily   = dailyExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalMonthly = monthlyExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalOther   = otherExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalExpenses = totalFixed + totalDaily + totalMonthly + totalOther;
   const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
   const totalAdvances = advances.reduce((s, e) => s + Number(e.amount || 0), 0);
 
@@ -7753,8 +7813,26 @@ async function renderExpenses(container) {
 
     <div class="metrics-grid" style="margin-bottom:18px">
       <div class="metric-card red">
-        <div class="metric-icon">📋</div>
-        <div class="metric-label">إجمالي المصاريف</div>
+        <div class="metric-icon">📌</div>
+        <div class="metric-label">مصاريف ثابتة</div>
+        <div class="metric-value">${fmt(totalFixed)}</div>
+        <div class="metric-sub">${fixedExp.length} عملية</div>
+      </div>
+      <div class="metric-card amber">
+        <div class="metric-icon">📅</div>
+        <div class="metric-label">مصاريف يومية</div>
+        <div class="metric-value">${fmt(totalDaily)}</div>
+        <div class="metric-sub">${dailyExp.length} عملية</div>
+      </div>
+      <div class="metric-card red">
+        <div class="metric-icon">🗓️</div>
+        <div class="metric-label">مصاريف شهرية</div>
+        <div class="metric-value">${fmt(totalMonthly)}</div>
+        <div class="metric-sub">${monthlyExp.length} عملية</div>
+      </div>
+      <div class="metric-card blue">
+        <div class="metric-icon">💸</div>
+        <div class="metric-label">إجمالي كل المصاريف</div>
         <div class="metric-value">${fmt(totalExpenses)}</div>
         <div class="metric-sub">دينار أردني</div>
       </div>
@@ -7770,19 +7848,25 @@ async function renderExpenses(container) {
         <div class="metric-value">${fmt(totalAdvances)}</div>
         <div class="metric-sub">دينار أردني</div>
       </div>
-      <div class="metric-card blue">
-        <div class="metric-icon">💸</div>
-        <div class="metric-label">إجمالي الصرف</div>
-        <div class="metric-value">${fmt(totalExpenses + totalSalaries + totalAdvances)}</div>
-        <div class="metric-sub">دينار أردني</div>
-      </div>
     </div>
 
     <div class="tabs" style="margin-bottom:16px">
-      <button class="tab-btn active" id="exp-tab-expenses"
-              onclick="switchExpensesTab('expenses',this)">
-        المصاريف (${expenses.length})
+      <button class="tab-btn active" id="exp-tab-fixed"
+              onclick="switchExpensesTab('fixed',this)">
+        📌 ثابت (${fixedExp.length})
       </button>
+      <button class="tab-btn" id="exp-tab-daily"
+              onclick="switchExpensesTab('daily',this)">
+        📅 يومي (${dailyExp.length})
+      </button>
+      <button class="tab-btn" id="exp-tab-monthly"
+              onclick="switchExpensesTab('monthly',this)">
+        🗓️ شهري (${monthlyExp.length})
+      </button>
+      ${otherExp.length ? `<button class="tab-btn" id="exp-tab-other"
+              onclick="switchExpensesTab('other',this)">
+        📎 آخر (${otherExp.length})
+      </button>` : ''}
       <button class="tab-btn" id="exp-tab-salaries"
               onclick="switchExpensesTab('salaries',this)">
         الرواتب (${salaries.length})
@@ -7797,49 +7881,31 @@ async function renderExpenses(container) {
       </button>
     </div>
 
-    <!-- المصاريف -->
-    <div id="exp-section-expenses" class="card" style="padding:0;overflow:hidden">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>التاريخ</th><th>اسم المصروف</th><th>النوع</th>
-              <th>التصنيف</th><th>المبلغ</th><th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${expenses.length ? expenses.map(e => `
-              <tr>
-                <td>${fmtDate(e.expense_date)}</td>
-                <td><strong>${escHtml(e.name || e.description || '—')}</strong></td>
-                <td>${escHtml(e.expense_type || 'daily')}</td>
-                <td>${escHtml(e.category || '—')}</td>
-                <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
-                <td>${escHtml(e.notes || '—')}</td>
-                <td><div style="display:flex;gap:6px">
-                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editExpenseById('${e.id}')">✏️</button>` : ''}
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense('${e.id}')">🗑️</button>` : ''}
-                </div></td>
-              </tr>
-            `).join('') : emptyRow('لا توجد مصاريف', 7)}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <!-- مصاريف ثابتة -->
+    ${_buildExpenseCategorySection('exp-section-fixed', fixedExp, 'المصاريف الثابتة', 'red')}
+
+    <!-- مصاريف يومية -->
+    ${_buildExpenseCategorySection('exp-section-daily', dailyExp, 'المصاريف اليومية', 'amber')}
+
+    <!-- مصاريف شهرية -->
+    ${_buildExpenseCategorySection('exp-section-monthly', monthlyExp, 'المصاريف الشهرية', 'red')}
+
+    <!-- مصاريف أخرى -->
+    ${otherExp.length ? _buildExpenseCategorySection('exp-section-other', otherExp, 'مصاريف أخرى', 'blue') : ''}
 
     <!-- الرواتب -->
-    <div id="exp-section-salaries" class="card" style="padding:0;overflow:hidden;display:none">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>الشهر</th><th>اسم الموظف</th><th>الراتب</th>
-              <th>تاريخ الدفع</th><th>الحالة</th><th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${salaries.length ? salaries.map(s => {
-        // Carried advance balance allocated to this salary (not month-limited).
+    <div id="exp-section-salaries" style="display:none">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الشهر</th><th>اسم الموظف</th><th>الراتب</th>
+                <th>تاريخ الدفع</th><th>الحالة</th><th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${salaries.length ? salaries.map(s => {
         const advSum = Number(s.advance_applied || 0);
         const remaining = Number(s.effective_remaining || 0);
         const isEffectivelyPaid = s.status === 'paid' || s.effective_status === 'covered_by_advance';
@@ -7865,24 +7931,25 @@ async function renderExpenses(container) {
                 </div></td>
               </tr>`;
       }).join('') : emptyRow('لا توجد رواتب', 7)}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <!-- السلف -->
-
-    <div id="exp-section-advances" class="card" style="padding:0;overflow:hidden;display:none">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>التاريخ</th><th>اسم الموظف</th><th>المبلغ</th>
-              <th>النوع</th><th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${advances.length ? advances.map(a => `
+    <div id="exp-section-advances" style="display:none">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th><th>اسم الموظف</th><th>المبلغ</th>
+                <th>النوع</th><th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${advances.length ? advances.map(a => `
               <tr>
                 <td>${fmtDate(a.advance_date)}</td>
                 <td><strong>${escHtml(a.employee_name || '—')}</strong></td>
@@ -7895,27 +7962,29 @@ async function renderExpenses(container) {
                 </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد سلف', 6)}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <!-- إيجار المستودع -->
-    <div id="exp-section-warehouse_rent" class="card" style="padding:0;overflow:hidden;display:none">
-      <div style="display:flex; justify-content:flex-end; padding:12px">
+    <div id="exp-section-warehouse_rent" style="display:none">
+      <div style="display:flex; justify-content:flex-end; padding:12px 0">
         <button class="btn btn-primary btn-sm" onclick="openWarehouseRentModal()">+ سجل إيجار جديد</button>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>الاسم</th><th>المبلغ الشهري</th><th>العملة</th>
-              <th>تاريخ البدء</th><th>الأشهر المدفوعة</th><th>الأشهر غير المدفوعة</th>
-              <th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${warehouseRents.length ? warehouseRents.map(r => `
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الاسم</th><th>المبلغ الشهري</th><th>العملة</th>
+                <th>تاريخ البدء</th><th>الأشهر المدفوعة</th><th>الأشهر غير المدفوعة</th>
+                <th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${warehouseRents.length ? warehouseRents.map(r => `
               <tr>
                 <td><strong>${escHtml(r.name)}</strong></td>
                 <td style="font-weight:800;color:var(--rd)">${fmt(r.monthly_amount)}</td>
@@ -7931,15 +8000,21 @@ async function renderExpenses(container) {
                 </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد سجلات إيجار', 8)}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   `;
+
+  // Show the first tab (fixed) by default
+  const firstSection = document.getElementById('exp-section-fixed');
+  if (firstSection) firstSection.style.display = '';
 }
 
 function switchExpensesTab(tab, btn) {
-  ['expenses', 'salaries', 'advances', 'warehouse_rent'].forEach(t => {
+  const allTabs = ['fixed', 'daily', 'monthly', 'other', 'salaries', 'advances', 'warehouse_rent'];
+  allTabs.forEach(t => {
     const section = document.getElementById(`exp-section-${t}`);
     const tabBtn = document.getElementById(`exp-tab-${t}`);
     if (section) section.style.display = t === tab ? '' : 'none';
