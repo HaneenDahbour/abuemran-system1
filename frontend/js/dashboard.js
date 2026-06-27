@@ -78,6 +78,7 @@ const PERMISSION_SECTIONS = [
   { key: 'warehouse',  label: 'المستودع' },
   { key: 'investors',  label: 'المستثمرون' },
   { key: 'china',      label: 'قسم الصين' },
+  { key: 'personal',   label: 'الأمانات الشخصية' },
   { key: 'shops',      label: 'نظام المحلات' },
 ];
 
@@ -586,6 +587,7 @@ async function navigateTo(section) {
     warehouse: renderWarehouse,
     investors: renderInvestors,
     china: renderChina,
+    personal: renderPersonal,
     users: renderUsers,
     employee_activity: renderEmployeeActivity,
     audit: renderAudit,
@@ -734,6 +736,11 @@ function renderSidebar() {
   if (isAccountant() && hasPermission('china')) {
     html += '<div class="nav-section-title">الصين</div>';
     html += navItem('china', '🇨🇳', 'قسم الصين');
+  }
+
+  if (isAccountant() && hasPermission('personal')) {
+    html += '<div class="nav-section-title">الأمانات</div>';
+    html += navItem('personal', '🤝', 'الأمانات الشخصية');
   }
 
   if (isAccountant() && hasPermission('shops')) {
@@ -11795,4 +11802,528 @@ async function openInvestorDetailsModal(investorId) {
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
   `, '700px');
+}
+
+/* ════════════════════════════════════════════════════════════
+   الأمانات الشخصية — إعطاء مبالغ لأشخاص وسحبها
+   ════════════════════════════════════════════════════════════ */
+
+window._personalTab = window._personalTab || 'people';
+
+async function renderPersonal(container) {
+  const tab = window._personalTab || 'people';
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🤝 الأمانات الشخصية</div>
+        <div class="page-sub">إدارة الأمانات — إعطاء مبالغ لأشخاص وسحبها</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="openPersonalPersonModal()">+ شخص جديد</button>
+        <button class="btn btn-ghost" onclick="openPersonalTransactionModal()">+ عملية جديدة</button>
+      </div>
+    </div>
+    <div class="tabs" style="margin-bottom:16px" id="personal-tabs"></div>
+    <div id="personal-content"></div>
+  `;
+
+  await _loadPersonalData();
+  _renderPersonalTabs(tab);
+  _renderPersonalContent(tab);
+}
+
+async function _loadPersonalData() {
+  try {
+    const [people, transactions] = await Promise.all([
+      API.getPersonalPeople(),
+      API.getPersonalTransactions(),
+    ]);
+    window._personalPeople = people || [];
+    window._personalTransactions = transactions || [];
+  } catch (e) {
+    window._personalPeople = [];
+    window._personalTransactions = [];
+  }
+}
+
+function _renderPersonalTabs(active) {
+  const people = window._personalPeople || [];
+  const transactions = window._personalTransactions || [];
+  const el = document.getElementById('personal-tabs');
+  if (!el) return;
+  el.innerHTML = `
+    <button class="tab-btn ${active === 'people' ? 'active' : ''}"
+            onclick="switchPersonalTab('people')">
+      👥 الأشخاص (${people.length})
+    </button>
+    <button class="tab-btn ${active === 'transactions' ? 'active' : ''}"
+            onclick="switchPersonalTab('transactions')">
+      💸 العمليات (${transactions.length})
+    </button>
+  `;
+}
+
+function switchPersonalTab(tab) {
+  window._personalTab = tab;
+  _renderPersonalTabs(tab);
+  _renderPersonalContent(tab);
+}
+
+function _renderPersonalContent(tab) {
+  const el = document.getElementById('personal-content');
+  if (!el) return;
+  if (tab === 'people') _renderPersonalPeople(el);
+  else _renderPersonalTransactions(el);
+}
+
+function _renderPersonalPeople(el) {
+  const people = window._personalPeople || [];
+  const totalGiven = people.reduce((s, p) => s + Number(p.total_given || 0), 0);
+  const totalWithdrawn = people.reduce((s, p) => s + Number(p.total_withdrawn || 0), 0);
+  const totalBalance = people.reduce((s, p) => s + Number(p.balance || 0), 0);
+
+  el.innerHTML = `
+    <div class="metrics-grid" style="margin-bottom:18px">
+      <div class="metric-card red">
+        <div class="metric-icon">💰</div>
+        <div class="metric-label">إجمالي المُعطى</div>
+        <div class="metric-value">${fmt(totalGiven)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card green">
+        <div class="metric-icon">🔄</div>
+        <div class="metric-label">إجمالي المُسترد</div>
+        <div class="metric-value">${fmt(totalWithdrawn)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card ${totalBalance > 0 ? 'amber' : 'green'}">
+        <div class="metric-icon">📊</div>
+        <div class="metric-label">الرصيد المتبقي (عندهم)</div>
+        <div class="metric-value">${fmt(totalBalance)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card blue">
+        <div class="metric-icon">👥</div>
+        <div class="metric-label">عدد الأشخاص</div>
+        <div class="metric-value">${people.length}</div>
+        <div class="metric-sub">شخص</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الاسم</th><th>الهاتف</th><th>إجمالي المُعطى</th>
+              <th>إجمالي المُسترد</th><th>الرصيد المتبقي</th>
+              <th>عدد العمليات</th><th>ملاحظات</th><th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${people.length ? people.map(p => `
+              <tr>
+                <td><strong style="cursor:pointer;color:var(--bl)" onclick="viewPersonalStatement('${p.id}')">${escHtml(p.name)}</strong></td>
+                <td>${escHtml(p.phone || '—')}</td>
+                <td style="font-weight:800;color:var(--rd)">${fmt(p.total_given)} د.أ</td>
+                <td style="font-weight:800;color:var(--gr)">${fmt(p.total_withdrawn)} د.أ</td>
+                <td style="font-weight:800;color:${Number(p.balance) > 0 ? 'var(--am)' : 'var(--gr)'}">${fmt(p.balance)} د.أ</td>
+                <td>${p.transaction_count || 0}</td>
+                <td>${escHtml(p.notes || '—')}</td>
+                <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-ghost btn-sm" onclick="viewPersonalStatement('${p.id}')">📋 كشف</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'give')">💰 إعطاء</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'withdraw')">🔄 سحب</button>
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openPersonalPersonModal('${p.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePersonalPerson('${p.id}')">🗑️</button>` : ''}
+                </div></td>
+              </tr>
+            `).join('') : emptyRow('لا يوجد أشخاص — أضف شخصاً جديداً', 8)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderPersonalTransactions(el) {
+  const transactions = window._personalTransactions || [];
+
+  el.innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th><th>الشخص</th><th>النوع</th>
+              <th>المبلغ</th><th>ملاحظات</th><th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${transactions.length ? transactions.map(t => `
+              <tr>
+                <td>${fmtDate(t.transaction_date)}</td>
+                <td><strong>${escHtml(t.person_name || '—')}</strong></td>
+                <td>
+                  <span class="badge ${t.transaction_type === 'give' ? 'badge-red' : 'badge-green'}">
+                    ${t.transaction_type === 'give' ? '💰 إعطاء' : '🔄 سحب'}
+                  </span>
+                </td>
+                <td style="font-weight:800;color:${t.transaction_type === 'give' ? 'var(--rd)' : 'var(--gr)'}">${fmt(t.amount)} د.أ</td>
+                <td>${escHtml(t.notes || '—')}</td>
+                <td><div style="display:flex;gap:6px">
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editPersonalTransaction('${t.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePersonalTransaction('${t.id}')">🗑️</button>` : ''}
+                </div></td>
+              </tr>
+            `).join('') : emptyRow('لا توجد عمليات', 6)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ── Person CRUD Modals ─────────────────────────────────────
+
+function openPersonalPersonModal(personId) {
+  const people = window._personalPeople || [];
+  const p = personId ? people.find(x => String(x.id) === String(personId)) : null;
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${p ? '✏️ تعديل شخص' : '👤 إضافة شخص جديد'}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الاسم *</label>
+      <input class="form-input" id="pp_name" placeholder="اسم الشخص" value="${escHtml(p?.name || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">رقم الهاتف</label>
+      <input class="form-input" id="pp_phone" placeholder="07X XXXX XXXX" value="${escHtml(p?.phone || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pp_notes" placeholder="اختياري" value="${escHtml(p?.notes || '')}">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePersonalPerson('${personId || ''}')">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function savePersonalPerson(personId) {
+  const name = document.getElementById('pp_name')?.value?.trim();
+  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  const payload = {
+    name,
+    phone: document.getElementById('pp_phone')?.value?.trim() || null,
+    notes: document.getElementById('pp_notes')?.value?.trim() || null,
+  };
+
+  try {
+    if (personId) {
+      await API.updatePersonalPerson(personId, payload);
+    } else {
+      await API.createPersonalPerson(payload);
+    }
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
+  }
+}
+
+async function deletePersonalPerson(id) {
+  if (!confirm('حذف هذا الشخص وجميع عملياته؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    await API.deletePersonalPerson(id);
+    toast('تم الحذف ✅', 'success');
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
+  }
+}
+
+// ── Transaction Modals ──────────────────────────────────────
+
+function openPersonalTransactionModal(preSelectPersonId, preSelectType) {
+  const people = window._personalPeople || [];
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">💸 عملية جديدة</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الشخص *</label>
+      <select class="form-select" id="pt_person">
+        <option value="">— اختر شخصاً —</option>
+        ${people.map(p => `<option value="${p.id}" ${String(p.id) === String(preSelectPersonId) ? 'selected' : ''}>${escHtml(p.name)}${Number(p.balance) > 0 ? ` (رصيد: ${fmt(p.balance)} د.أ)` : ''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">نوع العملية *</label>
+        <select class="form-select" id="pt_type">
+          <option value="give" ${preSelectType === 'give' ? 'selected' : ''}>💰 إعطاء (تسليم مبلغ)</option>
+          <option value="withdraw" ${preSelectType === 'withdraw' ? 'selected' : ''}>🔄 سحب (استرداد مبلغ)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="pt_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">التاريخ</label>
+      <input class="form-input" id="pt_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pt_notes" placeholder="اختياري">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePersonalTransaction()">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function savePersonalTransaction(transactionId) {
+  const personId = parseInt(document.getElementById('pt_person')?.value);
+  const type = document.getElementById('pt_type')?.value;
+  const amount = parseFloat(document.getElementById('pt_amount')?.value);
+
+  if (!personId) { toast('اختر الشخص', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  const payload = {
+    person_id: personId,
+    amount,
+    transaction_type: type || 'give',
+    transaction_date: document.getElementById('pt_date')?.value,
+    notes: document.getElementById('pt_notes')?.value?.trim() || null,
+  };
+
+  try {
+    if (transactionId) {
+      await API.updatePersonalTransaction(transactionId, payload);
+    } else {
+      await API.createPersonalTransaction(payload);
+    }
+    toast(type === 'withdraw' ? 'تم تسجيل السحب ✅' : 'تم تسجيل الإعطاء ✅', 'success');
+    closeModal();
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
+  }
+}
+
+function editPersonalTransaction(id) {
+  const t = (window._personalTransactions || []).find(x => String(x.id) === String(id));
+  if (!t) { toast('العملية غير موجودة', 'error'); return; }
+
+  const people = window._personalPeople || [];
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل عملية</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الشخص *</label>
+      <select class="form-select" id="pt_person">
+        ${people.map(p => `<option value="${p.id}" ${p.id === t.person_id ? 'selected' : ''}>${escHtml(p.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">نوع العملية *</label>
+        <select class="form-select" id="pt_type">
+          <option value="give" ${t.transaction_type === 'give' ? 'selected' : ''}>💰 إعطاء</option>
+          <option value="withdraw" ${t.transaction_type === 'withdraw' ? 'selected' : ''}>🔄 سحب</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="pt_amount" type="number" step="0.001" min="0.001" value="${Number(t.amount || 0).toFixed(3)}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">التاريخ</label>
+      <input class="form-input" id="pt_date" type="date" value="${t.transaction_date ? String(t.transaction_date).split('T')[0] : ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pt_notes" value="${escHtml(t.notes || '')}">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePersonalTransaction('${t.id}')">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function deletePersonalTransaction(id) {
+  if (!confirm('حذف هذه العملية؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    await API.deletePersonalTransaction(id);
+    toast('تم الحذف ✅', 'success');
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
+  }
+}
+
+// ── Person Statement ────────────────────────────────────────
+
+async function viewPersonalStatement(personId) {
+  try {
+    const data = await API.getPersonalStatement(personId);
+    const p = data.person || {};
+    const txns = data.transactions || [];
+
+    let runningBalance = 0;
+
+    openModal(`
+      <div class="modal-header">
+        <div class="modal-title">📋 كشف حساب — ${escHtml(p.name || '')}</div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+
+      <div class="metrics-grid" style="margin-bottom:14px">
+        <div class="metric-card red">
+          <div class="metric-icon">💰</div>
+          <div class="metric-label">إجمالي المُعطى</div>
+          <div class="metric-value">${fmt(data.total_given)}</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-icon">🔄</div>
+          <div class="metric-label">إجمالي المُسترد</div>
+          <div class="metric-value">${fmt(data.total_withdrawn)}</div>
+        </div>
+        <div class="metric-card ${data.balance > 0 ? 'amber' : 'green'}">
+          <div class="metric-icon">📊</div>
+          <div class="metric-label">الرصيد المتبقي</div>
+          <div class="metric-value">${fmt(data.balance)}</div>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:14px">
+        <table>
+          <thead>
+            <tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الرصيد التراكمي</th><th>ملاحظات</th></tr>
+          </thead>
+          <tbody>
+            ${txns.length ? txns.map(t => {
+              if (t.transaction_type === 'give') runningBalance += Number(t.amount);
+              else runningBalance -= Number(t.amount);
+              return `
+              <tr>
+                <td>${fmtDate(t.transaction_date)}</td>
+                <td><span class="badge ${t.transaction_type === 'give' ? 'badge-red' : 'badge-green'}">${t.transaction_type === 'give' ? '💰 إعطاء' : '🔄 سحب'}</span></td>
+                <td style="font-weight:800;color:${t.transaction_type === 'give' ? 'var(--rd)' : 'var(--gr)'}">${fmt(t.amount)} د.أ</td>
+                <td style="font-weight:700">${fmt(runningBalance)} د.أ</td>
+                <td>${escHtml(t.notes || '—')}</td>
+              </tr>`;
+            }).join('') : `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد عمليات</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="printPersonalStatement('${personId}')">🖨️ طباعة</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'give')">💰 إعطاء</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'withdraw')">🔄 سحب</button>
+        <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
+      </div>
+    `, '750px');
+
+    window._personalStatementData = data;
+  } catch (e) {
+    toast(e.message || 'تعذّر تحميل كشف الحساب', 'error');
+  }
+}
+
+function printPersonalStatement(personId) {
+  const data = window._personalStatementData;
+  if (!data) return;
+
+  const p = data.person || {};
+  const txns = data.transactions || [];
+
+  let runningBalance = 0;
+
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="utf-8">
+      <title>كشف حساب — ${escHtml(p.name || '')}</title>
+      <style>
+        body { font-family: Tahoma, Arial, sans-serif; padding: 20px; }
+        h1 { text-align:center; margin-bottom:5px; }
+        .summary { display:flex; gap:30px; justify-content:center; margin-bottom:20px; font-size:14px; }
+        .summary div { text-align:center; }
+        .summary .label { color:#666; font-size:12px; }
+        .summary .val { font-weight:bold; font-size:18px; }
+        table { width:100%; border-collapse:collapse; margin-bottom:20px; }
+        th, td { border:1px solid #999; padding:6px 10px; text-align:right; font-size:13px; }
+        th { background:#f0f0f0; }
+        .give { color:red; }
+        .withdraw { color:green; }
+        .date { text-align:center; font-size:12px; color:#666; margin-top:20px; }
+      </style>
+    </head>
+    <body>
+      <h1>كشف حساب: ${escHtml(p.name || '')}</h1>
+      ${p.phone ? `<div style="text-align:center;color:#666;margin-bottom:10px">${escHtml(p.phone)}</div>` : ''}
+      <div class="summary">
+        <div><div class="label">إجمالي المُعطى</div><div class="val give">${fmt(data.total_given)} د.أ</div></div>
+        <div><div class="label">إجمالي المُسترد</div><div class="val withdraw">${fmt(data.total_withdrawn)} د.أ</div></div>
+        <div><div class="label">الرصيد المتبقي</div><div class="val">${fmt(data.balance)} د.أ</div></div>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الرصيد التراكمي</th><th>ملاحظات</th></tr></thead>
+        <tbody>
+          ${txns.map((t, i) => {
+            if (t.transaction_type === 'give') runningBalance += Number(t.amount);
+            else runningBalance -= Number(t.amount);
+            return `
+            <tr>
+              <td>${i + 1}</td>
+              <td>${fmtDate(t.transaction_date)}</td>
+              <td>${t.transaction_type === 'give' ? 'إعطاء' : 'سحب'}</td>
+              <td class="${t.transaction_type}">${fmt(t.amount)} د.أ</td>
+              <td style="font-weight:bold">${fmt(runningBalance)} د.أ</td>
+              <td>${escHtml(t.notes || '—')}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="date">تاريخ الطباعة: ${new Date().toLocaleDateString('ar-JO')}</div>
+    </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }

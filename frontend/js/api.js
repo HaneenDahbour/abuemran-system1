@@ -401,6 +401,24 @@
     getCategoryProfitShare: catId =>
       apiFetch(`/warehouse-investors/categories/${requireId(catId, 'معرّف الفئة')}/profit-share`),
     getWarehouseInvestorsSummary: () => apiFetch('/warehouse-investors/summary'),
+
+    // ── Personal Lending (الأمانات الشخصية) ───────────────────────
+    getPersonalPeople: () => apiFetch('/personal/people'),
+    createPersonalPerson: data =>
+      apiFetch('/personal/people', { method: 'POST', body: JSON.stringify(data) }),
+    updatePersonalPerson: (id, data) =>
+      apiFetch(`/personal/people/${requireId(id, 'معرّف الشخص')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deletePersonalPerson: id =>
+      apiFetch(`/personal/people/${requireId(id, 'معرّف الشخص')}`, { method: 'DELETE' }),
+    getPersonalTransactions: () => apiFetch('/personal/transactions'),
+    createPersonalTransaction: data =>
+      apiFetch('/personal/transactions', { method: 'POST', body: JSON.stringify(data) }),
+    updatePersonalTransaction: (id, data) =>
+      apiFetch(`/personal/transactions/${requireId(id, 'معرّف العملية')}`, { method: 'PUT', body: JSON.stringify(data) }),
+    deletePersonalTransaction: id =>
+      apiFetch(`/personal/transactions/${requireId(id, 'معرّف العملية')}`, { method: 'DELETE' }),
+    getPersonalStatement: id =>
+      apiFetch(`/personal/people/${requireId(id, 'معرّف الشخص')}/statement`),
   };
 
   window.API_BASE = API_BASE;
