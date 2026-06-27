@@ -67,7 +67,7 @@ if (typeof isClient !== 'function') {
 const PERMISSION_SECTIONS = [
   { key: 'dashboard',  label: 'لوحة التحكم' },
   { key: 'clients',    label: 'العملاء' },
-  { key: 'cashbox',    label: 'صندوق خالد' },
+
   { key: 'employees',  label: 'الموظفون' },
   { key: 'expenses',   label: 'المصاريف والرواتب' },
   { key: 'invoices',   label: 'الفواتير' },
@@ -79,7 +79,7 @@ const PERMISSION_SECTIONS = [
   { key: 'investors',  label: 'المستثمرون' },
   { key: 'china',      label: 'قسم الصين' },
   { key: 'personal',   label: 'الأمانات الشخصية' },
-  { key: 'shops',      label: 'نظام المحلات' },
+
 ];
 
 // admin: دائماً مسموح. permissions = null/undefined: غير محدود (توافق مع الحسابات القديمة).
@@ -575,7 +575,7 @@ async function navigateTo(section) {
 
   const renderers = {
     dashboard: renderDashboard,
-    cashbox: renderCashbox,
+
     employees: renderEmployees,
     expenses: renderExpenses,
     clients: renderClients,
@@ -713,7 +713,7 @@ function renderSidebar() {
   if (isAccountant() || sbUser.role === 'employee') {
     let sec = '';
     if (hasPermission('clients'))    sec += navItem('clients', '👥', 'العملاء');
-    if (hasPermission('cashbox'))    sec += navItem('cashbox', '💼', 'صندوق خالد');
+
     if (hasPermission('employees'))  sec += navItem('employees', '👷', 'الموظفون');
     if (hasPermission('expenses'))   sec += navItem('expenses', '📋', 'المصاريف والرواتب');
     if (hasPermission('invoices'))   sec += navItem('invoices', '🧾', 'الفواتير');
@@ -743,12 +743,6 @@ function renderSidebar() {
     html += navItem('personal', '🤝', 'الأمانات الشخصية');
   }
 
-  if (isAccountant() && hasPermission('shops')) {
-    html += '<div class="nav-section-title">المحلات</div>';
-    html += `<a class="nav-item" href="shops.html" target="_blank" rel="noopener">
-      <span class="nav-icon">🏬</span><span class="nav-label">نظام المحلات</span>
-    </a>`;
-  }
 
   if (isAdmin()) {
     html += '<div class="nav-section-title">الإدارة</div>';
