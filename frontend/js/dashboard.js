@@ -551,13 +551,17 @@ function setActiveNav(section) {
   });
 }
 
+let _navigating = false;
 async function navigateTo(section) {
+  if (_navigating) return;
+  _navigating = true;
   currentSection = section;
   setActiveNav(section);
 
   const container = document.getElementById('mainContent');
   if (!container) {
     console.error('mainContent not found');
+    _navigating = false;
     return;
   }
 
@@ -601,6 +605,7 @@ async function navigateTo(section) {
         </div>
       </div>
     `;
+    _navigating = false;
     return;
   }
 
@@ -614,6 +619,7 @@ async function navigateTo(section) {
         </div>
       </div>
     `;
+    _navigating = false;
     return;
   }
 
@@ -627,6 +633,8 @@ async function navigateTo(section) {
         حدث خطأ أثناء تحميل الصفحة: ${escHtml(e.message || e)}
       </div>
     `;
+  } finally {
+    _navigating = false;
   }
 }
 
@@ -8182,11 +8190,12 @@ function switchExpensesTab(tab, btn) {
 
 async function deleteAdvanceFromExpenses(id) {
   if (!confirm('حذف هذه السلفة؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteAdvance(id);
     toast('تم الحذف ✅', 'success');
     navigateTo('expenses');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = '🗑️'; } }
 }
 
 // ── Edit by id (from cached lists) ───────────────────────────
@@ -9000,12 +9009,14 @@ function openAdvanceModal(userId, employeeName) {
 
 async function deleteExpense(id) {
   if (!confirm('حذف هذا المصروف؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteExpense(id);
     toast('تم حذف المصروف ✅', 'success');
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
   }
 }
 function openAddEmployeeModal() {
@@ -9673,26 +9684,30 @@ function filterStatementTx(type, btn) {
 }
 async function deleteSalary(id) {
   if (!confirm('حذف هذا الراتب؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteSalary(id);
     toast('تم حذف الراتب ✅', 'success');
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
   }
 }
 
 async function deleteSalaryFromStatement(id, userId, employeeName) {
   if (!confirm('حذف هذا الراتب؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteSalary(id);
     toast('تم حذف الراتب ✅', 'success');
     viewEmployeeStatement(userId, employeeName);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = '🗑️'; } }
 }
 
 async function deleteAdvanceFromStatement(id, userId, employeeName) {
   if (!confirm('حذف هذه السلفة؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteAdvance(id);
     toast('تم حذف السلفة ✅', 'success');
