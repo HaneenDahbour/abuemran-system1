@@ -11805,7 +11805,7 @@ async function openInvestorDetailsModal(investorId) {
 }
 
 /* ════════════════════════════════════════════════════════════
-   الأمانات الشخصية — إعطاء مبالغ لأشخاص وسحبها
+   الأمانات الشخصية — تسجيل دفعات ومقبوضات للأشخاص
    ════════════════════════════════════════════════════════════ */
 
 window._personalTab = window._personalTab || 'people';
@@ -11817,11 +11817,11 @@ async function renderPersonal(container) {
     <div class="page-header">
       <div>
         <div class="page-title">🤝 الأمانات الشخصية</div>
-        <div class="page-sub">إدارة الأمانات — إعطاء مبالغ لأشخاص وسحبها</div>
+        <div class="page-sub">إدارة الأمانات — تسجيل دفعات ومقبوضات للأشخاص</div>
       </div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="openPersonalPersonModal()">+ شخص جديد</button>
-        <button class="btn btn-ghost" onclick="openPersonalTransactionModal()">+ عملية جديدة</button>
+        <button class="btn btn-ghost" onclick="openPersonalTransactionModal()">+ تسجيل عملية</button>
       </div>
     </div>
     <div class="tabs" style="margin-bottom:16px" id="personal-tabs"></div>
@@ -11933,8 +11933,8 @@ function _renderPersonalPeople(el) {
                 <td>${escHtml(p.notes || '—')}</td>
                 <td><div style="display:flex;gap:6px;flex-wrap:wrap">
                   <button class="btn btn-ghost btn-sm" onclick="viewPersonalStatement('${p.id}')">📋 كشف</button>
-                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'give')">💰 إعطاء</button>
-                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'withdraw')">🔄 سحب</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'give')">💰 تسجيل دفعة</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'withdraw')">💰 تسجيل مقبوضة</button>
                   ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openPersonalPersonModal('${p.id}')">✏️</button>` : ''}
                   ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePersonalPerson('${p.id}')">🗑️</button>` : ''}
                 </div></td>
@@ -11967,7 +11967,7 @@ function _renderPersonalTransactions(el) {
                 <td><strong>${escHtml(t.person_name || '—')}</strong></td>
                 <td>
                   <span class="badge ${t.transaction_type === 'give' ? 'badge-red' : 'badge-green'}">
-                    ${t.transaction_type === 'give' ? '💰 إعطاء' : '🔄 سحب'}
+                    ${t.transaction_type === 'give' ? '💰 دفعة' : '💰 مقبوضة'}
                   </span>
                 </td>
                 <td style="font-weight:800;color:${t.transaction_type === 'give' ? 'var(--rd)' : 'var(--gr)'}">${fmt(t.amount)} د.أ</td>
@@ -12077,8 +12077,8 @@ function openPersonalTransactionModal(preSelectPersonId, preSelectType) {
       <div class="form-group">
         <label class="form-label">نوع العملية *</label>
         <select class="form-select" id="pt_type">
-          <option value="give" ${preSelectType === 'give' ? 'selected' : ''}>💰 إعطاء (تسليم مبلغ)</option>
-          <option value="withdraw" ${preSelectType === 'withdraw' ? 'selected' : ''}>🔄 سحب (استرداد مبلغ)</option>
+          <option value="give" ${preSelectType === 'give' ? 'selected' : ''}>💰 تسجيل دفعة (تسليم مبلغ)</option>
+          <option value="withdraw" ${preSelectType === 'withdraw' ? 'selected' : ''}>💰 تسجيل مقبوضة (استرداد مبلغ)</option>
         </select>
       </div>
       <div class="form-group">
@@ -12126,7 +12126,7 @@ async function savePersonalTransaction(transactionId) {
     } else {
       await API.createPersonalTransaction(payload);
     }
-    toast(type === 'withdraw' ? 'تم تسجيل السحب ✅' : 'تم تسجيل الإعطاء ✅', 'success');
+    toast(type === 'withdraw' ? 'تم تسجيل المقبوضة ✅' : 'تم تسجيل الدفعة ✅', 'success');
     closeModal();
     navigateTo('personal');
   } catch (e) {
@@ -12156,8 +12156,8 @@ function editPersonalTransaction(id) {
       <div class="form-group">
         <label class="form-label">نوع العملية *</label>
         <select class="form-select" id="pt_type">
-          <option value="give" ${t.transaction_type === 'give' ? 'selected' : ''}>💰 إعطاء</option>
-          <option value="withdraw" ${t.transaction_type === 'withdraw' ? 'selected' : ''}>🔄 سحب</option>
+          <option value="give" ${t.transaction_type === 'give' ? 'selected' : ''}>💰 تسجيل دفعة</option>
+          <option value="withdraw" ${t.transaction_type === 'withdraw' ? 'selected' : ''}>💰 تسجيل مقبوضة</option>
         </select>
       </div>
       <div class="form-group">
@@ -12239,7 +12239,7 @@ async function viewPersonalStatement(personId) {
               return `
               <tr>
                 <td>${fmtDate(t.transaction_date)}</td>
-                <td><span class="badge ${t.transaction_type === 'give' ? 'badge-red' : 'badge-green'}">${t.transaction_type === 'give' ? '💰 إعطاء' : '🔄 سحب'}</span></td>
+                <td><span class="badge ${t.transaction_type === 'give' ? 'badge-red' : 'badge-green'}">${t.transaction_type === 'give' ? '💰 دفعة' : '💰 مقبوضة'}</span></td>
                 <td style="font-weight:800;color:${t.transaction_type === 'give' ? 'var(--rd)' : 'var(--gr)'}">${fmt(t.amount)} د.أ</td>
                 <td style="font-weight:700">${fmt(runningBalance)} د.أ</td>
                 <td>${escHtml(t.notes || '—')}</td>
@@ -12251,8 +12251,8 @@ async function viewPersonalStatement(personId) {
 
       <div style="display:flex;gap:10px;margin-top:8px">
         <button class="btn btn-primary" style="flex:1" onclick="printPersonalStatement('${personId}')">🖨️ طباعة</button>
-        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'give')">💰 إعطاء</button>
-        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'withdraw')">🔄 سحب</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'give')">💰 تسجيل دفعة</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'withdraw')">💰 تسجيل مقبوضة</button>
         <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
       </div>
     `, '750px');
@@ -12311,7 +12311,7 @@ function printPersonalStatement(personId) {
             <tr>
               <td>${i + 1}</td>
               <td>${fmtDate(t.transaction_date)}</td>
-              <td>${t.transaction_type === 'give' ? 'إعطاء' : 'سحب'}</td>
+              <td>${t.transaction_type === 'give' ? 'دفعة' : 'مقبوضة'}</td>
               <td class="${t.transaction_type}">${fmt(t.amount)} د.أ</td>
               <td style="font-weight:bold">${fmt(runningBalance)} د.أ</td>
               <td>${escHtml(t.notes || '—')}</td>
