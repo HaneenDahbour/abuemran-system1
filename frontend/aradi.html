@@ -151,8 +151,13 @@ function confirm2(msg,fn){
   openModal(`<div class="modal-header"><div class="modal-title">تأكيد</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <p style="margin-bottom:18px;font-size:13px">${esc(msg)}</p>
     <div style="display:flex;gap:10px"><button class="btn btn-danger" style="flex:1" id="cfbtn">تأكيد</button><button class="btn btn-ghost" onclick="closeModal()">إلغاء</button></div>`,'400px');
-  document.getElementById('cfbtn').onclick=async()=>{ try{ await fn(); closeModal(); }catch(e){ toast(e.message,'error'); } };
+  document.getElementById('cfbtn').onclick=async()=>{
+    const b=document.getElementById('cfbtn'); if(b){b.disabled=true;b.textContent='جاري التنفيذ...';}
+    try{ await fn(); closeModal(); }catch(e){ toast(e.message,'error'); if(b){b.disabled=false;b.textContent='تأكيد';} }
+  };
 }
+function _lockSave(){ const b=document.querySelector('#modal-ov .btn-primary'); if(!b||b.disabled) return null; b.disabled=true; b.textContent='جاري الحفظ...'; return b; }
+function _unlockSave(b){ if(b){b.disabled=false;b.textContent='💾 حفظ';} }
 
 function statusBadge(s){
   const m={
@@ -356,11 +361,12 @@ async function savePlot(id){
   };
   const err=document.getElementById('pf-err');
   if(!body.plot_number){ err.textContent='رقم القطعة مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{
     if(id) await api(`/aradi/plots/${id}`,{method:'PUT',body:JSON.stringify(body)});
     else await api('/aradi/plots',{method:'POST',body:JSON.stringify(body)});
     closeModal(); toast(id?'تم التعديل':'تمت الإضافة','success'); await loadPlots();
-  }catch(e){ err.textContent=e.message; }
+  }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function deletePlot(id,num){
@@ -430,11 +436,12 @@ async function saveBuyer(id){
   const body={ name:document.getElementById('bf-name').value.trim(), phone:document.getElementById('bf-phone').value.trim()||null, address:document.getElementById('bf-addr').value.trim()||null, notes:document.getElementById('bf-notes').value.trim()||null };
   const err=document.getElementById('bf-err');
   if(!body.name){ err.textContent='الاسم مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{
     if(id) await api(`/aradi/buyers/${id}`,{method:'PUT',body:JSON.stringify(body)});
     else await api('/aradi/buyers',{method:'POST',body:JSON.stringify(body)});
     closeModal(); toast('تم الحفظ','success'); await loadBuyers();
-  }catch(e){ err.textContent=e.message; }
+  }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteBuyer(id,name){
@@ -542,10 +549,11 @@ async function saveContract(){
   };
   if(!body.buyer_id){ err.textContent='اختر المشتري'; return; }
   if(!body.sale_price){ err.textContent='سعر البيع مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{
     await api('/aradi/contracts',{method:'POST',body:JSON.stringify(body)});
     closeModal(); toast('تم إنشاء العقد بنجاح','success'); await loadContracts();
-  }catch(e){ err.textContent=e.message; }
+  }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function showContractEditForm(id){
@@ -606,10 +614,11 @@ async function updateContract(id){
     notes:document.getElementById('ce-notes').value.trim()||null,
   };
   if(!body.buyer_id){ document.getElementById('ce-err').textContent='اختر المشتري'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{
     await api(`/aradi/contracts/${id}`,{method:'PUT',body:JSON.stringify(body)});
     closeModal(); toast('تم التعديل','success'); await loadContracts();
-  }catch(e){ document.getElementById('ce-err').textContent=e.message; }
+  }catch(e){ document.getElementById('ce-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteContract(id,num){
@@ -735,10 +744,11 @@ async function saveBuyerPay(contractId,installmentId){
   };
   const err=document.getElementById('bpf-err');
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{
     await api('/aradi/payments',{method:'POST',body:JSON.stringify(body)});
     closeModal(); toast('تم تسجيل الدفعة','success');
-  }catch(e){ err.textContent=e.message; }
+  }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 function printContractStatement(id){
@@ -821,8 +831,9 @@ async function showInstallmentEdit(id,num,dueDate,amount,notes){
 
 async function updateInstallment(id){
   const body={due_date:document.getElementById('ied-date').value||null,amount:parseFloat(document.getElementById('ied-amt').value)||null,notes:document.getElementById('ied-notes').value.trim()||null};
+  const btn=_lockSave(); if(!btn) return;
   try{ await api(`/aradi/installments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadInstallments(); }
-  catch(e){ document.getElementById('ied-err').textContent=e.message; }
+  catch(e){ document.getElementById('ied-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteInstallment(id,num){
@@ -895,8 +906,9 @@ async function editBuyerPay(id){
 
 async function saveBuyerPayEdit(id){
   const body={amount:parseFloat(document.getElementById('ebp-amt').value)||null,payment_type:document.getElementById('ebp-type').value,payment_date:document.getElementById('ebp-date').value||null,method:document.getElementById('ebp-meth').value,status:document.getElementById('ebp-stat').value,notes:document.getElementById('ebp-notes').value.trim()||null};
+  const btn=_lockSave(); if(!btn) return;
   try{ await api(`/aradi/payments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadBuyerPayments(); }
-  catch(e){ document.getElementById('ebp-err').textContent=e.message; }
+  catch(e){ document.getElementById('ebp-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteBuyerPay(id){
@@ -941,8 +953,9 @@ async function submitAddPay(){
   const err=document.getElementById('ap-err');
   if(!body.contract_id){ err.textContent='اختر العقد'; return; }
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/payments',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadBuyerPayments(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function voidBuyerPay(id){
@@ -1011,11 +1024,12 @@ async function saveInvestor(id){
   const body={name:document.getElementById('ivf-name').value.trim(),phone:document.getElementById('ivf-phone').value.trim()||null,address:document.getElementById('ivf-addr').value.trim()||null,notes:document.getElementById('ivf-notes').value.trim()||null};
   const err=document.getElementById('ivf-err');
   if(!body.name){ err.textContent='الاسم مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{
     if(id) await api(`/aradi/investors/${id}`,{method:'PUT',body:JSON.stringify(body)});
     else await api('/aradi/investors',{method:'POST',body:JSON.stringify(body)});
     closeModal(); toast('تم الحفظ','success'); loadInvestors();
-  }catch(e){ err.textContent=e.message; }
+  }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteInvestor(id,name){
@@ -1099,8 +1113,9 @@ async function saveInvestment(){
   const err=document.getElementById('inf-err');
   if(!body.investor_id){ err.textContent='اختر المستثمر'; return; }
   if(!body.capital_amount){ err.textContent='رأس المال مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/investments',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadInvestments(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function showInvestmentDetail(id){
@@ -1172,8 +1187,9 @@ async function updateInvestment(id){
     notes:document.getElementById('ie-notes').value.trim()||null,
   };
   if(!body.investor_id){ document.getElementById('ie-err').textContent='اختر المستثمر'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api(`/aradi/investments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadInvestments(); }
-  catch(e){ document.getElementById('ie-err').textContent=e.message; }
+  catch(e){ document.getElementById('ie-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteInvestment(id,num){
@@ -1241,8 +1257,9 @@ async function editInvPay(id){
 
 async function saveInvPayEdit(id){
   const body={amount:parseFloat(document.getElementById('eip-amt').value)||null,payment_date:document.getElementById('eip-date').value||null,method:document.getElementById('eip-meth').value,status:document.getElementById('eip-stat').value,notes:document.getElementById('eip-notes').value.trim()||null};
+  const btn=_lockSave(); if(!btn) return;
   try{ await api(`/aradi/investor-payments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadInvestorPayments(); }
-  catch(e){ document.getElementById('eip-err').textContent=e.message; }
+  catch(e){ document.getElementById('eip-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteInvPay(id){
@@ -1302,8 +1319,9 @@ async function saveInvPay(investmentId){
   const body={investment_id:investmentId,amount:parseFloat(document.getElementById('ipf-amt').value)||0,payment_date:document.getElementById('ipf-date').value,method:document.getElementById('ipf-meth').value,status:'confirmed',notes:document.getElementById('ipf-notes').value.trim()||null};
   const err=document.getElementById('ipf-err');
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/investor-payments',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function saveInvPaySa(){
@@ -1311,8 +1329,9 @@ async function saveInvPaySa(){
   const err=document.getElementById('ipf-err');
   if(!body.investment_id){ err.textContent='اختر الاستثمار'; return; }
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/investor-payments',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadInvestorPayments(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function voidInvPay(id){
@@ -1389,8 +1408,9 @@ async function saveCheck(){
   const body={related_type:document.getElementById('chf-rtype').value,direction:document.getElementById('chf-dir').value,person_name:document.getElementById('chf-name').value.trim()||null,check_number:document.getElementById('chf-num').value.trim()||null,amount:parseFloat(document.getElementById('chf-amt').value)||0,check_date:document.getElementById('chf-date').value||null,received_date:document.getElementById('chf-rdate').value||null,bank_name:document.getElementById('chf-bank').value.trim()||null,notes:document.getElementById('chf-notes').value.trim()||null};
   const err=document.getElementById('chf-err');
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/checks',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadChecks(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function showCheckEdit(id){
@@ -1444,8 +1464,9 @@ async function updateCheck(id){
     status:document.getElementById('che-status').value,
     notes:document.getElementById('che-notes').value.trim()||null,
   };
+  const btn=_lockSave(); if(!btn) return;
   try{ await api(`/aradi/checks/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadChecks(); }
-  catch(e){ document.getElementById('che-err').textContent=e.message; }
+  catch(e){ document.getElementById('che-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteCheck(id,num){
@@ -1522,8 +1543,9 @@ async function saveExpense(){
   const err=document.getElementById('ef-err');
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
   if(!body.expense_date){ err.textContent='التاريخ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/expenses',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم','success'); loadExpenses(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function voidExpense(id){
@@ -1578,8 +1600,9 @@ async function saveExpenseEdit(id){
     status:document.getElementById('ee-stat').value,
     notes:document.getElementById('ee-notes').value.trim()||null,
   };
+  const btn=_lockSave(); if(!btn) return;
   try{ await api(`/aradi/expenses/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadExpenses(); }
-  catch(e){ document.getElementById('ee-err').textContent=e.message; }
+  catch(e){ document.getElementById('ee-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function deleteExpense(id){
