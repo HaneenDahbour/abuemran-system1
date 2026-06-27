@@ -197,6 +197,18 @@ async def update_transaction(transaction_id: int, data: TransactionIn, user=Depe
             raise HTTPException(status_code=400, detail="التاريخ غير صحيح")
 
     pool = await get_pool()
+
+    if data.transaction_type == "withdraw":
+        balance = await pool.fetchval("""
+            SELECT COALESCE(SUM(CASE WHEN transaction_type='give' THEN amount ELSE -amount END), 0)
+            FROM personal_transactions WHERE person_id=$1 AND id != $2
+        """, data.person_id, transaction_id)
+        if amount > float(balance):
+            raise HTTPException(
+                status_code=400,
+                detail=f"المبلغ المطلوب سحبه ({amount}) أكبر من الرصيد المتاح ({float(balance):.3f})"
+            )
+
     row = await pool.fetchrow(
         """
         UPDATE personal_transactions
@@ -216,11 +228,25 @@ async def update_transaction(transaction_id: int, data: TransactionIn, user=Depe
 async def delete_transaction(transaction_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
     pool = await get_pool()
-    deleted = await pool.fetchrow(
-        "DELETE FROM personal_transactions WHERE id=$1 RETURNING id", transaction_id
+
+    txn = await pool.fetchrow(
+        "SELECT * FROM personal_transactions WHERE id=$1", transaction_id
     )
-    if not deleted:
+    if not txn:
         raise HTTPException(status_code=404, detail="العملية غير موجودة")
+
+    if txn["transaction_type"] == "give":
+        balance_after = await pool.fetchval("""
+            SELECT COALESCE(SUM(CASE WHEN transaction_type='give' THEN amount ELSE -amount END), 0)
+            FROM personal_transactions WHERE person_id=$1 AND id != $2
+        """, txn["person_id"], transaction_id)
+        if float(balance_after) < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="لا يمكن حذف هذه العملية — الرصيد سيصبح سالباً بسبب عمليات سحب سابقة"
+            )
+
+    await pool.execute("DELETE FROM personal_transactions WHERE id=$1", transaction_id)
     return {"success": True}
 
 

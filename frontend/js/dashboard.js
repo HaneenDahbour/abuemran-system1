@@ -12149,7 +12149,7 @@ function editPersonalTransaction(id) {
     <div class="form-group">
       <label class="form-label">الشخص *</label>
       <select class="form-select" id="pt_person">
-        ${people.map(p => `<option value="${p.id}" ${p.id === t.person_id ? 'selected' : ''}>${escHtml(p.name)}</option>`).join('')}
+        ${people.map(p => `<option value="${p.id}" ${String(p.id) === String(t.person_id) ? 'selected' : ''}>${escHtml(p.name)}</option>`).join('')}
       </select>
     </div>
     <div class="form-row">
