@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional, List
 from uuid import UUID
@@ -58,10 +58,28 @@ def parse_purchase_date(value: Optional[str]) -> date:
         raise HTTPException(status_code=400, detail="تاريخ فاتورة الشراء غير صحيح")
 
 
-async def insert_audit(conn, user, action: str, entity_id: Optional[int], detail: str):
-    # audit_log.entity_id is INTEGER in the live schema while purchases.id is UUID.
-    # Keep the UUID in detail and leave the incompatible legacy column empty.
-    audit_entity_id = None if isinstance(entity_id, UUID) else entity_id
+def coerce_id(val):
+    """Convert to int if possible, otherwise UUID — matches whatever the live DB uses."""
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        pass
+    return safe_uuid(val) or val
+
+
+def parse_int_id(val, label="المعرّف"):
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"{label} غير صحيح")
+
+
+async def insert_audit(conn, user, action: str, entity_id, detail: str):
+    audit_entity_id = entity_id if isinstance(entity_id, int) else None
     try:
         await conn.execute(
             """

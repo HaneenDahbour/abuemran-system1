@@ -12,6 +12,18 @@ function safeJsonParse(value, fallback = null) {
   }
 }
 
+function _lockBtn(btn, text) { if (btn) { btn.disabled = true; btn.dataset.oldText = btn.textContent; btn.textContent = text || 'جاري الحفظ...'; } }
+function _unlockBtn(btn) { if (btn) { btn.disabled = false; btn.textContent = btn.dataset.oldText || 'حفظ'; } }
+function _modalBtn() { return document.querySelector('#global-modal .btn-primary'); }
+
+
+function normalizeOptionalId(value) {
+  const normalized = String(value ?? '').trim();
+  return (!normalized || ['null', 'undefined', 'nan'].includes(normalized.toLowerCase()))
+    ? null
+    : normalized;
+}
+
 if (typeof getUser !== 'function') {
   function getUser() {
     return safeJsonParse(localStorage.getItem('user'), null);
@@ -55,7 +67,7 @@ if (typeof isClient !== 'function') {
 const PERMISSION_SECTIONS = [
   { key: 'dashboard',  label: 'لوحة التحكم' },
   { key: 'clients',    label: 'العملاء' },
-  { key: 'cashbox',    label: 'صندوق خالد' },
+
   { key: 'employees',  label: 'الموظفون' },
   { key: 'expenses',   label: 'المصاريف والرواتب' },
   { key: 'invoices',   label: 'الفواتير' },
@@ -66,7 +78,8 @@ const PERMISSION_SECTIONS = [
   { key: 'warehouse',  label: 'المستودع' },
   { key: 'investors',  label: 'المستثمرون' },
   { key: 'china',      label: 'قسم الصين' },
-  { key: 'shops',      label: 'نظام المحلات' },
+  { key: 'personal',   label: 'الأمانات الشخصية' },
+
 ];
 
 // admin: دائماً مسموح. permissions = null/undefined: غير محدود (توافق مع الحسابات القديمة).
@@ -540,13 +553,17 @@ function setActiveNav(section) {
   });
 }
 
+let _navigating = false;
 async function navigateTo(section) {
+  if (_navigating) return;
+  _navigating = true;
   currentSection = section;
   setActiveNav(section);
 
   const container = document.getElementById('mainContent');
   if (!container) {
     console.error('mainContent not found');
+    _navigating = false;
     return;
   }
 
@@ -559,7 +576,7 @@ async function navigateTo(section) {
 
   const renderers = {
     dashboard: renderDashboard,
-    cashbox: renderCashbox,
+
     employees: renderEmployees,
     expenses: renderExpenses,
     clients: renderClients,
@@ -571,6 +588,7 @@ async function navigateTo(section) {
     warehouse: renderWarehouse,
     investors: renderInvestors,
     china: renderChina,
+    personal: renderPersonal,
     users: renderUsers,
     employee_activity: renderEmployeeActivity,
     audit: renderAudit,
@@ -590,6 +608,7 @@ async function navigateTo(section) {
         </div>
       </div>
     `;
+    _navigating = false;
     return;
   }
 
@@ -603,6 +622,7 @@ async function navigateTo(section) {
         </div>
       </div>
     `;
+    _navigating = false;
     return;
   }
 
@@ -616,6 +636,8 @@ async function navigateTo(section) {
         حدث خطأ أثناء تحميل الصفحة: ${escHtml(e.message || e)}
       </div>
     `;
+  } finally {
+    _navigating = false;
   }
 }
 
@@ -692,7 +714,7 @@ function renderSidebar() {
   if (isAccountant() || sbUser.role === 'employee') {
     let sec = '';
     if (hasPermission('clients'))    sec += navItem('clients', '👥', 'العملاء');
-    if (hasPermission('cashbox'))    sec += navItem('cashbox', '💼', 'صندوق خالد');
+
     if (hasPermission('employees'))  sec += navItem('employees', '👷', 'الموظفون');
     if (hasPermission('expenses'))   sec += navItem('expenses', '📋', 'المصاريف والرواتب');
     if (hasPermission('invoices'))   sec += navItem('invoices', '🧾', 'الفواتير');
@@ -717,12 +739,11 @@ function renderSidebar() {
     html += navItem('china', '🇨🇳', 'قسم الصين');
   }
 
-  if (isAccountant() && hasPermission('shops')) {
-    html += '<div class="nav-section-title">المحلات</div>';
-    html += `<a class="nav-item" href="shops.html" target="_blank" rel="noopener">
-      <span class="nav-icon">🏬</span><span class="nav-label">نظام المحلات</span>
-    </a>`;
+  if (isAccountant() && hasPermission('personal')) {
+    html += '<div class="nav-section-title">الأمانات</div>';
+    html += navItem('personal', '🤝', 'الأمانات الشخصية');
   }
+
 
   if (isAdmin()) {
     html += '<div class="nav-section-title">الإدارة</div>';
@@ -1425,7 +1446,8 @@ function _invoiceActionButtons(inv) {
     html += `<button class="btn btn-ghost btn-sm" onclick="printInvoiceFromEncoded(${jsString(encoded)})">🖨️ طباعة</button>`;
     if (isAccountant()) {
       html += `
-<button class="btn btn-success btn-sm" onclick="openRecipientPayment(${jsString(getInvoiceRecipientName(inv) || inv.recipient_name || '')}, null)">💰 قبض</button>        <button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
+${inv.client_id ? `<button class="btn btn-success btn-sm" onclick="openPaymentModal('${inv.client_id}', '${inv.id}')">💰 قبض للفاتورة</button>` : ''}
+<button class="btn btn-primary btn-sm" onclick="openInvoiceModalFromEncoded(${jsString(encoded)})">✏️ تعديل</button>
       `;
     }
     if (isAdmin()) {
@@ -1551,9 +1573,9 @@ function openInvoiceModal(invoice = null) {
   // Pending invoices: paid_amount is always 0 until approval — the amount the
   // employee recorded lives in initial_paid_amount. Use it so editing a pending
   // invoice doesn't silently wipe the recorded payment.
-  const paid = (invoice?.status || 'approved') === 'pending'
-    ? Number(invoice?.initial_paid_amount || 0)
-    : Number(invoice?.paid_amount || 0);
+  // Editing changes only the invoice's original automatic payment. Later
+  // manual receipts are separate ledger entries and must never be collapsed.
+  const paid = Number(invoice?.initial_paid_amount || 0);
   const recipient = invoice?.recipient_name ||
     String(invoice?.notes || '').match(/المطلوب من السادة:\s*([^|]+)/)?.[1]?.trim() || '';
   const cleanNotes = (invoice?.notes || '')
@@ -2525,8 +2547,6 @@ function calcInvoiceItemsTotal() {
   handleInvoicePaymentChange();
 }
 
-
-
 function calcInvoiceLineFromTotal(idx) {
   const qty = parseFloat(document.getElementById(`ii_qty_${idx}`)?.value) || 0;
   const lineTotal = parseFloat(document.getElementById(`ii_total_${idx}`)?.value) || 0;
@@ -2542,8 +2562,6 @@ function calcInvoiceLineFromTotal(idx) {
 
   calcInvoiceItemsTotal();
 }
-
-
 
 
 function calcInvoiceLineFromTotal(idx) {
@@ -2936,6 +2954,7 @@ async function doRejectInvoice(id) {
 }
 
 function renderPaymentRow(p) {
+  const encoded = encodePayload(p);
   return `<tr data-payment-id="${p.id}">
     <td><strong>${escHtml(p.recipient_name || '—')}</strong></td>
     <td style="color:var(--gr);font-weight:700">+${fmt(p.amount)} د.أ</td>
@@ -2944,46 +2963,142 @@ function renderPaymentRow(p) {
     <td>${escHtml(p.invoice_number || '—')}</td>
     <td>${escHtml(p.employee_name || '—')}</td>
     <td style="color:var(--tx2);font-size:12px">${escHtml(p.notes || '—')}</td>
-    <td>${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${p.id}')">🗑️</button>` : ''}</td>
+    <td><div style="display:flex;gap:6px">
+      ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openEditRecipientPayment(${jsString(encoded)})">✏️</button>` : ''}
+      ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${p.id}')">🗑️</button>` : ''}
+    </div></td>
   </tr>`;
 }
+
+function directPaymentStatusBadge(status) {
+  if (status === 'approved') return '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">معتمدة</span>';
+  if (status === 'rejected') return '<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">مرفوضة</span>';
+  return '<span style="background:#fff8e1;color:#f57f17;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700">بانتظار الموافقة</span>';
+}
+
+function renderDirectPaymentRow(p) {
+  const cleanNotes = (p.notes || '').replace(/\s*\|\s*method:\w+/g, '').replace(/\s*\|\s*invoice_id:\d+/g, '').trim();
+  return `<tr data-dp-id="${p.id}">
+    <td><strong>${escHtml(p.client_name || '—')}</strong></td>
+    <td style="color:var(--gr);font-weight:700">+${fmt(p.amount)} د.أ</td>
+    <td>${payMethodBadge(p.payment_method || 'cash')}</td>
+    <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
+    <td>${directPaymentStatusBadge(p.status)}</td>
+    <td>${escHtml(p.employee_name || '—')}</td>
+    <td>${escHtml(p.approver_name || '—')}</td>
+    <td style="color:var(--tx2);font-size:12px">${escHtml(cleanNotes || '—')}</td>
+    <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+      ${p.status === 'pending' && isAdmin() ? `
+        <button class="btn btn-success btn-sm" onclick="approveDirectPayment('${p.id}')">اعتماد</button>
+        <button class="btn btn-danger btn-sm" onclick="rejectDirectPayment('${p.id}')">رفض</button>` : ''}
+      ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePayment('${p.id}')">🗑️</button>` : ''}
+    </div></td>
+  </tr>`;
+}
+
 async function renderPayments(container) {
-  let payments = [];
-  try { payments = await API.getRecipientPayments() || []; } catch (e) { payments = []; }
+  let recipientPayments = [], directPayments = [];
+  try {
+    [recipientPayments, directPayments] = await Promise.all([
+      API.getRecipientPayments().catch(() => []),
+      API.getPayments().catch(() => []),
+    ]);
+  } catch (e) { recipientPayments = []; directPayments = []; }
+
+  window._paymentsCache = directPayments || [];
+
+  const pending = (directPayments || []).filter(p => p.status === 'pending');
+  const approved = (directPayments || []).filter(p => p.status === 'approved');
+  const rejected = (directPayments || []).filter(p => p.status === 'rejected');
+
+  const activeTab = window._paymentsActiveTab || 'recipient';
+
   container.innerHTML = `
     <div class="page-header">
       <div>
-        <div class="page-title">المقبوضات</div>
-        <div class="page-sub">${payments.length} عملية مسجّلة</div>
+        <div class="page-title">المقبوضات والمدفوعات</div>
+        <div class="page-sub">${(recipientPayments || []).length} مقبوضة — ${(directPayments || []).length} دفعة مباشرة${pending.length ? ` — <span style="color:var(--yl)">${pending.length} بانتظار الموافقة</span>` : ''}</div>
       </div>
       <div style="display:flex; gap:10px">
         ${isAccountant() ? `<button class="btn btn-success" onclick="openRecipientPayment('', null)">+ تسجيل مقبوضة</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="printPaymentsFromEncoded(${jsString(encodePayload(payments))})">🖨️</button>
+        <button class="btn btn-ghost btn-sm" onclick="printPaymentsFromEncoded(${jsString(encodePayload(recipientPayments || []))})">🖨️</button>
       </div>
     </div>
 
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button class="btn ${activeTab === 'recipient' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('recipient')">المقبوضات (${(recipientPayments || []).length})</button>
+      <button class="btn ${activeTab === 'pending' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('pending')">بانتظار الموافقة (${pending.length})</button>
+      <button class="btn ${activeTab === 'approved' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('approved')">معتمدة (${approved.length})</button>
+      <button class="btn ${activeTab === 'rejected' ? 'btn-primary' : 'btn-ghost'}" onclick="switchPaymentsTab('rejected')">مرفوضة (${rejected.length})</button>
+    </div>
+
+    <div id="payments-tab-content"></div>
+  `;
+
+  renderPaymentsTabContent(activeTab, recipientPayments || [], { pending, approved, rejected });
+}
+
+function switchPaymentsTab(tab) {
+  window._paymentsActiveTab = tab;
+  navigateTo('payments');
+}
+
+function renderPaymentsTabContent(tab, recipientPayments, directGroups) {
+  const el = document.getElementById('payments-tab-content');
+  if (!el) return;
+
+  if (tab === 'recipient') {
+    el.innerHTML = `
+      <div class="card" style="padding:0; overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>الزبون / مطلوب من السادة</th><th>المبلغ</th><th>طريقة الدفع</th>
+              <th>التاريخ</th><th>الفاتورة</th><th>سجّلها الموظف</th><th>ملاحظات</th><th>الإجراءات</th>
+            </tr></thead>
+            <tbody id="pay-tbody">
+              ${recipientPayments.length ? recipientPayments.map(renderPaymentRow).join('') : emptyRow('لا توجد مقبوضات', 8)}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    return;
+  }
+
+  const list = directGroups[tab] || [];
+  el.innerHTML = `
     <div class="card" style="padding:0; overflow:hidden">
       <div class="table-wrap">
         <table>
-<thead>
-  <tr>
-    <th>الزبون / مطلوب من السادة</th>
-    <th>المبلغ</th>
-    <th>طريقة الدفع</th>
-    <th>التاريخ</th>
-    <th>الفاتورة</th>
-    <th>سجّلها الموظف</th>
-    <th>ملاحظات</th>
-    <th>الإجراءات</th>
-  </tr>
-</thead>
-          ${payments.length
-      ? payments.map(renderPaymentRow).join('')
-      : emptyRow('لا توجد مقبوضات', 8)}
+          <thead><tr>
+            <th>العميل</th><th>المبلغ</th><th>طريقة الدفع</th>
+            <th>التاريخ</th><th>الحالة</th><th>الموظف</th><th>الموافق</th><th>ملاحظات</th><th>الإجراءات</th>
+          </tr></thead>
+          <tbody id="dp-tbody">
+            ${list.length ? list.map(renderDirectPaymentRow).join('') : emptyRow('لا توجد دفعات', 9)}
+          </tbody>
         </table>
       </div>
-    </div>
-  `;
+    </div>`;
+}
+
+async function approveDirectPayment(id) {
+  if (!confirm('هل تريد اعتماد هذه الدفعة؟')) return;
+  try {
+    await API.approvePayment(id);
+    toast('تم اعتماد الدفعة ✅', 'success');
+    navigateTo('payments');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function rejectDirectPayment(id) {
+  const reason = prompt('سبب الرفض:');
+  if (!reason || !reason.trim()) { toast('سبب الرفض مطلوب', 'error'); return; }
+  try {
+    await API.rejectPayment(id, reason.trim());
+    toast('تم رفض الدفعة', 'success');
+    navigateTo('payments');
+  } catch (e) { toast(e.message, 'error'); }
 }
 async function deleteRecipientPayment(id) {
   const lines = [
@@ -3110,23 +3225,12 @@ async function savePayment() {
     toast('تم تسجيل المقبوضة بنجاح ✅', 'success');
     closeModal();
 
-    // Attach client name from cache
-    result.client_name = (window._clientsCache || []).find(c => String(c.id) === String(result.client_id))?.name || '—';
-    result.payment_method = document.getElementById('pay_method')?.value || 'cash';
-
     if (window._paymentInvoiceId) {
       window._paymentInvoiceId = null;
-      // Refresh the invoice row's paid/remaining amounts
       navigateTo('invoices');
     } else {
-      const tbody = document.getElementById('pay-tbody');
-      if (tbody) {
-        const empty = tbody.querySelector('td[colspan]');
-        if (empty) tbody.innerHTML = '';
-        tbody.insertAdjacentHTML('afterbegin', renderPaymentRow(result));
-        const sub = document.querySelector('.page-sub');
-        if (sub) sub.textContent = `${tbody.children.length} عملية مسجّلة`;
-      }
+      window._paymentsActiveTab = result.status === 'pending' ? 'pending' : 'approved';
+      navigateTo('payments');
     }
   } catch (e) {
     toast(e.message, 'error');
@@ -3138,24 +3242,18 @@ async function deletePayment(id) {
   const lines = [
     `المبلغ: ${p ? fmt(p.amount) + ' د.أ' : '—'}`,
     `العميل: ${p?.client_name || '—'}`,
-    'سيتم حذف هذه المقبوضة نهائياً من سجل المدفوعات',
+    'سيتم حذف هذه الدفعة نهائياً',
   ];
-  confirmDanger('حذف المقبوضة', lines, async () => {
-  const row = document.querySelector(`#pay-tbody tr[data-payment-id="${id}"]`);
-  if (row) { row.style.opacity = '0.4'; row.style.pointerEvents = 'none'; }
+  confirmDanger('حذف الدفعة', lines, async () => {
   try {
     await API.deletePayment(id);
     toast('تم الحذف ✅', 'success');
-    if (row) {
-      row.style.transition = 'opacity 0.25s';
-      row.style.opacity = '0';
-      setTimeout(() => row.remove(), 280);
-    }
+    closeModal();
+    navigateTo('payments');
   } catch (e) {
-    if (row) { row.style.opacity = '1'; row.style.pointerEvents = ''; }
     toast(e.message, 'error');
+    closeModal();
   }
-  closeModal();
   });
 }
 
@@ -3185,6 +3283,7 @@ function renderCheckRow(ch) {
 async function renderChecks(container) {
   let checks = [];
   try { checks = await API.getChecks() || []; } catch (e) { checks = []; }
+  window._checksCache = checks;
 
   const today = new Date().toISOString().split('T')[0];
   const pending = checks.filter(c => c.status === 'pending');
@@ -3697,7 +3796,7 @@ function openQuickAddSupplierInPurchase() {
         <input class="form-input" id="qs_phone" placeholder="اختياري">
       </div>
       <div style="display:flex;gap:10px;margin-top:8px">
-        <button class="btn btn-primary" style="flex:1" onclick="saveQuickSupplier()">إضافة</button>
+        <button class="btn btn-primary" style="flex:1" id="btn-save-quick-supplier" onclick="saveQuickSupplier()">إضافة</button>
         <button class="btn btn-ghost" onclick="document.getElementById('quick_supplier_overlay').remove()">إلغاء</button>
       </div>
     </div>
@@ -3707,13 +3806,14 @@ function openQuickAddSupplierInPurchase() {
 }
 
 async function saveQuickSupplier() {
+  const btn = document.getElementById('btn-save-quick-supplier');
   const name = document.getElementById('qs_name')?.value?.trim();
   if (!name) { toast('الاسم مطلوب', 'error'); return; }
   const phone = document.getElementById('qs_phone')?.value?.trim() || null;
+  _lockBtn(btn, 'جاري الإضافة...');
   try {
     const newSupplier = await API.createSupplier({ name, phone });
     document.getElementById('quick_supplier_overlay')?.remove();
-    // Add new supplier to cache and dropdown
     if (!window._suppliersCache) window._suppliersCache = [];
     window._suppliersCache.push(newSupplier);
     const sel = document.getElementById('pur_supplier');
@@ -3727,6 +3827,7 @@ async function saveQuickSupplier() {
     toast(`تم إضافة المورد "${name}" ✅`, 'success');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -3778,7 +3879,7 @@ async function openQuickAddProductInPurchase(rowIdx, prefix) {
         </div>
       </div>
       <div style="display:flex;gap:10px;margin-top:12px">
-        <button class="btn btn-primary" style="flex:1" onclick="saveQuickProduct('${rowIdx}', '${prefix}')">إضافة الصنف</button>
+        <button class="btn btn-primary" style="flex:1" id="btn-save-quick-product" onclick="saveQuickProduct('${rowIdx}', '${prefix}')">إضافة الصنف</button>
         <button class="btn btn-ghost" onclick="document.getElementById('quick_product_overlay').remove()">إلغاء</button>
       </div>
     </div>
@@ -3798,6 +3899,7 @@ function toggleNewCategoryFields() {
 }
 
 async function saveQuickProduct(rowIdx, prefix) {
+  const btn = document.getElementById('btn-save-quick-product');
   const name = document.getElementById('qp_name')?.value?.trim();
   if (!name) { toast('اسم الصنف مطلوب', 'error'); return; }
 
@@ -3810,6 +3912,7 @@ async function saveQuickProduct(rowIdx, prefix) {
     const catName = document.getElementById('qp_cat_name')?.value?.trim();
     if (!catName) { toast('اسم الفئة مطلوب', 'error'); return; }
     const catIcon = document.getElementById('qp_cat_icon')?.value?.trim() || '📦';
+    _lockBtn(btn, 'جاري الإضافة...');
     try {
       const newCat = await API.createWarehouseCategory({ name: catName, icon: catIcon });
       categoryId = newCat.id;
@@ -3818,12 +3921,14 @@ async function saveQuickProduct(rowIdx, prefix) {
       toast(`تم إنشاء الفئة "${catName}" ✅`, 'success');
     } catch (e) {
       toast(`خطأ في إنشاء الفئة: ${e.message}`, 'error');
+      _unlockBtn(btn);
       return;
     }
   }
 
   if (!categoryId) { toast('اختر فئة أو أنشئ فئة جديدة', 'error'); return; }
 
+  _lockBtn(btn, 'جاري الإضافة...');
   try {
     const newProduct = await API.createProduct({
       name,
@@ -3853,6 +3958,7 @@ async function saveQuickProduct(rowIdx, prefix) {
     toast(`تم إضافة الصنف "${name}" ✅`, 'success');
   } catch (e) {
     toast(`خطأ في إنشاء الصنف: ${e.message}`, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4008,6 +4114,7 @@ function calcEditPurchaseTotal() {
 
 async function saveEditPurchase() {
   if (window._savingEditPurchase) return;
+
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`epi_prod_${i}`);
@@ -4024,7 +4131,7 @@ async function saveEditPurchase() {
     }
   }
 
-  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
+  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); _unlockBtn(btn); return; }
 
   const supplierId = document.getElementById('epur_supplier').value || null;
 
@@ -4044,6 +4151,7 @@ async function saveEditPurchase() {
     toast(e.message, 'error');
   } finally {
     window._savingEditPurchase = false;
+
   }
 }
 
@@ -4416,8 +4524,6 @@ function productDetailValue(value) {
 
 
 
-
-
 function productDetailRow(label, value) {
   const v = productDetailValue(value);
   if (v === null) return '';
@@ -4767,8 +4873,9 @@ function openCategoryModal() {
 }
 
 async function saveCategory() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('cat_name').value.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.createWarehouseCategory({
@@ -4781,6 +4888,7 @@ async function saveCategory() {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -4955,8 +5063,9 @@ function openEditCategoryModal(id) {
 }
 
 async function saveEditCategory(id) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('ecat_name').value.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
 
   try {
     await API.updateWarehouseCategory(id, {
@@ -4969,6 +5078,7 @@ async function saveEditCategory(id) {
     navigateTo('warehouse');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 /* ── Add/Edit Product Modal ───────────────────────────────── */
@@ -5821,6 +5931,7 @@ function calcWarehouseTotal() {
 
 async function saveWarehouseInvoice() {
   if (window._savingWarehouseInvoice) return;
+
   const items = [];
   for (let i = 0; i < 50; i++) {
     const prodEl = document.getElementById(`wp_prod_${i}`);
@@ -5837,7 +5948,7 @@ async function saveWarehouseInvoice() {
     }
   }
 
-  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); return; }
+  if (!items.length) { toast('أضف صنفاً واحداً على الأقل', 'error'); _unlockBtn(btn); return; }
 
   window._savingWarehouseInvoice = true;
   try {
@@ -5857,6 +5968,7 @@ async function saveWarehouseInvoice() {
     toast(e.message, 'error');
   } finally {
     window._savingWarehouseInvoice = false;
+
   }
 }
 
@@ -6150,6 +6262,7 @@ function openUserModal() {
 }
 
 async function saveUser() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('nu_name').value.trim();
   const username = document.getElementById('nu_user').value.trim();
   const password = document.getElementById('nu_pass').value;
@@ -6158,11 +6271,13 @@ async function saveUser() {
 
   if (!name || !username || !password) {
     toast('يرجى ملء جميع الحقول', 'error');
+    _unlockBtn(btn);
     return;
   }
 
   if ((role === 'shop_manager' || role === 'shop_employee') && !shopIdVal) {
     toast('اختر المحل المرتبط بهذا الحساب', 'error');
+    _unlockBtn(btn);
     return;
   }
 
@@ -6177,6 +6292,7 @@ async function saveUser() {
     navigateTo('users');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -7295,7 +7411,7 @@ async function viewRecipientStatement(name) {
                   ${fmt(Math.abs(t.running_balance))} د.أ
                 </td>
                 <td style="padding:10px 12px">
-                  ${!isInv && isAdmin()
+                  ${!isInv && t.source === 'manual_recipient_payment' && isAdmin()
           ? `<button class="btn btn-danger btn-sm" onclick="deleteRecipientPayment('${t.id}', ${jsString(name)})">🗑️</button>`
           : ''}
                 </td>
@@ -7419,6 +7535,7 @@ function printRecipientStatement(name, data) {
 }
 
 function openRecipientPayment(name, clientId) {
+  window._editingRecipientPayment = null;
   const hasClient = name && String(name).trim();
   const clientOpts = (window._clientsCache || [])
     .map(c => `<option value="${c.id}" data-name="${escHtml(c.name)}" ${c.id == clientId ? 'selected' : ''}>${escHtml(c.name)}</option>`)
@@ -7478,6 +7595,23 @@ function openRecipientPayment(name, clientId) {
   `);
 }
 
+function openEditRecipientPayment(encoded) {
+  const payment = decodePayload(encoded);
+  if (!payment) { toast('تعذر تحميل المقبوضة', 'error'); return; }
+  openRecipientPayment(payment.recipient_name || '', payment.client_id || null);
+  window._editingRecipientPayment = payment;
+  const amount = document.getElementById('rp_amount');
+  const method = document.getElementById('rp_method');
+  const dateEl = document.getElementById('rp_date');
+  const notes = document.getElementById('rp_notes');
+  if (amount) amount.value = payment.amount || '';
+  if (method) method.value = payment.payment_method || 'cash';
+  if (dateEl) dateEl.value = String(payment.payment_date || '').split('T')[0];
+  if (notes) notes.value = payment.notes || '';
+  const title = document.querySelector('#global-modal .modal-title');
+  if (title) title.textContent = '✏️ تعديل المقبوضة';
+}
+
 async function saveRecipientPayment() {
   const name = document.getElementById('rp_name')?.value?.trim() || '';
   const clientId = document.getElementById('rp_client_id')?.value || null;
@@ -7490,15 +7624,23 @@ async function saveRecipientPayment() {
   if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
 
   try {
-    await API.createRecipientPayment({
+    const payload = {
       recipient_name: name,
       client_id: clientId ? Number(clientId) : null,
+      invoice_id: window._editingRecipientPayment?.invoice_id || null,
       amount,
       payment_method: document.getElementById('rp_method')?.value || 'cash',
       payment_date: document.getElementById('rp_date')?.value,
       notes: document.getElementById('rp_notes')?.value || null,
-    });
-    toast('تم تسجيل المقبوضة ✅', 'success');
+    };
+    if (window._editingRecipientPayment?.id) {
+      await API.updateRecipientPayment(window._editingRecipientPayment.id, payload);
+      toast('تم تعديل المقبوضة ✅', 'success');
+    } else {
+      await API.createRecipientPayment(payload);
+      toast('تم تسجيل المقبوضة ✅', 'success');
+    }
+    window._editingRecipientPayment = null;
     closeModal();
     window._clientsCache = null;
     navigateTo('payments');
@@ -7507,8 +7649,6 @@ async function saveRecipientPayment() {
     if (btn) { btn.disabled = false; btn.textContent = 'تسجيل المقبوضة'; }
   }
 }
-
-
 
 async function viewSupplierStatement(id, name) {
   openModal(`
@@ -7648,6 +7788,7 @@ async function saveSupplierPayment(supplierId, supplierName) {
   const amount = parseFloat(document.getElementById('sp_amount')?.value);
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
   window._savingSupplierPayment = true;
+
   try {
     await API.addSupplierPayment(supplierId, {
       amount,
@@ -7660,6 +7801,7 @@ async function saveSupplierPayment(supplierId, supplierName) {
     viewSupplierStatement(supplierId, supplierName);
   } catch (e) { toast(e.message, 'error'); }
   finally { window._savingSupplierPayment = false; }
+
 }
 
 async function deleteSupPayment(paymentId, supplierId, supplierName) {
@@ -7777,10 +7919,11 @@ function openExpenseModal() {
 }
 
 async function saveExpense() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const amount = parseFloat(document.getElementById('exp_amount')?.value);
   const description = document.getElementById('exp_desc')?.value?.trim();
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (!description) { toast('الوصف مطلوب', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
+  if (!description) { toast('الوصف مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.addCashboxExpense({
       amount,
@@ -7790,7 +7933,7 @@ async function saveExpense() {
     toast('تم تسجيل المصروف ✅', 'success');
     closeModal();
     navigateTo('cashbox');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openAddSupplierModal() {
@@ -7815,14 +7958,15 @@ function openAddSupplierModal() {
 }
 
 async function saveNewSupplier() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('ns_name')?.value?.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.createSupplier({ name, phone: document.getElementById('ns_phone')?.value || null });
     toast('تم إضافة المورد ✅', 'success');
     closeModal();
     navigateTo('purchases');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openEditSupplierModal(s) {
@@ -7847,15 +7991,16 @@ function openEditSupplierModal(s) {
 }
 
 async function saveEditSupplier(id) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const name = document.getElementById('es_name')?.value?.trim();
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
   try {
     await API.updateSupplier(id, { name, phone: document.getElementById('es_phone')?.value || null });
     toast('تم تحديث المورد ✅', 'success');
     window._suppliersCache = null;
     closeModal();
     navigateTo('purchases');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 function openEditSupplierById(id) {
@@ -7880,6 +8025,7 @@ function applyAdvancesToSalaries(salaries, advances) {
   const result = (salaries || []).map(s => ({
     ...s,
     advance_applied: 0,
+    cash_paid: s.status === 'paid' ? Number(s.salary_amount || 0) : 0,
     effective_remaining: s.status === 'paid' ? 0 : Number(s.salary_amount || 0),
     effective_status: s.status === 'paid' ? 'paid' : 'pending',
   }));
@@ -7892,7 +8038,7 @@ function applyAdvancesToSalaries(salaries, advances) {
   });
 
   result
-    .filter(s => s.status !== 'paid' && s.employee_user_id)
+    .filter(s => s.employee_user_id)
     .sort((a, b) => String(a.salary_month || '').localeCompare(String(b.salary_month || '')) || Number(a.id) - Number(b.id))
     .forEach(s => {
       const key = String(s.employee_user_id);
@@ -7900,12 +8046,66 @@ function applyAdvancesToSalaries(salaries, advances) {
       const amount = Number(s.salary_amount || 0);
       const applied = Math.min(available, amount);
       s.advance_applied = applied;
-      s.effective_remaining = Math.max(amount - applied, 0);
-      s.effective_status = applied >= amount ? 'covered_by_advance' : applied > 0 ? 'partial' : 'pending';
+      s.cash_paid = s.status === 'paid' ? Math.max(amount - applied, 0) : 0;
+      s.effective_remaining = s.status === 'paid' ? 0 : Math.max(amount - applied, 0);
+      s.effective_status = s.status === 'paid'
+        ? 'paid'
+        : applied >= amount ? 'covered_by_advance' : applied > 0 ? 'partial' : 'pending';
       balances.set(key, Math.max(available - applied, 0));
     });
 
   return result;
+}
+
+function _buildExpenseTableRows(list) {
+  if (!list.length) return emptyRow('لا توجد مصاريف', 6);
+  return list.map(e => `
+    <tr>
+      <td>${fmtDate(e.expense_date)}</td>
+      <td><strong>${escHtml(e.name || e.description || '—')}</strong></td>
+      <td>${escHtml(e.category || '—')}</td>
+      <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
+      <td>${escHtml(e.notes || '—')}</td>
+      <td><div style="display:flex;gap:6px">
+        ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editExpenseById('${e.id}')">✏️</button>` : ''}
+        ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense('${e.id}')">🗑️</button>` : ''}
+      </div></td>
+    </tr>
+  `).join('');
+}
+
+function _buildExpenseCategorySection(id, list, label, color) {
+  const total = list.reduce((s, e) => s + Number(e.amount || 0), 0);
+  return `
+    <div id="${id}" style="display:none">
+      <div class="metrics-grid" style="margin-bottom:14px">
+        <div class="metric-card ${color}">
+          <div class="metric-icon">📋</div>
+          <div class="metric-label">إجمالي ${label}</div>
+          <div class="metric-value">${fmt(total)}</div>
+          <div class="metric-sub">دينار أردني</div>
+        </div>
+        <div class="metric-card blue">
+          <div class="metric-icon">#</div>
+          <div class="metric-label">عدد العمليات</div>
+          <div class="metric-value">${list.length}</div>
+          <div class="metric-sub">عملية</div>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th><th>اسم المصروف</th>
+                <th>التصنيف</th><th>المبلغ</th><th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>${_buildExpenseTableRows(list)}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
 }
 
 async function renderExpenses(container) {
@@ -7930,9 +8130,19 @@ async function renderExpenses(container) {
   window._advancesCache = advances || [];
   window._warehouseRentsCache = warehouseRents || [];
 
-  const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const fixedExp  = expenses.filter(e => e.expense_type === 'fixed');
+  const dailyExp  = expenses.filter(e => e.expense_type === 'daily' || (!e.expense_type));
+  const monthlyExp = expenses.filter(e => e.expense_type === 'monthly');
+  const otherExp  = expenses.filter(e => e.expense_type === 'other');
+
+  const totalFixed   = fixedExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalDaily   = dailyExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalMonthly = monthlyExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalOther   = otherExp.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalExpenses = totalFixed + totalDaily + totalMonthly + totalOther;
   const totalSalaries = salaries.reduce((s, e) => s + Number(e.salary_amount || 0), 0);
   const totalAdvances = advances.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const totalSalaryCash = salaries.reduce((s, e) => s + Number(e.cash_paid || 0), 0);
 
   container.innerHTML = `
     <div class="page-header">
@@ -7949,8 +8159,26 @@ async function renderExpenses(container) {
 
     <div class="metrics-grid" style="margin-bottom:18px">
       <div class="metric-card red">
-        <div class="metric-icon">📋</div>
-        <div class="metric-label">إجمالي المصاريف</div>
+        <div class="metric-icon">📌</div>
+        <div class="metric-label">مصاريف ثابتة</div>
+        <div class="metric-value">${fmt(totalFixed)}</div>
+        <div class="metric-sub">${fixedExp.length} عملية</div>
+      </div>
+      <div class="metric-card amber">
+        <div class="metric-icon">📅</div>
+        <div class="metric-label">مصاريف يومية</div>
+        <div class="metric-value">${fmt(totalDaily)}</div>
+        <div class="metric-sub">${dailyExp.length} عملية</div>
+      </div>
+      <div class="metric-card red">
+        <div class="metric-icon">🗓️</div>
+        <div class="metric-label">مصاريف شهرية</div>
+        <div class="metric-value">${fmt(totalMonthly)}</div>
+        <div class="metric-sub">${monthlyExp.length} عملية</div>
+      </div>
+      <div class="metric-card blue">
+        <div class="metric-icon">💸</div>
+        <div class="metric-label">إجمالي كل المصاريف</div>
         <div class="metric-value">${fmt(totalExpenses)}</div>
         <div class="metric-sub">دينار أردني</div>
       </div>
@@ -7969,16 +8197,28 @@ async function renderExpenses(container) {
       <div class="metric-card blue">
         <div class="metric-icon">💸</div>
         <div class="metric-label">إجمالي الصرف</div>
-        <div class="metric-value">${fmt(totalExpenses + totalSalaries + totalAdvances)}</div>
+        <div class="metric-value">${fmt(totalExpenses + totalSalaryCash + totalAdvances)}</div>
         <div class="metric-sub">دينار أردني</div>
       </div>
     </div>
 
     <div class="tabs" style="margin-bottom:16px">
-      <button class="tab-btn active" id="exp-tab-expenses"
-              onclick="switchExpensesTab('expenses',this)">
-        المصاريف (${expenses.length})
+      <button class="tab-btn active" id="exp-tab-fixed"
+              onclick="switchExpensesTab('fixed',this)">
+        📌 ثابت (${fixedExp.length})
       </button>
+      <button class="tab-btn" id="exp-tab-daily"
+              onclick="switchExpensesTab('daily',this)">
+        📅 يومي (${dailyExp.length})
+      </button>
+      <button class="tab-btn" id="exp-tab-monthly"
+              onclick="switchExpensesTab('monthly',this)">
+        🗓️ شهري (${monthlyExp.length})
+      </button>
+      ${otherExp.length ? `<button class="tab-btn" id="exp-tab-other"
+              onclick="switchExpensesTab('other',this)">
+        📎 آخر (${otherExp.length})
+      </button>` : ''}
       <button class="tab-btn" id="exp-tab-salaries"
               onclick="switchExpensesTab('salaries',this)">
         الرواتب (${salaries.length})
@@ -7993,49 +8233,31 @@ async function renderExpenses(container) {
       </button>
     </div>
 
-    <!-- المصاريف -->
-    <div id="exp-section-expenses" class="card" style="padding:0;overflow:hidden">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>التاريخ</th><th>اسم المصروف</th><th>النوع</th>
-              <th>التصنيف</th><th>المبلغ</th><th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${expenses.length ? expenses.map(e => `
-              <tr>
-                <td>${fmtDate(e.expense_date)}</td>
-                <td><strong>${escHtml(e.name || e.description || '—')}</strong></td>
-                <td>${escHtml(e.expense_type || 'daily')}</td>
-                <td>${escHtml(e.category || '—')}</td>
-                <td style="font-weight:800;color:var(--rd)">${fmt(e.amount)} د.أ</td>
-                <td>${escHtml(e.notes || '—')}</td>
-                <td><div style="display:flex;gap:6px">
-                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editExpenseById('${e.id}')">✏️</button>` : ''}
-                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteExpense('${e.id}')">🗑️</button>` : ''}
-                </div></td>
-              </tr>
-            `).join('') : emptyRow('لا توجد مصاريف', 7)}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <!-- مصاريف ثابتة -->
+    ${_buildExpenseCategorySection('exp-section-fixed', fixedExp, 'المصاريف الثابتة', 'red')}
+
+    <!-- مصاريف يومية -->
+    ${_buildExpenseCategorySection('exp-section-daily', dailyExp, 'المصاريف اليومية', 'amber')}
+
+    <!-- مصاريف شهرية -->
+    ${_buildExpenseCategorySection('exp-section-monthly', monthlyExp, 'المصاريف الشهرية', 'red')}
+
+    <!-- مصاريف أخرى -->
+    ${otherExp.length ? _buildExpenseCategorySection('exp-section-other', otherExp, 'مصاريف أخرى', 'blue') : ''}
 
     <!-- الرواتب -->
-    <div id="exp-section-salaries" class="card" style="padding:0;overflow:hidden;display:none">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>الشهر</th><th>اسم الموظف</th><th>الراتب</th>
-              <th>تاريخ الدفع</th><th>الحالة</th><th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${salaries.length ? salaries.map(s => {
-        // Carried advance balance allocated to this salary (not month-limited).
+    <div id="exp-section-salaries" style="display:none">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الشهر</th><th>اسم الموظف</th><th>الراتب</th>
+                <th>تاريخ الدفع</th><th>الحالة</th><th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${salaries.length ? salaries.map(s => {
         const advSum = Number(s.advance_applied || 0);
         const remaining = Number(s.effective_remaining || 0);
         const isEffectivelyPaid = s.status === 'paid' || s.effective_status === 'covered_by_advance';
@@ -8061,24 +8283,25 @@ async function renderExpenses(container) {
                 </div></td>
               </tr>`;
       }).join('') : emptyRow('لا توجد رواتب', 7)}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <!-- السلف -->
-
-    <div id="exp-section-advances" class="card" style="padding:0;overflow:hidden;display:none">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>التاريخ</th><th>اسم الموظف</th><th>المبلغ</th>
-              <th>النوع</th><th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${advances.length ? advances.map(a => `
+    <div id="exp-section-advances" style="display:none">
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>التاريخ</th><th>اسم الموظف</th><th>المبلغ</th>
+                <th>النوع</th><th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${advances.length ? advances.map(a => `
               <tr>
                 <td>${fmtDate(a.advance_date)}</td>
                 <td><strong>${escHtml(a.employee_name || '—')}</strong></td>
@@ -8091,27 +8314,29 @@ async function renderExpenses(container) {
                 </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد سلف', 6)}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
     <!-- إيجار المستودع -->
-    <div id="exp-section-warehouse_rent" class="card" style="padding:0;overflow:hidden;display:none">
-      <div style="display:flex; justify-content:flex-end; padding:12px">
+    <div id="exp-section-warehouse_rent" style="display:none">
+      <div style="display:flex; justify-content:flex-end; padding:12px 0">
         <button class="btn btn-primary btn-sm" onclick="openWarehouseRentModal()">+ سجل إيجار جديد</button>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>الاسم</th><th>المبلغ الشهري</th><th>العملة</th>
-              <th>تاريخ البدء</th><th>الأشهر المدفوعة</th><th>الأشهر غير المدفوعة</th>
-              <th>ملاحظات</th><th>إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${warehouseRents.length ? warehouseRents.map(r => `
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>الاسم</th><th>المبلغ الشهري</th><th>العملة</th>
+                <th>تاريخ البدء</th><th>الأشهر المدفوعة</th><th>الأشهر غير المدفوعة</th>
+                <th>ملاحظات</th><th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${warehouseRents.length ? warehouseRents.map(r => `
               <tr>
                 <td><strong>${escHtml(r.name)}</strong></td>
                 <td style="font-weight:800;color:var(--rd)">${fmt(r.monthly_amount)}</td>
@@ -8127,15 +8352,21 @@ async function renderExpenses(container) {
                 </div></td>
               </tr>
             `).join('') : emptyRow('لا توجد سجلات إيجار', 8)}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   `;
+
+  // Show the first tab (fixed) by default
+  const firstSection = document.getElementById('exp-section-fixed');
+  if (firstSection) firstSection.style.display = '';
 }
 
 function switchExpensesTab(tab, btn) {
-  ['expenses', 'salaries', 'advances', 'warehouse_rent'].forEach(t => {
+  const allTabs = ['fixed', 'daily', 'monthly', 'other', 'salaries', 'advances', 'warehouse_rent'];
+  allTabs.forEach(t => {
     const section = document.getElementById(`exp-section-${t}`);
     const tabBtn = document.getElementById(`exp-tab-${t}`);
     if (section) section.style.display = t === tab ? '' : 'none';
@@ -8145,11 +8376,12 @@ function switchExpensesTab(tab, btn) {
 
 async function deleteAdvanceFromExpenses(id) {
   if (!confirm('حذف هذه السلفة؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteAdvance(id);
     toast('تم الحذف ✅', 'success');
     navigateTo('expenses');
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = '🗑️'; } }
 }
 
 // ── Edit by id (from cached lists) ───────────────────────────
@@ -8292,18 +8524,20 @@ function openWarehouseRentModal(rentId = null) {
 }
 
 async function saveWarehouseRent(rentId) {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
+  rentId = normalizeOptionalId(rentId);
   const name = document.getElementById('wr_name')?.value?.trim();
   const monthly_amount = parseFloat(document.getElementById('wr_amount')?.value);
   const currency = document.getElementById('wr_currency')?.value || 'JOD';
-  const startMonthVal = document.getElementById('wr_start_month')?.value; // YYYY-MM
+  const startMonthVal = document.getElementById('wr_start_month')?.value;
   const notes = document.getElementById('wr_notes')?.value?.trim() || null;
 
-  if (!name) { toast('الاسم مطلوب', 'error'); return; }
-  if (!monthly_amount || monthly_amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!name) { toast('الاسم مطلوب', 'error'); _unlockBtn(btn); return; }
+  if (!monthly_amount || monthly_amount <= 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btn); return; }
 
   const payload = { name, monthly_amount, currency, notes };
   if (!rentId) {
-    if (!startMonthVal) { toast('شهر البدء مطلوب', 'error'); return; }
+    if (!startMonthVal) { toast('شهر البدء مطلوب', 'error'); _unlockBtn(btn); return; }
     payload.start_month = `${startMonthVal}-01`;
   }
 
@@ -8318,6 +8552,7 @@ async function saveWarehouseRent(rentId) {
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -8960,12 +9195,14 @@ function openAdvanceModal(userId, employeeName) {
 
 async function deleteExpense(id) {
   if (!confirm('حذف هذا المصروف؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteExpense(id);
     toast('تم حذف المصروف ✅', 'success');
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
   }
 }
 function openAddEmployeeModal() {
@@ -9172,7 +9409,7 @@ async function renderEmployees(container) {
               <div style="font-size:11px;color:var(--tx3)">${roleLabel(emp.role)}</div>
             </div>
             <button class="btn btn-ghost btn-sm"
-                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
+                    onclick="openEditUserModal(${jsString(JSON.stringify({ id: emp.id, full_name: emp.full_name, role: emp.role, client_id: emp.client_id || null, shop_id: emp.shop_id || null, permissions: emp.permissions ?? null, base_salary: emp.baseSalary || 0 }))})">✏️</button>
             ${emp.id !== getUser()?.id
       ? `<button class="btn btn-danger btn-sm"
                    onclick="deleteEmployee('${emp.id}', ${jsString(emp.full_name)})">🗑️</button>`
@@ -9289,8 +9526,6 @@ async function saveSalaryForEmployee(userId, employeeName) {
     if (btn) { btn.disabled = false; btn.textContent = 'حفظ الراتب'; }
   }
 }
-
-
 
 async function deleteEmployee(id, name) {
   if (!confirm(`حذف الموظف "${name}"؟`)) return;
@@ -9666,26 +9901,30 @@ function filterStatementTx(type, btn) {
 }
 async function deleteSalary(id) {
   if (!confirm('حذف هذا الراتب؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteSalary(id);
     toast('تم حذف الراتب ✅', 'success');
     navigateTo('expenses');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
   }
 }
 
 async function deleteSalaryFromStatement(id, userId, employeeName) {
   if (!confirm('حذف هذا الراتب؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteSalary(id);
     toast('تم حذف الراتب ✅', 'success');
     viewEmployeeStatement(userId, employeeName);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); if (btn) { btn.disabled = false; btn.textContent = '🗑️'; } }
 }
 
 async function deleteAdvanceFromStatement(id, userId, employeeName) {
   if (!confirm('حذف هذه السلفة؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
   try {
     await API.deleteAdvance(id);
     toast('تم حذف السلفة ✅', 'success');
@@ -10227,18 +10466,21 @@ function openChinaInvestorModal(investorId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestor('${investorId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-investor" onclick="saveChinaInvestor('${investorId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaInvestor(investorId) {
+  const btn = document.getElementById('btn-save-china-investor');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  investorId = normalizeOptionalId(investorId);
   const name = document.getElementById('ci_name')?.value?.trim();
   const phone = document.getElementById('ci_phone')?.value?.trim() || null;
   const notes = document.getElementById('ci_notes')?.value?.trim() || null;
 
-  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     if (investorId) {
@@ -10251,6 +10493,7 @@ async function saveChinaInvestor(investorId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10354,19 +10597,21 @@ function openChinaInvestorTransactionModal(investorId) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaInvestorTransaction('${investorId}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-inv-tx" onclick="saveChinaInvestorTransaction('${investorId}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaInvestorTransaction(investorId) {
+  const btn = document.getElementById('btn-save-china-inv-tx');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
   const type = document.getElementById('cit_type')?.value;
   const amount = parseFloat(document.getElementById('cit_amount')?.value);
   const trans_date = document.getElementById('cit_date')?.value;
   const notes = document.getElementById('cit_notes')?.value?.trim() || null;
 
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     await API.createChinaInvestorTransaction(investorId, { type, amount, trans_date, notes });
@@ -10377,6 +10622,7 @@ async function saveChinaInvestorTransaction(investorId) {
     openChinaInvestorDetails(investorId);
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10469,18 +10715,21 @@ function openChinaSupplierModal(supplierId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSupplier('${supplierId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-supplier" onclick="saveChinaSupplier('${supplierId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaSupplier(supplierId) {
+  const btn = document.getElementById('btn-save-china-supplier');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  supplierId = normalizeOptionalId(supplierId);
   const name = document.getElementById('cs_name')?.value?.trim();
   const phone = document.getElementById('cs_phone')?.value?.trim() || null;
   const notes = document.getElementById('cs_notes')?.value?.trim() || null;
 
-  if (!name) { toast('اسم المورد مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المورد مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
   try {
     if (supplierId) {
@@ -10494,6 +10743,7 @@ async function saveChinaSupplier(supplierId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10577,17 +10827,16 @@ async function openChinaSupplierStatement(supplierId) {
       <div style="font-weight:700;margin-bottom:6px">💸 الدفعات (${payments.length})</div>
       <div class="table-wrap" style="margin-bottom:14px">
         <table>
-          <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+          <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
           <tbody>
             ${payments.length ? payments.map(p => `
               <tr>
                 <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
                 <td style="font-weight:700">${fmt(p.amount)}</td>
                 <td>${chinaCurrencyLabel(p.currency)}</td>
-                <td style="color:var(--rd)">${fmt(p.amount_jod || p.amount)}</td>
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               </tr>
-            `).join('') : `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+            `).join('') : `<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -10595,7 +10844,7 @@ async function openChinaSupplierStatement(supplierId) {
       <div style="font-weight:700;margin-bottom:6px">📦 المشتريات / العروض (${purchases.length})</div>
       <div class="table-wrap" style="margin-bottom:14px">
         <table>
-          <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+          <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
           <tbody>
             ${purchases.length ? purchases.map(p => `
               <tr>
@@ -10604,10 +10853,9 @@ async function openChinaSupplierStatement(supplierId) {
                 <td>${fmt(p.quantity || 0)}</td>
                 <td style="font-weight:700">${fmt(p.amount)}</td>
                 <td>${chinaCurrencyLabel(p.currency)}</td>
-                <td>${fmt(p.amount_jod || p.amount)}</td>
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               </tr>
-            `).join('') : `<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+            `).join('') : `<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -10654,14 +10902,13 @@ function printChinaSupplierStatement(supplierId) {
 
       <h3>الدفعات</h3>
       <table>
-        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
         <tbody>
           ${payments.map(p => `
             <tr>
               <td>${fmtDate(p.payment_date)}</td>
               <td>${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td>${fmt(p.amount_jod || p.amount)}</td>
               <td>${escHtml(p.notes || '—')}</td>
             </tr>
           `).join('')}
@@ -10670,7 +10917,7 @@ function printChinaSupplierStatement(supplierId) {
 
       <h3>المشتريات / العروض</h3>
       <table>
-        <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+        <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
         <tbody>
           ${purchases.map(p => `
             <tr>
@@ -10679,7 +10926,6 @@ function printChinaSupplierStatement(supplierId) {
               <td>${fmt(p.quantity || 0)}</td>
               <td>${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td>${fmt(p.amount_jod || p.amount)}</td>
               <td>${escHtml(p.notes || '—')}</td>
             </tr>
           `).join('')}
@@ -10706,7 +10952,7 @@ async function renderChinaPayments(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>المورد</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th><th>أضيف بواسطة</th><th></th></tr>
+          <tr><th>التاريخ</th><th>المورد</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th><th>أضيف بواسطة</th><th></th></tr>
         </thead>
         <tbody>
           ${payments.length ? payments.map(p => `
@@ -10715,7 +10961,6 @@ async function renderChinaPayments(container) {
               <td><strong>${escHtml(p.supplier_name)}</strong></td>
               <td style="color:var(--rd);font-weight:700">${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td style="font-size:12px;color:var(--tx3)">${fmt(p.amount_jod || p.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.created_by_name || '—')}</td>
               <td>
@@ -10725,7 +10970,7 @@ async function renderChinaPayments(container) {
                 </div>
               </td>
             </tr>
-          `).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+          `).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -10762,15 +11007,10 @@ function openChinaPaymentModal(paymentId = null) {
       </div>
       <div class="form-group">
         <label class="form-label">العملة</label>
-        <select class="form-select" id="cp_currency" onchange="chinaOnCurrencyChange('cp_currency','cp_rate_group')">
+        <select class="form-select" id="cp_currency">
           ${chinaCurrencyOptions(currency)}
         </select>
       </div>
-    </div>
-
-    <div class="form-group" id="cp_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
-      <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
-      <input class="form-input" id="cp_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${p?.exchange_rate ?? ''}">
     </div>
 
     <div class="form-group">
@@ -10784,27 +11024,28 @@ function openChinaPaymentModal(paymentId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPayment('${paymentId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-payment" onclick="saveChinaPayment('${paymentId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaPayment(paymentId) {
+  const btn = document.getElementById('btn-save-china-payment');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  paymentId = normalizeOptionalId(paymentId);
   const supplier_idRaw = document.getElementById('cp_supplier_id')?.value;
-  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
+  const supplier_id = normalizeOptionalId(supplier_idRaw);
   const supplier_name = document.getElementById('cp_supplier')?.value?.trim();
   const amount = parseFloat(document.getElementById('cp_amount')?.value);
   const currency = document.getElementById('cp_currency')?.value || 'JOD';
-  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cp_rate')?.value);
   const payment_date = document.getElementById('cp_date')?.value;
   const notes = document.getElementById('cp_notes')?.value?.trim() || null;
 
-  if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
-  const payload = { supplier_id, supplier_name, amount, currency, exchange_rate, payment_date, notes };
+  const payload = { supplier_id, supplier_name, amount, currency, payment_date, notes };
 
   try {
     if (paymentId) {
@@ -10817,6 +11058,7 @@ async function saveChinaPayment(paymentId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -10847,7 +11089,7 @@ async function renderChinaPurchases(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>المورد</th><th>ملاحظات</th><th></th></tr>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>المورد</th><th>ملاحظات</th><th></th></tr>
         </thead>
         <tbody>
           ${purchases.length ? purchases.map(p => `
@@ -10857,7 +11099,6 @@ async function renderChinaPurchases(container) {
               <td>${fmt(p.quantity || 0)}</td>
               <td style="font-weight:700">${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td style="font-size:12px;color:var(--tx3)">${fmt(p.amount_jod || p.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.supplier_name || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               <td>
@@ -10867,7 +11108,7 @@ async function renderChinaPurchases(container) {
                 </div>
               </td>
             </tr>
-          `).join('') : `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+          `).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -10904,13 +11145,9 @@ function openChinaPurchaseModal(purchaseId = null) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">العملة</label>
-        <select class="form-select" id="cpu_currency" onchange="chinaOnCurrencyChange('cpu_currency','cpu_rate_group')">
+        <select class="form-select" id="cpu_currency">
           ${chinaCurrencyOptions(currency)}
         </select>
-      </div>
-      <div class="form-group" id="cpu_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
-        <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
-        <input class="form-input" id="cpu_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${p?.exchange_rate ?? ''}">
       </div>
     </div>
 
@@ -10938,29 +11175,30 @@ function openChinaPurchaseModal(purchaseId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaPurchase('${purchaseId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-purchase" onclick="saveChinaPurchase('${purchaseId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaPurchase(purchaseId) {
+  const btn = document.getElementById('btn-save-china-purchase');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  purchaseId = normalizeOptionalId(purchaseId);
   const item_name = document.getElementById('cpu_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('cpu_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('cpu_amount')?.value);
   const currency = document.getElementById('cpu_currency')?.value || 'JOD';
-  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cpu_rate')?.value);
   const supplier_idRaw = document.getElementById('cpu_supplier_id')?.value;
-  const supplier_id = supplier_idRaw ? parseInt(supplier_idRaw) : null;
+  const supplier_id = normalizeOptionalId(supplier_idRaw);
   const supplier_name = document.getElementById('cpu_supplier')?.value?.trim() || null;
   const purchase_date = document.getElementById('cpu_date')?.value;
   const notes = document.getElementById('cpu_notes')?.value?.trim() || null;
 
-  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
-  const payload = { item_name, quantity, amount, currency, exchange_rate, supplier_id, supplier_name, purchase_date, notes };
+  const payload = { item_name, quantity, amount, currency, supplier_id, supplier_name, purchase_date, notes };
 
   try {
     if (purchaseId) {
@@ -10973,6 +11211,7 @@ async function saveChinaPurchase(purchaseId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -11003,7 +11242,7 @@ async function renderChinaSales(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>المشتري</th><th>ملاحظات</th><th></th></tr>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>المشتري</th><th>ملاحظات</th><th></th></tr>
         </thead>
         <tbody>
           ${sales.length ? sales.map(s => `
@@ -11013,7 +11252,6 @@ async function renderChinaSales(container) {
               <td>${fmt(s.quantity || 0)}</td>
               <td style="font-weight:700;color:var(--gr)">${fmt(s.amount)}</td>
               <td>${chinaCurrencyLabel(s.currency)}</td>
-              <td style="font-size:12px;color:var(--tx3)">${fmt(s.amount_jod || s.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.buyer_name || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.notes || '—')}</td>
               <td>
@@ -11023,7 +11261,7 @@ async function renderChinaSales(container) {
                 </div>
               </td>
             </tr>
-          `).join('') : `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مبيعات</td></tr>`}
+          `).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مبيعات</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -11060,13 +11298,9 @@ function openChinaSaleModal(saleId = null) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">العملة</label>
-        <select class="form-select" id="csa_currency" onchange="chinaOnCurrencyChange('csa_currency','csa_rate_group')">
+        <select class="form-select" id="csa_currency">
           ${chinaCurrencyOptions(currency)}
         </select>
-      </div>
-      <div class="form-group" id="csa_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
-        <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
-        <input class="form-input" id="csa_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${s?.exchange_rate ?? ''}">
       </div>
     </div>
 
@@ -11087,27 +11321,28 @@ function openChinaSaleModal(saleId = null) {
     </div>
 
     <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-primary" style="flex:1" onclick="saveChinaSale('${saleId ?? 'null'}')">حفظ</button>
+      <button class="btn btn-primary" style="flex:1" id="btn-save-china-sale" onclick="saveChinaSale('${saleId ?? 'null'}')">حفظ</button>
       <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
     </div>
   `);
 }
 
 async function saveChinaSale(saleId) {
+  const btn = document.getElementById('btn-save-china-sale');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+  saleId = normalizeOptionalId(saleId);
   const item_name = document.getElementById('csa_item')?.value?.trim();
   const quantity = parseFloat(document.getElementById('csa_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('csa_amount')?.value);
   const currency = document.getElementById('csa_currency')?.value || 'JOD';
-  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('csa_rate')?.value);
   const buyer_name = document.getElementById('csa_buyer')?.value?.trim() || null;
   const sale_date = document.getElementById('csa_date')?.value;
   const notes = document.getElementById('csa_notes')?.value?.trim() || null;
 
-  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); return; }
-  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); return; }
+  if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
-  const payload = { item_name, quantity, amount, currency, exchange_rate, buyer_name, sale_date, notes };
+  const payload = { item_name, quantity, amount, currency, buyer_name, sale_date, notes };
 
   try {
     if (saleId) {
@@ -11120,6 +11355,7 @@ async function saveChinaSale(saleId) {
     navigateTo('china');
   } catch (e) {
     toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
   }
 }
 
@@ -11333,7 +11569,7 @@ async function openCategoryInvestmentsModal(categoryId) {
                   ${fmt(remaining)} د.أ
                 </td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap;min-width:80px">
-                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}')" title="حفظ">💾</button>
+                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}', this)" title="حفظ">💾</button>
                   ${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm('${categoryId}', '${inv.id}', '${s.investor_id}')" title="حذف">🗑️</button>` : ''}
                 </td>
               </tr>`;
@@ -11371,12 +11607,13 @@ function openAddInvestmentForm(categoryId) {
         <label class="form-label" style="font-size:12px">المدفوع (د.أ)</label>
         <input class="form-input" type="number" step="0.001" min="0" id="new_inv_paid" value="0" style="font-size:13px;border-color:var(--gr)">
       </div>
-      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null)" style="align-self:flex-end">إضافة</button>
+      <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null, this)" style="align-self:flex-end">إضافة</button>
     </div>
   `;
 }
 
-async function saveCategoryInvestment(categoryId, investorId) {
+async function saveCategoryInvestment(categoryId, investorId, btnEl) {
+  _lockBtn(btnEl, 'جاري...');
   let id = investorId;
   let amount, paid_amount;
 
@@ -11387,10 +11624,10 @@ async function saveCategoryInvestment(categoryId, investorId) {
     id = document.getElementById('new_inv_investor')?.value;
     amount = parseFloat(document.getElementById('new_inv_amount')?.value || 0);
     paid_amount = parseFloat(document.getElementById('new_inv_paid')?.value || 0);
-    if (!id) { toast('اختر مستثمراً', 'error'); return; }
+    if (!id) { toast('اختر مستثمراً', 'error'); _unlockBtn(btnEl); return; }
   }
 
-  if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); return; }
+  if (isNaN(amount) || amount < 0) { toast('المبلغ غير صحيح', 'error'); _unlockBtn(btnEl); return; }
 
   try {
     await API.setCategoryInvestment(categoryId, { investor_id: Number(id), amount, paid_amount });
@@ -11402,6 +11639,7 @@ async function saveCategoryInvestment(categoryId, investorId) {
     }
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btnEl);
   }
 }
 
@@ -11602,19 +11840,20 @@ function removeInvContribRow(idx) {
 }
 
 async function saveInvestorFull() {
+  const btn = _modalBtn(); _lockBtn(btn, 'جاري الحفظ...');
   const investorId = window._invEditId || null;
   const name = document.getElementById('wi_name')?.value?.trim();
   const phone = document.getElementById('wi_phone')?.value?.trim() || null;
   const notes = document.getElementById('wi_notes')?.value?.trim() || null;
-  if (!name) { toast('اسم المستثمر مطلوب', 'error'); return; }
+  if (!name) { toast('اسم المستثمر مطلوب', 'error'); _unlockBtn(btn); return; }
 
   const amount = parseFloat(document.getElementById('wi_total_contribution')?.value || 0);
   const paidAmount = parseFloat(document.getElementById('wi_total_paid')?.value || 0);
-  if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); return; }
-  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); return; }
+  if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); _unlockBtn(btn); return; }
+  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); _unlockBtn(btn); return; }
   const selectedCategoryIds = [...document.querySelectorAll('#inv_category_checks .inv-category-check:checked')]
     .map(el => Number(el.value));
-  if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); return; }
+  if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); _unlockBtn(btn); return; }
 
   try {
     let finalId = investorId;
@@ -11642,6 +11881,7 @@ async function saveInvestorFull() {
     navigateTo('investors');
   } catch (e) {
     toast(e.message, 'error');
+    _unlockBtn(btn);
   }
 }
 
@@ -11746,4 +11986,528 @@ async function openInvestorDetailsModal(investorId) {
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
   `, '700px');
+}
+
+/* ════════════════════════════════════════════════════════════
+   الأمانات الشخصية — تسجيل دفعات ومقبوضات للأشخاص
+   ════════════════════════════════════════════════════════════ */
+
+window._personalTab = window._personalTab || 'people';
+
+async function renderPersonal(container) {
+  const tab = window._personalTab || 'people';
+
+  container.innerHTML = `
+    <div class="page-header">
+      <div>
+        <div class="page-title">🤝 الأمانات الشخصية</div>
+        <div class="page-sub">إدارة الأمانات — تسجيل دفعات ومقبوضات للأشخاص</div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="openPersonalPersonModal()">+ شخص جديد</button>
+        <button class="btn btn-ghost" onclick="openPersonalTransactionModal()">+ تسجيل عملية</button>
+      </div>
+    </div>
+    <div class="tabs" style="margin-bottom:16px" id="personal-tabs"></div>
+    <div id="personal-content"></div>
+  `;
+
+  await _loadPersonalData();
+  _renderPersonalTabs(tab);
+  _renderPersonalContent(tab);
+}
+
+async function _loadPersonalData() {
+  try {
+    const [people, transactions] = await Promise.all([
+      API.getPersonalPeople(),
+      API.getPersonalTransactions(),
+    ]);
+    window._personalPeople = people || [];
+    window._personalTransactions = transactions || [];
+  } catch (e) {
+    window._personalPeople = [];
+    window._personalTransactions = [];
+  }
+}
+
+function _renderPersonalTabs(active) {
+  const people = window._personalPeople || [];
+  const transactions = window._personalTransactions || [];
+  const el = document.getElementById('personal-tabs');
+  if (!el) return;
+  el.innerHTML = `
+    <button class="tab-btn ${active === 'people' ? 'active' : ''}"
+            onclick="switchPersonalTab('people')">
+      👥 الأشخاص (${people.length})
+    </button>
+    <button class="tab-btn ${active === 'transactions' ? 'active' : ''}"
+            onclick="switchPersonalTab('transactions')">
+      💸 العمليات (${transactions.length})
+    </button>
+  `;
+}
+
+function switchPersonalTab(tab) {
+  window._personalTab = tab;
+  _renderPersonalTabs(tab);
+  _renderPersonalContent(tab);
+}
+
+function _renderPersonalContent(tab) {
+  const el = document.getElementById('personal-content');
+  if (!el) return;
+  if (tab === 'people') _renderPersonalPeople(el);
+  else _renderPersonalTransactions(el);
+}
+
+function _renderPersonalPeople(el) {
+  const people = window._personalPeople || [];
+  const totalGiven = people.reduce((s, p) => s + Number(p.total_given || 0), 0);
+  const totalWithdrawn = people.reduce((s, p) => s + Number(p.total_withdrawn || 0), 0);
+  const totalBalance = people.reduce((s, p) => s + Number(p.balance || 0), 0);
+
+  el.innerHTML = `
+    <div class="metrics-grid" style="margin-bottom:18px">
+      <div class="metric-card red">
+        <div class="metric-icon">💰</div>
+        <div class="metric-label">إجمالي المُعطى</div>
+        <div class="metric-value">${fmt(totalGiven)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card green">
+        <div class="metric-icon">🔄</div>
+        <div class="metric-label">إجمالي المُسترد</div>
+        <div class="metric-value">${fmt(totalWithdrawn)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card ${totalBalance > 0 ? 'amber' : 'green'}">
+        <div class="metric-icon">📊</div>
+        <div class="metric-label">الرصيد المتبقي (عندهم)</div>
+        <div class="metric-value">${fmt(totalBalance)}</div>
+        <div class="metric-sub">دينار أردني</div>
+      </div>
+      <div class="metric-card blue">
+        <div class="metric-icon">👥</div>
+        <div class="metric-label">عدد الأشخاص</div>
+        <div class="metric-value">${people.length}</div>
+        <div class="metric-sub">شخص</div>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>الاسم</th><th>الهاتف</th><th>إجمالي المُعطى</th>
+              <th>إجمالي المُسترد</th><th>الرصيد المتبقي</th>
+              <th>عدد العمليات</th><th>ملاحظات</th><th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${people.length ? people.map(p => `
+              <tr>
+                <td><strong style="cursor:pointer;color:var(--bl)" onclick="viewPersonalStatement('${p.id}')">${escHtml(p.name)}</strong></td>
+                <td>${escHtml(p.phone || '—')}</td>
+                <td style="font-weight:800;color:var(--rd)">${fmt(p.total_given)} د.أ</td>
+                <td style="font-weight:800;color:var(--gr)">${fmt(p.total_withdrawn)} د.أ</td>
+                <td style="font-weight:800;color:${Number(p.balance) > 0 ? 'var(--am)' : 'var(--gr)'}">${fmt(p.balance)} د.أ</td>
+                <td>${p.transaction_count || 0}</td>
+                <td>${escHtml(p.notes || '—')}</td>
+                <td><div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <button class="btn btn-ghost btn-sm" onclick="viewPersonalStatement('${p.id}')">📋 كشف</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'give')">💰 تسجيل دفعة</button>
+                  <button class="btn btn-ghost btn-sm" onclick="openPersonalTransactionModal('${p.id}', 'withdraw')">💰 تسجيل مقبوضة</button>
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="openPersonalPersonModal('${p.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePersonalPerson('${p.id}')">🗑️</button>` : ''}
+                </div></td>
+              </tr>
+            `).join('') : emptyRow('لا يوجد أشخاص — أضف شخصاً جديداً', 8)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function _renderPersonalTransactions(el) {
+  const transactions = window._personalTransactions || [];
+
+  el.innerHTML = `
+    <div class="card" style="padding:0;overflow:hidden">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th><th>الشخص</th><th>النوع</th>
+              <th>المبلغ</th><th>ملاحظات</th><th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${transactions.length ? transactions.map(t => `
+              <tr>
+                <td>${fmtDate(t.transaction_date)}</td>
+                <td><strong>${escHtml(t.person_name || '—')}</strong></td>
+                <td>
+                  <span class="badge ${t.transaction_type === 'give' ? 'badge-red' : 'badge-green'}">
+                    ${t.transaction_type === 'give' ? '💰 دفعة' : '💰 مقبوضة'}
+                  </span>
+                </td>
+                <td style="font-weight:800;color:${t.transaction_type === 'give' ? 'var(--rd)' : 'var(--gr)'}">${fmt(t.amount)} د.أ</td>
+                <td>${escHtml(t.notes || '—')}</td>
+                <td><div style="display:flex;gap:6px">
+                  ${isAccountant() ? `<button class="btn btn-primary btn-sm" onclick="editPersonalTransaction('${t.id}')">✏️</button>` : ''}
+                  ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deletePersonalTransaction('${t.id}')">🗑️</button>` : ''}
+                </div></td>
+              </tr>
+            `).join('') : emptyRow('لا توجد عمليات', 6)}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ── Person CRUD Modals ─────────────────────────────────────
+
+function openPersonalPersonModal(personId) {
+  const people = window._personalPeople || [];
+  const p = personId ? people.find(x => String(x.id) === String(personId)) : null;
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">${p ? '✏️ تعديل شخص' : '👤 إضافة شخص جديد'}</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الاسم *</label>
+      <input class="form-input" id="pp_name" placeholder="اسم الشخص" value="${escHtml(p?.name || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">رقم الهاتف</label>
+      <input class="form-input" id="pp_phone" placeholder="07X XXXX XXXX" value="${escHtml(p?.phone || '')}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pp_notes" placeholder="اختياري" value="${escHtml(p?.notes || '')}">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePersonalPerson('${personId || ''}')">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function savePersonalPerson(personId) {
+  const name = document.getElementById('pp_name')?.value?.trim();
+  if (!name) { toast('الاسم مطلوب', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  const payload = {
+    name,
+    phone: document.getElementById('pp_phone')?.value?.trim() || null,
+    notes: document.getElementById('pp_notes')?.value?.trim() || null,
+  };
+
+  try {
+    if (personId) {
+      await API.updatePersonalPerson(personId, payload);
+    } else {
+      await API.createPersonalPerson(payload);
+    }
+    toast('تم الحفظ ✅', 'success');
+    closeModal();
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
+  }
+}
+
+async function deletePersonalPerson(id) {
+  if (!confirm('حذف هذا الشخص وجميع عملياته؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    await API.deletePersonalPerson(id);
+    toast('تم الحذف ✅', 'success');
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
+  }
+}
+
+// ── Transaction Modals ──────────────────────────────────────
+
+function openPersonalTransactionModal(preSelectPersonId, preSelectType) {
+  const people = window._personalPeople || [];
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">💸 عملية جديدة</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الشخص *</label>
+      <select class="form-select" id="pt_person">
+        <option value="">— اختر شخصاً —</option>
+        ${people.map(p => `<option value="${p.id}" ${String(p.id) === String(preSelectPersonId) ? 'selected' : ''}>${escHtml(p.name)}${Number(p.balance) > 0 ? ` (رصيد: ${fmt(p.balance)} د.أ)` : ''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">نوع العملية *</label>
+        <select class="form-select" id="pt_type">
+          <option value="give" ${preSelectType === 'give' ? 'selected' : ''}>💰 تسجيل دفعة (تسليم مبلغ)</option>
+          <option value="withdraw" ${preSelectType === 'withdraw' ? 'selected' : ''}>💰 تسجيل مقبوضة (استرداد مبلغ)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="pt_amount" type="number" step="0.001" min="0.001" placeholder="0.000">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">التاريخ</label>
+      <input class="form-input" id="pt_date" type="date" value="${new Date().toISOString().split('T')[0]}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pt_notes" placeholder="اختياري">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePersonalTransaction()">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function savePersonalTransaction(transactionId) {
+  const personId = parseInt(document.getElementById('pt_person')?.value);
+  const type = document.getElementById('pt_type')?.value;
+  const amount = parseFloat(document.getElementById('pt_amount')?.value);
+
+  if (!personId) { toast('اختر الشخص', 'error'); return; }
+  if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); return; }
+
+  const btn = document.querySelector('#global-modal .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'جاري الحفظ...'; }
+
+  const payload = {
+    person_id: personId,
+    amount,
+    transaction_type: type || 'give',
+    transaction_date: document.getElementById('pt_date')?.value,
+    notes: document.getElementById('pt_notes')?.value?.trim() || null,
+  };
+
+  try {
+    if (transactionId) {
+      await API.updatePersonalTransaction(transactionId, payload);
+    } else {
+      await API.createPersonalTransaction(payload);
+    }
+    toast(type === 'withdraw' ? 'تم تسجيل المقبوضة ✅' : 'تم تسجيل الدفعة ✅', 'success');
+    closeModal();
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; }
+  }
+}
+
+function editPersonalTransaction(id) {
+  const t = (window._personalTransactions || []).find(x => String(x.id) === String(id));
+  if (!t) { toast('العملية غير موجودة', 'error'); return; }
+
+  const people = window._personalPeople || [];
+
+  openModal(`
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل عملية</div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">الشخص *</label>
+      <select class="form-select" id="pt_person">
+        ${people.map(p => `<option value="${p.id}" ${String(p.id) === String(t.person_id) ? 'selected' : ''}>${escHtml(p.name)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">نوع العملية *</label>
+        <select class="form-select" id="pt_type">
+          <option value="give" ${t.transaction_type === 'give' ? 'selected' : ''}>💰 تسجيل دفعة</option>
+          <option value="withdraw" ${t.transaction_type === 'withdraw' ? 'selected' : ''}>💰 تسجيل مقبوضة</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">المبلغ *</label>
+        <input class="form-input" id="pt_amount" type="number" step="0.001" min="0.001" value="${Number(t.amount || 0).toFixed(3)}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">التاريخ</label>
+      <input class="form-input" id="pt_date" type="date" value="${t.transaction_date ? String(t.transaction_date).split('T')[0] : ''}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ملاحظات</label>
+      <input class="form-input" id="pt_notes" value="${escHtml(t.notes || '')}">
+    </div>
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-primary" style="flex:1" onclick="savePersonalTransaction('${t.id}')">حفظ</button>
+      <button class="btn btn-ghost" onclick="closeModal()">إلغاء</button>
+    </div>
+  `);
+}
+
+async function deletePersonalTransaction(id) {
+  if (!confirm('حذف هذه العملية؟')) return;
+  const btn = event?.target; if (btn) { btn.disabled = true; btn.textContent = '...'; }
+  try {
+    await API.deletePersonalTransaction(id);
+    toast('تم الحذف ✅', 'success');
+    navigateTo('personal');
+  } catch (e) {
+    toast(e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️'; }
+  }
+}
+
+// ── Person Statement ────────────────────────────────────────
+
+async function viewPersonalStatement(personId) {
+  try {
+    const data = await API.getPersonalStatement(personId);
+    const p = data.person || {};
+    const txns = data.transactions || [];
+
+    let runningBalance = 0;
+
+    openModal(`
+      <div class="modal-header">
+        <div class="modal-title">📋 كشف حساب — ${escHtml(p.name || '')}</div>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+
+      <div class="metrics-grid" style="margin-bottom:14px">
+        <div class="metric-card red">
+          <div class="metric-icon">💰</div>
+          <div class="metric-label">إجمالي المُعطى</div>
+          <div class="metric-value">${fmt(data.total_given)}</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-icon">🔄</div>
+          <div class="metric-label">إجمالي المُسترد</div>
+          <div class="metric-value">${fmt(data.total_withdrawn)}</div>
+        </div>
+        <div class="metric-card ${data.balance > 0 ? 'amber' : 'green'}">
+          <div class="metric-icon">📊</div>
+          <div class="metric-label">الرصيد المتبقي</div>
+          <div class="metric-value">${fmt(data.balance)}</div>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="margin-bottom:14px">
+        <table>
+          <thead>
+            <tr><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الرصيد التراكمي</th><th>ملاحظات</th></tr>
+          </thead>
+          <tbody>
+            ${txns.length ? txns.map(t => {
+              if (t.transaction_type === 'give') runningBalance += Number(t.amount);
+              else runningBalance -= Number(t.amount);
+              return `
+              <tr>
+                <td>${fmtDate(t.transaction_date)}</td>
+                <td><span class="badge ${t.transaction_type === 'give' ? 'badge-red' : 'badge-green'}">${t.transaction_type === 'give' ? '💰 دفعة' : '💰 مقبوضة'}</span></td>
+                <td style="font-weight:800;color:${t.transaction_type === 'give' ? 'var(--rd)' : 'var(--gr)'}">${fmt(t.amount)} د.أ</td>
+                <td style="font-weight:700">${fmt(runningBalance)} د.أ</td>
+                <td>${escHtml(t.notes || '—')}</td>
+              </tr>`;
+            }).join('') : `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد عمليات</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;gap:10px;margin-top:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="printPersonalStatement('${personId}')">🖨️ طباعة</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'give')">💰 تسجيل دفعة</button>
+        <button class="btn btn-ghost" style="flex:1" onclick="closeModal(); openPersonalTransactionModal('${personId}', 'withdraw')">💰 تسجيل مقبوضة</button>
+        <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
+      </div>
+    `, '750px');
+
+    window._personalStatementData = data;
+  } catch (e) {
+    toast(e.message || 'تعذّر تحميل كشف الحساب', 'error');
+  }
+}
+
+function printPersonalStatement(personId) {
+  const data = window._personalStatementData;
+  if (!data) return;
+
+  const p = data.person || {};
+  const txns = data.transactions || [];
+
+  let runningBalance = 0;
+
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="utf-8">
+      <title>كشف حساب — ${escHtml(p.name || '')}</title>
+      <style>
+        body { font-family: Tahoma, Arial, sans-serif; padding: 20px; }
+        h1 { text-align:center; margin-bottom:5px; }
+        .summary { display:flex; gap:30px; justify-content:center; margin-bottom:20px; font-size:14px; }
+        .summary div { text-align:center; }
+        .summary .label { color:#666; font-size:12px; }
+        .summary .val { font-weight:bold; font-size:18px; }
+        table { width:100%; border-collapse:collapse; margin-bottom:20px; }
+        th, td { border:1px solid #999; padding:6px 10px; text-align:right; font-size:13px; }
+        th { background:#f0f0f0; }
+        .give { color:red; }
+        .withdraw { color:green; }
+        .date { text-align:center; font-size:12px; color:#666; margin-top:20px; }
+      </style>
+    </head>
+    <body>
+      <h1>كشف حساب: ${escHtml(p.name || '')}</h1>
+      ${p.phone ? `<div style="text-align:center;color:#666;margin-bottom:10px">${escHtml(p.phone)}</div>` : ''}
+      <div class="summary">
+        <div><div class="label">إجمالي المُعطى</div><div class="val give">${fmt(data.total_given)} د.أ</div></div>
+        <div><div class="label">إجمالي المُسترد</div><div class="val withdraw">${fmt(data.total_withdrawn)} د.أ</div></div>
+        <div><div class="label">الرصيد المتبقي</div><div class="val">${fmt(data.balance)} د.أ</div></div>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>الرصيد التراكمي</th><th>ملاحظات</th></tr></thead>
+        <tbody>
+          ${txns.map((t, i) => {
+            if (t.transaction_type === 'give') runningBalance += Number(t.amount);
+            else runningBalance -= Number(t.amount);
+            return `
+            <tr>
+              <td>${i + 1}</td>
+              <td>${fmtDate(t.transaction_date)}</td>
+              <td>${t.transaction_type === 'give' ? 'دفعة' : 'مقبوضة'}</td>
+              <td class="${t.transaction_type}">${fmt(t.amount)} د.أ</td>
+              <td style="font-weight:bold">${fmt(runningBalance)} د.أ</td>
+              <td>${escHtml(t.notes || '—')}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+      <div class="date">تاريخ الطباعة: ${new Date().toLocaleDateString('ar-JO')}</div>
+    </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  setTimeout(() => win.print(), 300);
 }
