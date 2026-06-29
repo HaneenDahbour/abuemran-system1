@@ -83,17 +83,7 @@ def parse_currency(value: Optional[str]) -> str:
 
 
 def parse_exchange_rate(value, currency: str) -> float:
-    if value is None:
-        return 1.0
-    try:
-        rate = float(value)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="سعر الصرف غير صحيح")
-    if rate <= 0:
-        raise HTTPException(status_code=400, detail="سعر الصرف يجب أن يكون أكبر من صفر")
-    if currency == "JOD":
-        return 1.0
-    return rate
+    return 1.0
 
 
 # ── Pydantic models ──────────────────────────────────────────
@@ -332,8 +322,8 @@ async def list_china_suppliers(user=Depends(get_current_user)):
     rows = await pool.fetch("""
         SELECT
             cs.*,
-            COALESCE((SELECT SUM(p.amount_jod) FROM china_payments  p WHERE p.supplier_id = cs.id), 0) AS total_paid_jod,
-            COALESCE((SELECT SUM(p.amount_jod) FROM china_purchases p WHERE p.supplier_id = cs.id), 0) AS total_purchased_jod,
+            COALESCE((SELECT SUM(p.amount) FROM china_payments  p WHERE p.supplier_id = cs.id), 0) AS total_paid_jod,
+            COALESCE((SELECT SUM(p.amount) FROM china_purchases p WHERE p.supplier_id = cs.id), 0) AS total_purchased_jod,
             COALESCE((SELECT COUNT(*) FROM china_payments  p WHERE p.supplier_id = cs.id), 0) AS payments_count,
             COALESCE((SELECT COUNT(*) FROM china_purchases p WHERE p.supplier_id = cs.id), 0) AS purchases_count
         FROM china_suppliers cs
@@ -470,8 +460,8 @@ async def china_supplier_statement(supplier_id: str, user=Depends(get_current_us
         cur = p["currency"] or "JOD"
         totals_by_currency[cur]["purchases"] += float(p["amount"] or 0)
 
-    total_paid_jod = sum(float(p["amount_jod"] or 0) for p in payments)
-    total_purchased_jod = sum(float(p["amount_jod"] or 0) for p in purchases)
+    total_paid_jod = sum(float(p["amount"] or 0) for p in payments)
+    total_purchased_jod = sum(float(p["amount"] or 0) for p in purchases)
 
     return {
         "supplier": row_to_dict(supplier),
@@ -844,13 +834,13 @@ async def get_summary(user=Depends(get_current_user)):
         "SELECT COALESCE(SUM(amount),0) FROM china_investor_transactions WHERE type='profit_share'"
     )
     total_payments = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount_jod),0) FROM china_payments"
+        "SELECT COALESCE(SUM(amount),0) FROM china_payments"
     )
     total_purchases = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount_jod),0) FROM china_purchases"
+        "SELECT COALESCE(SUM(amount),0) FROM china_purchases"
     )
     total_sales = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount_jod),0) FROM china_sales"
+        "SELECT COALESCE(SUM(amount),0) FROM china_sales"
     )
 
     contributions = float(contributions or 0)

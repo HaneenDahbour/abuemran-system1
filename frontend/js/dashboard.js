@@ -10611,17 +10611,16 @@ async function openChinaSupplierStatement(supplierId) {
       <div style="font-weight:700;margin-bottom:6px">💸 الدفعات (${payments.length})</div>
       <div class="table-wrap" style="margin-bottom:14px">
         <table>
-          <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+          <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
           <tbody>
             ${payments.length ? payments.map(p => `
               <tr>
                 <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
                 <td style="font-weight:700">${fmt(p.amount)}</td>
                 <td>${chinaCurrencyLabel(p.currency)}</td>
-                <td style="color:var(--rd)">${fmt(p.amount_jod || p.amount)}</td>
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               </tr>
-            `).join('') : `<tr><td colspan="5" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+            `).join('') : `<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -10629,7 +10628,7 @@ async function openChinaSupplierStatement(supplierId) {
       <div style="font-weight:700;margin-bottom:6px">📦 المشتريات / العروض (${purchases.length})</div>
       <div class="table-wrap" style="margin-bottom:14px">
         <table>
-          <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+          <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
           <tbody>
             ${purchases.length ? purchases.map(p => `
               <tr>
@@ -10638,10 +10637,9 @@ async function openChinaSupplierStatement(supplierId) {
                 <td>${fmt(p.quantity || 0)}</td>
                 <td style="font-weight:700">${fmt(p.amount)}</td>
                 <td>${chinaCurrencyLabel(p.currency)}</td>
-                <td>${fmt(p.amount_jod || p.amount)}</td>
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               </tr>
-            `).join('') : `<tr><td colspan="7" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+            `).join('') : `<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -10688,14 +10686,13 @@ function printChinaSupplierStatement(supplierId) {
 
       <h3>الدفعات</h3>
       <table>
-        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
         <tbody>
           ${payments.map(p => `
             <tr>
               <td>${fmtDate(p.payment_date)}</td>
               <td>${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td>${fmt(p.amount_jod || p.amount)}</td>
               <td>${escHtml(p.notes || '—')}</td>
             </tr>
           `).join('')}
@@ -10704,7 +10701,7 @@ function printChinaSupplierStatement(supplierId) {
 
       <h3>المشتريات / العروض</h3>
       <table>
-        <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th></tr></thead>
+        <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
         <tbody>
           ${purchases.map(p => `
             <tr>
@@ -10713,7 +10710,6 @@ function printChinaSupplierStatement(supplierId) {
               <td>${fmt(p.quantity || 0)}</td>
               <td>${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td>${fmt(p.amount_jod || p.amount)}</td>
               <td>${escHtml(p.notes || '—')}</td>
             </tr>
           `).join('')}
@@ -10740,7 +10736,7 @@ async function renderChinaPayments(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>المورد</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>ملاحظات</th><th>أضيف بواسطة</th><th></th></tr>
+          <tr><th>التاريخ</th><th>المورد</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th><th>أضيف بواسطة</th><th></th></tr>
         </thead>
         <tbody>
           ${payments.length ? payments.map(p => `
@@ -10749,7 +10745,6 @@ async function renderChinaPayments(container) {
               <td><strong>${escHtml(p.supplier_name)}</strong></td>
               <td style="color:var(--rd);font-weight:700">${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td style="font-size:12px;color:var(--tx3)">${fmt(p.amount_jod || p.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.created_by_name || '—')}</td>
               <td>
@@ -10759,7 +10754,7 @@ async function renderChinaPayments(container) {
                 </div>
               </td>
             </tr>
-          `).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+          `).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -10796,15 +10791,10 @@ function openChinaPaymentModal(paymentId = null) {
       </div>
       <div class="form-group">
         <label class="form-label">العملة</label>
-        <select class="form-select" id="cp_currency" onchange="chinaOnCurrencyChange('cp_currency','cp_rate_group')">
+        <select class="form-select" id="cp_currency">
           ${chinaCurrencyOptions(currency)}
         </select>
       </div>
-    </div>
-
-    <div class="form-group" id="cp_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
-      <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
-      <input class="form-input" id="cp_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${p?.exchange_rate ?? ''}">
     </div>
 
     <div class="form-group">
@@ -10833,15 +10823,13 @@ async function saveChinaPayment(paymentId) {
   const supplier_name = document.getElementById('cp_supplier')?.value?.trim();
   const amount = parseFloat(document.getElementById('cp_amount')?.value);
   const currency = document.getElementById('cp_currency')?.value || 'JOD';
-  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cp_rate')?.value);
   const payment_date = document.getElementById('cp_date')?.value;
   const notes = document.getElementById('cp_notes')?.value?.trim() || null;
 
   if (!supplier_name) { toast('اسم المورد مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
-  const payload = { supplier_id, supplier_name, amount, currency, exchange_rate, payment_date, notes };
+  const payload = { supplier_id, supplier_name, amount, currency, payment_date, notes };
 
   try {
     if (paymentId) {
@@ -10885,7 +10873,7 @@ async function renderChinaPurchases(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>المورد</th><th>ملاحظات</th><th></th></tr>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>المورد</th><th>ملاحظات</th><th></th></tr>
         </thead>
         <tbody>
           ${purchases.length ? purchases.map(p => `
@@ -10895,7 +10883,6 @@ async function renderChinaPurchases(container) {
               <td>${fmt(p.quantity || 0)}</td>
               <td style="font-weight:700">${fmt(p.amount)}</td>
               <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td style="font-size:12px;color:var(--tx3)">${fmt(p.amount_jod || p.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.supplier_name || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               <td>
@@ -10905,7 +10892,7 @@ async function renderChinaPurchases(container) {
                 </div>
               </td>
             </tr>
-          `).join('') : `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+          `).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -10942,13 +10929,9 @@ function openChinaPurchaseModal(purchaseId = null) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">العملة</label>
-        <select class="form-select" id="cpu_currency" onchange="chinaOnCurrencyChange('cpu_currency','cpu_rate_group')">
+        <select class="form-select" id="cpu_currency">
           ${chinaCurrencyOptions(currency)}
         </select>
-      </div>
-      <div class="form-group" id="cpu_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
-        <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
-        <input class="form-input" id="cpu_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${p?.exchange_rate ?? ''}">
       </div>
     </div>
 
@@ -10990,7 +10973,6 @@ async function saveChinaPurchase(purchaseId) {
   const quantity = parseFloat(document.getElementById('cpu_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('cpu_amount')?.value);
   const currency = document.getElementById('cpu_currency')?.value || 'JOD';
-  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('cpu_rate')?.value);
   const supplier_idRaw = document.getElementById('cpu_supplier_id')?.value;
   const supplier_id = normalizeOptionalId(supplier_idRaw);
   const supplier_name = document.getElementById('cpu_supplier')?.value?.trim() || null;
@@ -10999,9 +10981,8 @@ async function saveChinaPurchase(purchaseId) {
 
   if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
-  const payload = { item_name, quantity, amount, currency, exchange_rate, supplier_id, supplier_name, purchase_date, notes };
+  const payload = { item_name, quantity, amount, currency, supplier_id, supplier_name, purchase_date, notes };
 
   try {
     if (purchaseId) {
@@ -11045,7 +11026,7 @@ async function renderChinaSales(container) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ما يعادل (د.أ)</th><th>المشتري</th><th>ملاحظات</th><th></th></tr>
+          <tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>المشتري</th><th>ملاحظات</th><th></th></tr>
         </thead>
         <tbody>
           ${sales.length ? sales.map(s => `
@@ -11055,7 +11036,6 @@ async function renderChinaSales(container) {
               <td>${fmt(s.quantity || 0)}</td>
               <td style="font-weight:700;color:var(--gr)">${fmt(s.amount)}</td>
               <td>${chinaCurrencyLabel(s.currency)}</td>
-              <td style="font-size:12px;color:var(--tx3)">${fmt(s.amount_jod || s.amount)}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.buyer_name || '—')}</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(s.notes || '—')}</td>
               <td>
@@ -11065,7 +11045,7 @@ async function renderChinaSales(container) {
                 </div>
               </td>
             </tr>
-          `).join('') : `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مبيعات</td></tr>`}
+          `).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد مبيعات</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -11102,13 +11082,9 @@ function openChinaSaleModal(saleId = null) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">العملة</label>
-        <select class="form-select" id="csa_currency" onchange="chinaOnCurrencyChange('csa_currency','csa_rate_group')">
+        <select class="form-select" id="csa_currency">
           ${chinaCurrencyOptions(currency)}
         </select>
-      </div>
-      <div class="form-group" id="csa_rate_group" style="display:${currency === 'JOD' ? 'none' : ''}">
-        <label class="form-label">سعر الصرف (1 وحدة = ? د.أ) *</label>
-        <input class="form-input" id="csa_rate" type="number" min="0.000001" step="0.000001" placeholder="مثال: 0.13" value="${s?.exchange_rate ?? ''}">
       </div>
     </div>
 
@@ -11143,16 +11119,14 @@ async function saveChinaSale(saleId) {
   const quantity = parseFloat(document.getElementById('csa_qty')?.value) || 1;
   const amount = parseFloat(document.getElementById('csa_amount')?.value);
   const currency = document.getElementById('csa_currency')?.value || 'JOD';
-  const exchange_rate = currency === 'JOD' ? 1 : parseFloat(document.getElementById('csa_rate')?.value);
   const buyer_name = document.getElementById('csa_buyer')?.value?.trim() || null;
   const sale_date = document.getElementById('csa_date')?.value;
   const notes = document.getElementById('csa_notes')?.value?.trim() || null;
 
   if (!item_name) { toast('اسم البضاعة مطلوب', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
   if (!amount || amount <= 0) { toast('المبلغ غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
-  if (currency !== 'JOD' && (!exchange_rate || exchange_rate <= 0)) { toast('سعر الصرف غير صحيح', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'حفظ'; } return; }
 
-  const payload = { item_name, quantity, amount, currency, exchange_rate, buyer_name, sale_date, notes };
+  const payload = { item_name, quantity, amount, currency, buyer_name, sale_date, notes };
 
   try {
     if (saleId) {
