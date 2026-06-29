@@ -10073,6 +10073,14 @@ function chinaCurrencyLabel(code) {
   return c ? c.code : (code || 'JOD');
 }
 
+function chinaCurrencyTotalsHtml(totals, field) {
+  if (!totals || !Object.keys(totals).length) return '<span>0</span>';
+  return Object.keys(totals)
+    .filter(cur => (totals[cur][field] || 0) !== 0)
+    .map(cur => `<div>${fmt(totals[cur][field] || 0)} <small>${chinaCurrencyLabel(cur)}</small></div>`)
+    .join('') || '<span>0</span>';
+}
+
 // عند اختيار مورد من القائمة — تعبئة اسم المورد تلقائياً (للحقول النصية القديمة)
 function chinaOnSupplierSelect(selectId, nameInputId) {
   const sel = document.getElementById(selectId);
@@ -10130,36 +10138,33 @@ async function renderChinaOverview(container) {
       <div class="metric-card">
         <div class="metric-icon">💸</div>
         <div class="metric-label">دفعات للموردين</div>
-        <div class="metric-value" style="color:var(--rd)">${fmt(summary.total_payments_to_suppliers || 0)}</div>
-        <div class="metric-sub">دينار أردني</div>
+        <div class="metric-value" style="color:var(--rd)">${chinaCurrencyTotalsHtml(summary.totals_by_currency, 'payments')}</div>
       </div>
 
       <div class="metric-card">
         <div class="metric-icon">📦</div>
         <div class="metric-label">إجمالي المشتريات</div>
-        <div class="metric-value">${fmt(summary.total_purchases || 0)}</div>
-        <div class="metric-sub">دينار أردني</div>
+        <div class="metric-value">${chinaCurrencyTotalsHtml(summary.totals_by_currency, 'purchases')}</div>
       </div>
 
       <div class="metric-card">
         <div class="metric-icon">🏷️</div>
         <div class="metric-label">إجمالي المبيعات</div>
-        <div class="metric-value" style="color:var(--gr)">${fmt(summary.total_sales || 0)}</div>
-        <div class="metric-sub">دينار أردني</div>
+        <div class="metric-value" style="color:var(--gr)">${chinaCurrencyTotalsHtml(summary.totals_by_currency, 'sales')}</div>
       </div>
 
       <div class="metric-card" style="background:linear-gradient(135deg,#0a7650,#057a55);color:white">
         <div class="metric-icon">📈</div>
         <div class="metric-label" style="color:rgba(255,255,255,.8)">الربح الإجمالي (مبيعات - مشتريات)</div>
         <div class="metric-value" style="color:white">${fmt(summary.gross_profit || 0)}</div>
-        <div class="metric-sub" style="color:rgba(255,255,255,.7)">دينار أردني</div>
+        <div class="metric-sub" style="color:rgba(255,255,255,.7)">إجمالي بكل العملات</div>
       </div>
 
       <div class="metric-card">
         <div class="metric-icon">🏦</div>
         <div class="metric-label">رأس المال المتبقي التقديري</div>
         <div class="metric-value" style="color:${parseFloat(summary.remaining_capital || 0) >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(summary.remaining_capital || 0)}</div>
-        <div class="metric-sub">دينار أردني</div>
+        <div class="metric-sub">إجمالي بكل العملات</div>
       </div>
     </div>
 
@@ -10442,8 +10447,8 @@ async function renderChinaSuppliers(container) {
           <tr>
             <th>الاسم</th>
             <th>الهاتف</th>
-            <th>إجمالي الدفعات (د.أ)</th>
-            <th>إجمالي المشتريات (د.أ)</th>
+            <th>إجمالي الدفعات</th>
+            <th>إجمالي المشتريات</th>
             <th>عدد العمليات</th>
             <th>ملاحظات</th>
             <th>الإجراءات</th>
@@ -10563,17 +10568,6 @@ async function openChinaSupplierStatement(supplierId) {
     const purchases = data.purchases || [];
     const totalsByCurrency = data.totals_by_currency || {};
 
-    const currencyRows = Object.keys(totalsByCurrency).map(code => {
-      const t = totalsByCurrency[code];
-      return `
-        <tr>
-          <td><strong>${chinaCurrencyLabel(code)}</strong></td>
-          <td style="color:var(--rd);font-weight:700">${fmt(t.payments || 0)}</td>
-          <td style="font-weight:700">${fmt(t.purchases || 0)}</td>
-        </tr>
-      `;
-    }).join('');
-
     openModal(`
       <div class="modal-header">
         <div class="modal-title">📊 ${escHtml(s.name || '')}</div>
@@ -10587,26 +10581,20 @@ async function openChinaSupplierStatement(supplierId) {
       <div class="metrics-grid" style="margin-bottom:14px">
         <div class="metric-card">
           <div class="metric-label">إجمالي الدفعات</div>
-          <div class="metric-value" style="color:var(--rd)">${fmt(data.total_paid_jod || 0)} د.أ</div>
+          <div class="metric-value" style="color:var(--rd)">${chinaCurrencyTotalsHtml(totalsByCurrency, 'payments')}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">إجمالي المشتريات</div>
-          <div class="metric-value">${fmt(data.total_purchased_jod || 0)} د.أ</div>
+          <div class="metric-value">${chinaCurrencyTotalsHtml(totalsByCurrency, 'purchases')}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">الرصيد (مشتريات - دفعات)</div>
-          <div class="metric-value" style="color:${parseFloat(data.balance_jod || 0) >= 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(data.balance_jod || 0)} د.أ</div>
+          <div class="metric-label">الرصيد (مشتريات - دفعات) لكل عملة</div>
+          <div class="metric-value">${Object.keys(totalsByCurrency).map(cur => {
+            const bal = (totalsByCurrency[cur].purchases || 0) - (totalsByCurrency[cur].payments || 0);
+            return bal !== 0 ? `<div style="color:${bal >= 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(bal)} <small>${chinaCurrencyLabel(cur)}</small></div>` : '';
+          }).join('') || '<span>0</span>'}</div>
         </div>
       </div>
-
-      ${currencyRows ? `
-        <div class="table-wrap" style="margin-bottom:14px">
-          <table>
-            <thead><tr><th>العملة</th><th>الدفعات</th><th>المشتريات</th></tr></thead>
-            <tbody>${currencyRows}</tbody>
-          </table>
-        </div>
-      ` : ''}
 
       <div style="font-weight:700;margin-bottom:6px">💸 الدفعات (${payments.length})</div>
       <div class="table-wrap" style="margin-bottom:14px">
@@ -10680,9 +10668,16 @@ function printChinaSupplierStatement(supplierId) {
     <body>
       <h1>كشف حساب المورد: ${escHtml(s.name || '')}</h1>
       <div>${s.phone ? `الهاتف: ${escHtml(s.phone)}` : ''}</div>
-      <div class="totals">إجمالي الدفعات: ${fmt(data.total_paid_jod || 0)} د.أ</div>
-      <div class="totals">إجمالي المشتريات: ${fmt(data.total_purchased_jod || 0)} د.أ</div>
-      <div class="totals">الرصيد: ${fmt(data.balance_jod || 0)} د.أ</div>
+      ${(() => {
+        const tbc = data.totals_by_currency || {};
+        const currencies = Object.keys(tbc);
+        if (!currencies.length) return '<div class="totals">لا توجد حركات</div>';
+        return currencies.map(cur => {
+          const t = tbc[cur];
+          const bal = (t.purchases || 0) - (t.payments || 0);
+          return `<div class="totals">${chinaCurrencyLabel(cur)}: دفعات ${fmt(t.payments || 0)} / مشتريات ${fmt(t.purchases || 0)} / رصيد ${fmt(bal)}</div>`;
+        }).join('');
+      })()}
 
       <h3>الدفعات</h3>
       <table>

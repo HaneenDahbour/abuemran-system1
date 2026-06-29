@@ -833,22 +833,37 @@ async def get_summary(user=Depends(get_current_user)):
     profit_shares_paid = await pool.fetchval(
         "SELECT COALESCE(SUM(amount),0) FROM china_investor_transactions WHERE type='profit_share'"
     )
-    total_payments = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount),0) FROM china_payments"
+
+    payments_by_cur = await pool.fetch(
+        "SELECT COALESCE(currency,'JOD') AS currency, COALESCE(SUM(amount),0) AS total FROM china_payments GROUP BY currency"
     )
-    total_purchases = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount),0) FROM china_purchases"
+    purchases_by_cur = await pool.fetch(
+        "SELECT COALESCE(currency,'JOD') AS currency, COALESCE(SUM(amount),0) AS total FROM china_purchases GROUP BY currency"
     )
-    total_sales = await pool.fetchval(
-        "SELECT COALESCE(SUM(amount),0) FROM china_sales"
+    sales_by_cur = await pool.fetch(
+        "SELECT COALESCE(currency,'JOD') AS currency, COALESCE(SUM(amount),0) AS total FROM china_sales GROUP BY currency"
     )
+
+    totals_by_currency = {}
+    for row in payments_by_cur:
+        cur = row["currency"] or "JOD"
+        totals_by_currency.setdefault(cur, {"payments": 0.0, "purchases": 0.0, "sales": 0.0})
+        totals_by_currency[cur]["payments"] = float(row["total"] or 0)
+    for row in purchases_by_cur:
+        cur = row["currency"] or "JOD"
+        totals_by_currency.setdefault(cur, {"payments": 0.0, "purchases": 0.0, "sales": 0.0})
+        totals_by_currency[cur]["purchases"] = float(row["total"] or 0)
+    for row in sales_by_cur:
+        cur = row["currency"] or "JOD"
+        totals_by_currency.setdefault(cur, {"payments": 0.0, "purchases": 0.0, "sales": 0.0})
+        totals_by_currency[cur]["sales"] = float(row["total"] or 0)
 
     contributions = float(contributions or 0)
     returns = float(returns or 0)
     profit_shares_paid = float(profit_shares_paid or 0)
-    total_payments = float(total_payments or 0)
-    total_purchases = float(total_purchases or 0)
-    total_sales = float(total_sales or 0)
+    total_payments = sum(v["payments"] for v in totals_by_currency.values())
+    total_purchases = sum(v["purchases"] for v in totals_by_currency.values())
+    total_sales = sum(v["sales"] for v in totals_by_currency.values())
 
     net_capital = contributions - returns - profit_shares_paid
     gross_profit = total_sales - total_purchases
@@ -864,4 +879,5 @@ async def get_summary(user=Depends(get_current_user)):
         "total_sales": total_sales,
         "gross_profit": gross_profit,
         "remaining_capital": remaining_capital,
+        "totals_by_currency": totals_by_currency,
     }
