@@ -171,7 +171,7 @@ async def get_supplier_statement(supplier_id: str, user=Depends(get_current_user
             d["amount"] = float(d.get("amount") or 0)
             transactions.append(d)
 
-        transactions.sort(key=lambda x: (x.get("date") or "", x.get("id") or 0))
+        transactions.sort(key=lambda x: (str(x.get("date") or ""), str(x.get("id") or "")))
 
         balance = 0.0
         for t in transactions:

@@ -235,6 +235,8 @@
       apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}`, { method: 'DELETE' }),
     getStockMovements: productId =>
       apiFetch(`/products/${requireValidId(productId, 'معرّف الصنف')}/movements`),
+    deleteStockMovement: (productId, movementId) =>
+      apiFetch(`/products/${requireValidId(productId, 'معرّف الصنف')}/movements/${movementId}`, { method: 'DELETE' }),
     adjustProductStock: (id, data) =>
       apiFetch(`/products/${requireValidId(id, 'معرّف الصنف')}/adjust`, { method: 'POST', body: JSON.stringify(data) }),
     importProductsExcel: (file, updateExisting = false) => {

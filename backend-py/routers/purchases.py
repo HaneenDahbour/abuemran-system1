@@ -20,6 +20,14 @@ def safe_uuid(val):
         return None
 
 
+def coerce_id(val):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        pass
+    return safe_uuid(val) or val
+
+
 def to_json_value(value):
     if isinstance(value, Decimal):
         return float(value)
@@ -154,7 +162,9 @@ async def create_purchase(data: PurchaseRequest, user=Depends(get_current_user))
     )
     purchase_date = parse_purchase_date(data.date)
     notes = clean_text(data.notes)
-    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
+    supplier_id = None
+    if data.supplier_id:
+        supplier_id = coerce_id(data.supplier_id)
 
     pool = await get_pool()
 
@@ -370,7 +380,9 @@ async def update_purchase(purchase_id: str, data: PurchaseRequest, user=Depends(
         raise HTTPException(status_code=400, detail="أضف صنفاً واحداً على الأقل")
 
     pool = await get_pool()
-    supplier_id = coerce_id(data.supplier_id) if data.supplier_id else None
+    supplier_id = None
+    if data.supplier_id:
+        supplier_id = coerce_id(data.supplier_id)
 
     try:
         async with pool.acquire() as conn:
@@ -576,4 +588,127 @@ async def delete_purchase(purchase_id: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/fix-stock")
+async def fix_stock_counts(user=Depends(get_current_user)):
+    """Deduplicate purchase movements and adjust stock for removed duplicates only."""
+    require_role(user, "admin")
+
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                dupes = await conn.fetch(
+                    """SELECT source_id::text AS sid, product_id, type,
+                              COUNT(*) AS cnt, SUM(quantity) AS total_qty
+                       FROM stock_movements
+                       WHERE source_type = 'purchase'
+                       GROUP BY source_id::text, product_id, type
+                       HAVING COUNT(*) > 1"""
+                )
+
+                if not dupes:
+                    return {
+                        "success": True,
+                        "duplicate_groups_fixed": 0,
+                        "products_adjusted": [],
+                    }
+
+                fixed_purchases = set()
+                adjustments = {}
+
+                for dupe in dupes:
+                    sid = dupe["sid"]
+                    pid = dupe["product_id"]
+                    cnt = dupe["cnt"]
+                    total_qty = float(dupe["total_qty"] or 0)
+                    keep_qty = total_qty / cnt
+                    removed_qty = total_qty - keep_qty
+
+                    await conn.execute(
+                        """DELETE FROM stock_movements
+                           WHERE id IN (
+                             SELECT id FROM stock_movements
+                             WHERE source_type='purchase'
+                               AND source_id::text = $1
+                               AND product_id = $2
+                             ORDER BY id
+                             OFFSET 1
+                           )""",
+                        sid,
+                        pid,
+                    )
+                    fixed_purchases.add(sid)
+
+                    if pid not in adjustments:
+                        adjustments[pid] = 0.0
+                    adjustments[pid] += removed_qty
+
+                adjusted = []
+                for pid, removed_qty in adjustments.items():
+                    if removed_qty > 0:
+                        row = await conn.fetchrow(
+                            """UPDATE products
+                               SET current_stock = GREATEST(0, current_stock - $1)
+                               WHERE id = $2
+                               RETURNING id, name, current_stock AS new_stock""",
+                            removed_qty,
+                            pid,
+                        )
+                        if row:
+                            adjusted.append(row_to_dict(row))
+
+                return {
+                    "success": True,
+                    "duplicate_groups_fixed": len(dupes),
+                    "purchases_affected": list(fixed_purchases),
+                    "products_adjusted": adjusted,
+                }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/recover-stock")
+async def recover_stock(user=Depends(get_current_user)):
+    """Recover stock after bad recalculation — recalculate from movements with floor of 0."""
+    require_role(user, "admin")
+
+    pool = await get_pool()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                updated = await conn.fetch(
+                    """UPDATE products p
+                       SET current_stock = GREATEST(0, COALESCE(sub.net, 0))
+                       FROM (
+                         SELECT product_id,
+                                SUM(CASE WHEN type='in' THEN quantity ELSE -quantity END) AS net
+                         FROM stock_movements
+                         GROUP BY product_id
+                       ) sub
+                       WHERE p.id = sub.product_id
+                         AND p.current_stock < 0
+                       RETURNING p.id, p.name, p.current_stock AS new_stock"""
+                )
+
+                no_movements = await conn.fetch(
+                    """UPDATE products
+                       SET current_stock = 0
+                       WHERE current_stock < 0
+                         AND id NOT IN (SELECT DISTINCT product_id FROM stock_movements)
+                       RETURNING id, name, current_stock AS new_stock"""
+                )
+
+                all_fixed = [row_to_dict(r) for r in updated] + [row_to_dict(r) for r in no_movements]
+
+                return {
+                    "success": True,
+                    "products_recovered": len(all_fixed),
+                    "details": all_fixed,
+                }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
