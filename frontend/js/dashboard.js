@@ -10156,15 +10156,27 @@ async function renderChinaOverview(container) {
       <div class="metric-card" style="background:linear-gradient(135deg,#0a7650,#057a55);color:white">
         <div class="metric-icon">📈</div>
         <div class="metric-label" style="color:rgba(255,255,255,.8)">الربح الإجمالي (مبيعات - مشتريات)</div>
-        <div class="metric-value" style="color:white">${fmt(summary.gross_profit || 0)}</div>
-        <div class="metric-sub" style="color:rgba(255,255,255,.7)">إجمالي بكل العملات</div>
+        <div class="metric-value" style="color:white">${(() => {
+          const tbc = summary.totals_by_currency || {};
+          const lines = Object.keys(tbc).map(cur => {
+            const profit = (tbc[cur].sales || 0) - (tbc[cur].purchases || 0);
+            return profit !== 0 ? `<div>${fmt(profit)} <small>${chinaCurrencyLabel(cur)}</small></div>` : '';
+          }).filter(Boolean).join('');
+          return lines || '<span>0</span>';
+        })()}</div>
       </div>
 
       <div class="metric-card">
         <div class="metric-icon">🏦</div>
         <div class="metric-label">رأس المال المتبقي التقديري</div>
-        <div class="metric-value" style="color:${parseFloat(summary.remaining_capital || 0) >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(summary.remaining_capital || 0)}</div>
-        <div class="metric-sub">إجمالي بكل العملات</div>
+        <div class="metric-value">${(() => {
+          const tbc = summary.totals_by_currency || {};
+          const lines = Object.keys(tbc).map(cur => {
+            const v = (tbc[cur].sales || 0) - (tbc[cur].purchases || 0) - (tbc[cur].payments || 0);
+            return v !== 0 ? `<div style="color:${v >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(v)} <small>${chinaCurrencyLabel(cur)}</small></div>` : '';
+          }).filter(Boolean).join('');
+          return lines || '<span>0</span>';
+        })()}</div>
       </div>
     </div>
 
