@@ -10795,6 +10795,14 @@ async function openChinaSupplierStatement(supplierId) {
     const payments = data.payments || [];
     const purchases = data.purchases || [];
     const totalsByCurrency = data.totals_by_currency || {};
+    const currencies = Object.keys(totalsByCurrency);
+
+    const tabBar = `
+      <div style="display:flex;gap:4px;margin-bottom:14px;background:var(--bg);border:1px solid var(--brd);border-radius:var(--r);padding:4px;width:fit-content;flex-wrap:wrap">
+        <button class="tab-btn active" id="css-tab-all" onclick="setChinaStatementCurrencyTab('all')">الكل</button>
+        ${currencies.map(cur => `<button class="tab-btn" id="css-tab-${cur}" onclick="setChinaStatementCurrencyTab('${cur}')">${chinaCurrencyLabel(cur)}</button>`).join('')}
+      </div>
+    `;
 
     openModal(`
       <div class="modal-header">
@@ -10806,56 +10814,58 @@ async function openChinaSupplierStatement(supplierId) {
         ${s.phone ? `📞 ${escHtml(s.phone)}` : ''} ${s.notes ? ` — ${escHtml(s.notes)}` : ''}
       </div>
 
-      <div class="metrics-grid" style="margin-bottom:14px">
+      ${currencies.length > 1 ? tabBar : ''}
+
+      <div id="css-summary-cards" class="metrics-grid" style="margin-bottom:14px">
         <div class="metric-card">
           <div class="metric-label">إجمالي الدفعات</div>
-          <div class="metric-value" style="color:var(--rd)">${chinaCurrencyTotalsHtml(totalsByCurrency, 'payments')}</div>
+          <div class="metric-value" style="color:var(--rd)" id="css-total-payments">${chinaCurrencyTotalsHtml(totalsByCurrency, 'payments')}</div>
         </div>
         <div class="metric-card">
           <div class="metric-label">إجمالي المشتريات</div>
-          <div class="metric-value">${chinaCurrencyTotalsHtml(totalsByCurrency, 'purchases')}</div>
+          <div class="metric-value" id="css-total-purchases">${chinaCurrencyTotalsHtml(totalsByCurrency, 'purchases')}</div>
         </div>
         <div class="metric-card">
-          <div class="metric-label">الرصيد (مشتريات - دفعات) لكل عملة</div>
-          <div class="metric-value">${Object.keys(totalsByCurrency).map(cur => {
+          <div class="metric-label">الرصيد (مشتريات - دفعات)</div>
+          <div class="metric-value" id="css-balance">${currencies.map(cur => {
             const bal = (totalsByCurrency[cur].purchases || 0) - (totalsByCurrency[cur].payments || 0);
             return bal !== 0 ? `<div style="color:${bal >= 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(bal)} <small>${chinaCurrencyLabel(cur)}</small></div>` : '';
           }).join('') || '<span>0</span>'}</div>
         </div>
       </div>
 
-      <div style="font-weight:700;margin-bottom:6px">💸 الدفعات (${payments.length})</div>
+      <div style="font-weight:700;margin-bottom:6px" id="css-payments-header">💸 الدفعات (${payments.length})</div>
       <div class="table-wrap" style="margin-bottom:14px">
         <table>
-          <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
-          <tbody>
+          <thead><tr><th>التاريخ</th><th>المبلغ</th><th class="css-col-currency">العملة</th><th>ملاحظات</th></tr></thead>
+          <tbody id="css-payments-tbody">
             ${payments.length ? payments.map(p => `
-              <tr>
+              <tr data-currency="${p.currency || 'JOD'}">
                 <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.payment_date)}</td>
                 <td style="font-weight:700">${fmt(p.amount)}</td>
-                <td>${chinaCurrencyLabel(p.currency)}</td>
+                <td class="css-col-currency">${chinaCurrencyLabel(p.currency)}</td>
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               </tr>
-            `).join('') : `<tr><td colspan="4" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
+            `).join('') : `<tr class="css-empty-row"><td colspan="4" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`}
           </tbody>
         </table>
       </div>
 
-      <div style="font-weight:700;margin-bottom:6px">📦 المشتريات / العروض (${purchases.length})</div>
+      <div style="font-weight:700;margin-bottom:6px" id="css-purchases-header">📦 المشتريات / العروض (${purchases.length})</div>
       <div class="table-wrap" style="margin-bottom:14px">
         <table>
-          <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
-          <tbody>
+          <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th class="css-col-currency">العملة</th><th>ملاحظات</th></tr></thead>
+          <tbody id="css-purchases-tbody">
             ${purchases.length ? purchases.map(p => `
-              <tr>
+              <tr data-currency="${p.currency || 'JOD'}">
                 <td style="font-size:12px;color:var(--tx3)">${fmtDate(p.purchase_date)}</td>
                 <td><strong>${escHtml(p.item_name)}</strong></td>
                 <td>${fmt(p.quantity || 0)}</td>
                 <td style="font-weight:700">${fmt(p.amount)}</td>
-                <td>${chinaCurrencyLabel(p.currency)}</td>
+                <td class="css-col-currency">${chinaCurrencyLabel(p.currency)}</td>
                 <td style="font-size:12px;color:var(--tx3)">${escHtml(p.notes || '—')}</td>
               </tr>
-            `).join('') : `<tr><td colspan="6" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
+            `).join('') : `<tr class="css-empty-row"><td colspan="6" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -10870,6 +10880,77 @@ async function openChinaSupplierStatement(supplierId) {
   }
 }
 
+function setChinaStatementCurrencyTab(currency) {
+  const data = window._chinaSupplierStatement;
+  if (!data) return;
+  const tbc = data.totals_by_currency || {};
+  const allCurrencies = Object.keys(tbc);
+  const payments = data.payments || [];
+  const purchases = data.purchases || [];
+
+  ['all', ...allCurrencies].forEach(c => {
+    const el = document.getElementById(`css-tab-${c}`);
+    if (el) el.classList.toggle('active', c === currency);
+  });
+
+  const isAll = currency === 'all';
+
+  const totalPaymentsEl = document.getElementById('css-total-payments');
+  const totalPurchasesEl = document.getElementById('css-total-purchases');
+  const balanceEl = document.getElementById('css-balance');
+
+  if (isAll) {
+    if (totalPaymentsEl) totalPaymentsEl.innerHTML = chinaCurrencyTotalsHtml(tbc, 'payments');
+    if (totalPurchasesEl) totalPurchasesEl.innerHTML = chinaCurrencyTotalsHtml(tbc, 'purchases');
+    if (balanceEl) balanceEl.innerHTML = allCurrencies.map(cur => {
+      const bal = (tbc[cur].purchases || 0) - (tbc[cur].payments || 0);
+      return bal !== 0 ? `<div style="color:${bal >= 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(bal)} <small>${chinaCurrencyLabel(cur)}</small></div>` : '';
+    }).join('') || '<span>0</span>';
+  } else {
+    const t = tbc[currency] || { payments: 0, purchases: 0 };
+    const bal = (t.purchases || 0) - (t.payments || 0);
+    if (totalPaymentsEl) totalPaymentsEl.innerHTML = `${fmt(t.payments || 0)} <small>${chinaCurrencyLabel(currency)}</small>`;
+    if (totalPurchasesEl) totalPurchasesEl.innerHTML = `${fmt(t.purchases || 0)} <small>${chinaCurrencyLabel(currency)}</small>`;
+    if (balanceEl) balanceEl.innerHTML = `<span style="color:${bal >= 0 ? 'var(--rd)' : 'var(--gr)'}">${fmt(bal)} <small>${chinaCurrencyLabel(currency)}</small></span>`;
+  }
+
+  document.querySelectorAll('.css-col-currency').forEach(el => {
+    el.style.display = isAll ? '' : 'none';
+  });
+
+  const payTbody = document.getElementById('css-payments-tbody');
+  if (payTbody) {
+    const filteredPay = isAll ? payments : payments.filter(p => (p.currency || 'JOD') === currency);
+    const payHeader = document.getElementById('css-payments-header');
+    if (payHeader) payHeader.textContent = `💸 الدفعات (${filteredPay.length})`;
+    payTbody.querySelectorAll('tr[data-currency]').forEach(row => {
+      row.style.display = (isAll || row.dataset.currency === currency) ? '' : 'none';
+    });
+    const emptyRow = payTbody.querySelector('.css-empty-row');
+    if (emptyRow) emptyRow.style.display = filteredPay.length ? 'none' : '';
+    if (!emptyRow && !filteredPay.length) {
+      const cols = isAll ? 4 : 3;
+      payTbody.insertAdjacentHTML('beforeend', `<tr class="css-empty-row"><td colspan="${cols}" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد دفعات</td></tr>`);
+    }
+  }
+
+  const purTbody = document.getElementById('css-purchases-tbody');
+  if (purTbody) {
+    const filteredPur = isAll ? purchases : purchases.filter(p => (p.currency || 'JOD') === currency);
+    const purHeader = document.getElementById('css-purchases-header');
+    if (purHeader) purHeader.textContent = `📦 المشتريات / العروض (${filteredPur.length})`;
+    purTbody.querySelectorAll('tr[data-currency]').forEach(row => {
+      row.style.display = (isAll || row.dataset.currency === currency) ? '' : 'none';
+    });
+    const emptyRow = purTbody.querySelector('.css-empty-row');
+    if (emptyRow) emptyRow.style.display = filteredPur.length ? 'none' : '';
+    if (!emptyRow && !filteredPur.length) {
+      const cols = isAll ? 6 : 5;
+      purTbody.insertAdjacentHTML('beforeend', `<tr class="css-empty-row"><td colspan="${cols}" style="text-align:center;padding:14px;color:var(--tx3)">لا توجد مشتريات</td></tr>`);
+    }
+  }
+}
+
 function printChinaSupplierStatement(supplierId) {
   const data = window._chinaSupplierStatement;
   if (!data) return;
@@ -10877,6 +10958,51 @@ function printChinaSupplierStatement(supplierId) {
   const s = data.supplier || {};
   const payments = data.payments || [];
   const purchases = data.purchases || [];
+  const tbc = data.totals_by_currency || {};
+  const currencies = Object.keys(tbc);
+
+  const currencySections = currencies.map(cur => {
+    const t = tbc[cur];
+    const bal = (t.purchases || 0) - (t.payments || 0);
+    const curPayments = payments.filter(p => (p.currency || 'JOD') === cur);
+    const curPurchases = purchases.filter(p => (p.currency || 'JOD') === cur);
+    const label = CHINA_CURRENCIES.find(c => c.code === cur)?.label || cur;
+
+    return `
+      <h2 style="background:#f0f0f0;padding:8px 12px;border-radius:6px;margin-top:20px">${label}</h2>
+      <div class="totals">دفعات: ${fmt(t.payments || 0)} | مشتريات: ${fmt(t.purchases || 0)} | رصيد: ${fmt(bal)}</div>
+
+      <h3>الدفعات (${curPayments.length})</h3>
+      <table>
+        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>ملاحظات</th></tr></thead>
+        <tbody>
+          ${curPayments.length ? curPayments.map(p => `
+            <tr>
+              <td>${fmtDate(p.payment_date)}</td>
+              <td>${fmt(p.amount)}</td>
+              <td>${escHtml(p.notes || '—')}</td>
+            </tr>
+          `).join('') : '<tr><td colspan="3" style="text-align:center;padding:10px">لا توجد دفعات</td></tr>'}
+        </tbody>
+      </table>
+
+      <h3>المشتريات / العروض (${curPurchases.length})</h3>
+      <table>
+        <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>ملاحظات</th></tr></thead>
+        <tbody>
+          ${curPurchases.length ? curPurchases.map(p => `
+            <tr>
+              <td>${fmtDate(p.purchase_date)}</td>
+              <td>${escHtml(p.item_name)}</td>
+              <td>${fmt(p.quantity || 0)}</td>
+              <td>${fmt(p.amount)}</td>
+              <td>${escHtml(p.notes || '—')}</td>
+            </tr>
+          `).join('') : '<tr><td colspan="5" style="text-align:center;padding:10px">لا توجد مشتريات</td></tr>'}
+        </tbody>
+      </table>
+    `;
+  }).join('');
 
   const win = window.open('', '_blank');
   win.document.write(`
@@ -10896,48 +11022,7 @@ function printChinaSupplierStatement(supplierId) {
     <body>
       <h1>كشف حساب المورد: ${escHtml(s.name || '')}</h1>
       <div>${s.phone ? `الهاتف: ${escHtml(s.phone)}` : ''}</div>
-      ${(() => {
-        const tbc = data.totals_by_currency || {};
-        const currencies = Object.keys(tbc);
-        if (!currencies.length) return '<div class="totals">لا توجد حركات</div>';
-        return currencies.map(cur => {
-          const t = tbc[cur];
-          const bal = (t.purchases || 0) - (t.payments || 0);
-          return `<div class="totals">${chinaCurrencyLabel(cur)}: دفعات ${fmt(t.payments || 0)} / مشتريات ${fmt(t.purchases || 0)} / رصيد ${fmt(bal)}</div>`;
-        }).join('');
-      })()}
-
-      <h3>الدفعات</h3>
-      <table>
-        <thead><tr><th>التاريخ</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
-        <tbody>
-          ${payments.map(p => `
-            <tr>
-              <td>${fmtDate(p.payment_date)}</td>
-              <td>${fmt(p.amount)}</td>
-              <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td>${escHtml(p.notes || '—')}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-
-      <h3>المشتريات / العروض</h3>
-      <table>
-        <thead><tr><th>التاريخ</th><th>البضاعة</th><th>الكمية</th><th>المبلغ</th><th>العملة</th><th>ملاحظات</th></tr></thead>
-        <tbody>
-          ${purchases.map(p => `
-            <tr>
-              <td>${fmtDate(p.purchase_date)}</td>
-              <td>${escHtml(p.item_name)}</td>
-              <td>${fmt(p.quantity || 0)}</td>
-              <td>${fmt(p.amount)}</td>
-              <td>${chinaCurrencyLabel(p.currency)}</td>
-              <td>${escHtml(p.notes || '—')}</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+      ${currencySections || '<div class="totals">لا توجد حركات</div>'}
     </body>
     </html>
   `);
