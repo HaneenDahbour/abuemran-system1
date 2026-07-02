@@ -9351,7 +9351,17 @@ async function renderEmployees(container) {
 
     // وضع راتب الشهر الحالي مقابل السلف
     const ym = new Date().toISOString().slice(0, 7);
-    const baseSalary = Number(emp.base_salary || 0);
+    // Prefer the employee profile salary. Older employees may not have one yet,
+    // so fall back to the largest salary entry in the latest recorded month.
+    const configuredBaseSalary = Number(emp.base_salary || 0);
+    const latestSalaryMonth = empSal.reduce((latest, s) => {
+      const month = String(s.salary_month || '').slice(0, 7);
+      return month > latest ? month : latest;
+    }, '');
+    const latestMonthSalary = empSal
+      .filter(s => String(s.salary_month || '').slice(0, 7) === latestSalaryMonth)
+      .reduce((largest, s) => Math.max(largest, Number(s.salary_amount || 0)), 0);
+    const baseSalary = configuredBaseSalary > 0 ? configuredBaseSalary : latestMonthSalary;
     const monthAdvances = empAdv
       .filter(a => String(a.advance_date || '').slice(0, 7) === ym)
       .reduce((s, x) => s + parseFloat(x.amount || 0), 0);
