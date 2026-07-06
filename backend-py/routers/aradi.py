@@ -928,20 +928,23 @@ async def get_purchase_contract_statement(contract_id: int, user=Depends(get_cur
             WHERE contract_id = $1
             ORDER BY payment_date, id
         """, contract_id)
+        expenses_rows = await pool.fetch("""
+            SELECT *
+            FROM aradi_expenses
+            WHERE plot_id = $1
+            ORDER BY expense_date DESC, id DESC
+        """, contract["plot_id"])
         payments = [row_to_dict(r) for r in payments_rows]
+        expenses = [row_to_dict(r) for r in expenses_rows]
         total_paid = sum(float(p["amount"]) for p in payments if p["status"] == "confirmed")
         purchase_price = float(contract["purchase_price"])
-        total_expenses = float(await pool.fetchval("""
-            SELECT COALESCE(SUM(e.amount), 0)
-            FROM aradi_expenses e
-            WHERE e.plot_id = $1
-              AND e.status = 'confirmed'
-        """, contract["plot_id"]) or 0)
+        total_expenses = sum(float(e["amount"]) for e in expenses if e["status"] == "confirmed")
 
         return {
             "contract": row_to_dict(contract),
             "installments": installments,
             "payments": payments,
+            "expenses": expenses,
             "summary": {
                 "purchase_price": purchase_price,
                 "total_expenses": round(total_expenses, 3),
