@@ -319,7 +319,7 @@ function renderPlots(q=''){
           <td style="max-width:150px;font-size:12px;color:var(--tx2)">${esc(r.notes||'')}</td>
           <td><div style="display:flex;gap:6px">
             <button class="btn btn-ghost btn-sm" onclick="showPlotForm(${r.id})">✏️ تعديل</button>
-            <button class="btn btn-danger btn-sm" onclick="deletePlot(${r.id},'${esc(r.plot_number)}')">🗑️ حذف</button>
+            <button class="btn btn-danger btn-sm" onclick="deletePlot(${r.id})">🗑️ حذف</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد قطع أراضي</td></tr>`}
       </tbody>
@@ -385,7 +385,9 @@ async function savePlot(id){
   }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
-async function deletePlot(id,num){
+async function deletePlot(id){
+  const row=S.plots.find(x=>x.id===id);
+  const num=row?.plot_number||id;
   confirm2(`هل تريد حذف القطعة ${num}؟ هذا الإجراء لا يمكن التراجع عنه.`,async()=>{
     await api(`/aradi/plots/${id}`,{method:'DELETE'});
     toast('تم حذف القطعة','success'); await loadPlots();
@@ -778,7 +780,7 @@ function renderBuyers(q=''){
           <td><div style="display:flex;gap:6px">
             <button class="btn btn-ghost btn-sm" onclick="showBuyerForm(${r.id})">✏️</button>
             <button class="btn btn-ghost btn-sm" onclick="nav('contracts');loadContracts('',${r.id})">📋 عقوده</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteBuyer(${r.id},'${esc(r.name)}')">🗑️</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteBuyer(${r.id})">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="5">لا يوجد مشترون</td></tr>`}
       </tbody>
@@ -815,7 +817,9 @@ async function saveBuyer(id){
   }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
-async function deleteBuyer(id,name){
+async function deleteBuyer(id){
+  const row=S.buyers.find(x=>x.id===id);
+  const name=row?.name||id;
   confirm2(`هل تريد حذف المشتري "${name}"؟`,async()=>{
     await api(`/aradi/buyers/${id}`,{method:'DELETE'});
     toast('تم حذف المشتري','success'); await loadBuyers();
@@ -858,7 +862,7 @@ function renderContracts(q='',buyerId=null){
           <td><div style="display:flex;gap:5px">
             <button class="btn btn-primary btn-sm" onclick="showContractDetail(${r.id})">📋 تفاصيل</button>
             <button class="btn btn-ghost btn-sm" onclick="showContractEditForm(${r.id})">✏️</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteContract(${r.id},'${esc(r.contract_number||r.id)}')">🗑️</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteContract(${r.id})">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="7">لا توجد عقود</td></tr>`}
       </tbody>
@@ -992,7 +996,9 @@ async function updateContract(id){
   }catch(e){ document.getElementById('ce-err').textContent=e.message; _unlockSave(btn); }
 }
 
-async function deleteContract(id,num){
+async function deleteContract(id){
+  const row=S.contracts.find(x=>x.id===id);
+  const num=row?.contract_number||id;
   confirm2(`هل تريد حذف العقد "${num}"؟ سيتم حذف جميع الأقساط والدفعات غير المؤكدة المرتبطة به.`,async()=>{
     await api(`/aradi/contracts/${id}`,{method:'DELETE'});
     toast('تم حذف العقد','success'); await loadContracts();
@@ -1177,7 +1183,7 @@ function renderInstallments(rows,filter='all'){
           <td>${statusBadge(r.computed_status)}</td>
           <td><div style="display:flex;gap:4px">
             <button class="btn btn-ghost btn-sm" onclick="showBuyerPayForm(${r.contract_id},${r.id},${r.remaining||r.amount})">💵 دفع</button>
-            <button class="btn btn-ghost btn-sm" onclick="showInstallmentEdit(${r.id},${r.installment_number},'${r.due_date}',${r.amount},'${esc(r.notes||'')}')">✏️</button>
+            <button class="btn btn-ghost btn-sm" onclick="showInstallmentEdit(${r.id})">✏️</button>
             <button class="btn btn-danger btn-sm" onclick="deleteInstallment(${r.id},${r.installment_number})">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد أقساط</td></tr>`}
@@ -1185,14 +1191,16 @@ function renderInstallments(rows,filter='all'){
     </table></div>`);
 }
 
-async function showInstallmentEdit(id,num,dueDate,amount,notes){
+async function showInstallmentEdit(id){
+  const rows=await api('/aradi/installments').catch(()=>[]);
+  const r=rows.find(x=>x.id===id); if(!r) return;
   openModal(`
-    <div class="modal-header"><div class="modal-title">تعديل القسط رقم ${num}</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="modal-header"><div class="modal-title">تعديل القسط رقم ${r.installment_number}</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
-      <div class="form-group"><label class="form-label">تاريخ الاستحقاق</label><input class="form-input" type="date" id="ied-date" value="${dueDate||''}"/></div>
-      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="ied-amt" value="${amount}"/></div>
+      <div class="form-group"><label class="form-label">تاريخ الاستحقاق</label><input class="form-input" type="date" id="ied-date" value="${r.due_date||''}"/></div>
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="ied-amt" value="${r.amount}"/></div>
     </div>
-    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="ied-notes" value="${esc(notes)}"/></div>
+    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="ied-notes" value="${esc(r.notes||'')}"/></div>
     <div id="ied-err" class="portal-err"></div>
     <div style="display:flex;gap:10px;margin-top:6px">
       <button class="btn btn-primary" style="flex:1" onclick="updateInstallment(${id})">💾 حفظ</button>
@@ -1366,7 +1374,7 @@ function renderInvestors(q=''){
           <td style="font-size:12px;color:var(--tx2)">${esc(r.notes||'')}</td>
           <td><div style="display:flex;gap:6px">
             <button class="btn btn-ghost btn-sm" onclick="showInvestorForm(${r.id})">✏️</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteInvestor(${r.id},'${esc(r.name)}')">🗑️</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteInvestor(${r.id})">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="5">لا يوجد مستثمرون</td></tr>`}
       </tbody>
@@ -1403,7 +1411,9 @@ async function saveInvestor(id){
   }catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
-async function deleteInvestor(id,name){
+async function deleteInvestor(id){
+  const row=S.investors.find(x=>x.id===id);
+  const name=row?.name||id;
   confirm2(`هل تريد حذف المستثمر "${name}"؟`,async()=>{
     await api(`/aradi/investors/${id}`,{method:'DELETE'});
     toast('تم حذف المستثمر','success'); loadInvestors();
@@ -1437,7 +1447,7 @@ async function loadInvestments(){
             <td><div style="display:flex;gap:5px">
               <button class="btn btn-primary btn-sm" onclick="showInvestmentDetail(${r.id})">📋 كشف</button>
               <button class="btn btn-ghost btn-sm" onclick="showInvestmentEdit(${r.id})">✏️</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteInvestment(${r.id},'${esc(r.investment_number||r.id)}')">🗑️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteInvestment(${r.id})">🗑️</button>
             </div></td>
           </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد استثمارات</td></tr>`}
         </tbody>
@@ -1563,7 +1573,10 @@ async function updateInvestment(id){
   catch(e){ document.getElementById('ie-err').textContent=e.message; _unlockSave(btn); }
 }
 
-async function deleteInvestment(id,num){
+async function deleteInvestment(id){
+  const rows=await api('/aradi/investments').catch(()=>[]);
+  const row=rows.find(x=>x.id===id);
+  const num=row?.investment_number||id;
   confirm2(`هل تريد حذف الاستثمار "${num}"؟ سيتم حذف جميع الاستحقاقات والدفعات غير المؤكدة المرتبطة به.`,async()=>{
     await api(`/aradi/investments/${id}`,{method:'DELETE'});
     toast('تم حذف الاستثمار','success'); loadInvestments();
@@ -1736,7 +1749,7 @@ async function loadChecks(){
             <td>${statusBadge(r.status)}</td>
             <td><div style="display:flex;gap:4px">
               <button class="btn btn-ghost btn-sm" onclick="showCheckEdit(${r.id})">✏️ تحديث</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteCheck(${r.id},'${esc(r.check_number||r.id)}')">🗑️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCheck(${r.id})">🗑️</button>
             </div></td>
           </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد شيكات</td></tr>`}
         </tbody>
@@ -1791,10 +1804,10 @@ async function showCheckEdit(id){
     <div class="modal-header"><div class="modal-title">تعديل الشيك</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
       <div class="form-group"><label class="form-label">الاتجاه</label>
-        <select class="form-select" id="che-dir">${['in','out'].map(d=>`<option value="${d}" ${r.direction===d?'selected':''}>${d==='in'?'داخل ← (من مشترٍ)':'خارج → (لمستثمر/مصروف)'}</option>`).join('')}</select>
+        <select class="form-select" id="che-dir">${['in','out'].map(d=>`<option value="${d}" ${r.direction===d?'selected':''}>${d==='in'?'داخل ← (من مشترٍ)':'خارج → (لبائع/مستثمر/مصروف)'}</option>`).join('')}</select>
       </div>
       <div class="form-group"><label class="form-label">النوع</label>
-        <select class="form-select" id="che-rtype">${['buyer_payment','investor_payment','expense','manual'].map(t=>`<option value="${t}" ${r.related_type===t?'selected':''}>${{buyer_payment:'دفعة مشترٍ',investor_payment:'دفعة مستثمر',expense:'مصروف',manual:'يدوي'}[t]}</option>`).join('')}</select>
+        <select class="form-select" id="che-rtype">${['buyer_payment','seller_payment','investor_payment','expense','manual'].map(t=>`<option value="${t}" ${r.related_type===t?'selected':''}>${{buyer_payment:'دفعة مشترٍ',seller_payment:'دفعة بائع',investor_payment:'دفعة مستثمر',expense:'مصروف',manual:'يدوي'}[t]}</option>`).join('')}</select>
       </div>
     </div>
     <div class="form-row">
@@ -1840,7 +1853,10 @@ async function updateCheck(id){
   catch(e){ document.getElementById('che-err').textContent=e.message; _unlockSave(btn); }
 }
 
-async function deleteCheck(id,num){
+async function deleteCheck(id){
+  const rows=await api('/aradi/checks').catch(()=>[]);
+  const row=rows.find(x=>x.id===id);
+  const num=row?.check_number||id;
   confirm2(`هل تريد حذف الشيك "${num}" نهائياً؟`,async()=>{
     await api(`/aradi/checks/${id}`,{method:'DELETE'});
     toast('تم حذف الشيك','success'); loadChecks();
