@@ -188,6 +188,7 @@ async def get_aradi_dashboard(user=Depends(get_current_user)):
                 purchase_contracts.total_purchase_price,
                 seller_payments.total                                           AS total_seller_payments,
                 purchase_contracts.total_purchase_price - seller_payments.total AS total_remaining_to_sellers,
+                purchase_contracts.total_purchase_price + expenses.total        AS total_land_cost,
                 overdue.cnt                                                     AS overdue_installments_count,
                 overdue_purchase.cnt                                            AS overdue_purchase_installments_count,
                 investments.total_capital                                       AS total_investor_capital,
@@ -621,6 +622,12 @@ async def list_purchase_contracts(user=Depends(get_current_user)):
                    s.name AS seller_name,
                    p.plot_number,
                    COALESCE((
+                       SELECT SUM(e.amount)
+                       FROM aradi_expenses e
+                       WHERE e.plot_id = pc.plot_id
+                         AND e.status = 'confirmed'
+                   ), 0) AS total_expenses,
+                   COALESCE((
                        SELECT SUM(sp.amount)
                        FROM aradi_seller_payments sp
                        WHERE sp.contract_id = pc.id
@@ -924,6 +931,12 @@ async def get_purchase_contract_statement(contract_id: int, user=Depends(get_cur
         payments = [row_to_dict(r) for r in payments_rows]
         total_paid = sum(float(p["amount"]) for p in payments if p["status"] == "confirmed")
         purchase_price = float(contract["purchase_price"])
+        total_expenses = float(await pool.fetchval("""
+            SELECT COALESCE(SUM(e.amount), 0)
+            FROM aradi_expenses e
+            WHERE e.plot_id = $1
+              AND e.status = 'confirmed'
+        """, contract["plot_id"]) or 0)
 
         return {
             "contract": row_to_dict(contract),
@@ -931,6 +944,8 @@ async def get_purchase_contract_statement(contract_id: int, user=Depends(get_cur
             "payments": payments,
             "summary": {
                 "purchase_price": purchase_price,
+                "total_expenses": round(total_expenses, 3),
+                "total_land_cost": round(purchase_price + total_expenses, 3),
                 "total_paid": round(total_paid, 3),
                 "remaining": round(purchase_price - total_paid, 3),
             },

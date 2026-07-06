@@ -244,6 +244,7 @@ async function loadDashboard(){
         ${mc('red','⏳','المتبقي على المشترين',cur(d.total_remaining_from_buyers),'')}
         ${mc('red','⚠️','الأقساط المتأخرة',d.overdue_installments_count,'قسط متأخر')}
         ${mc('amber','🧾','إجمالي الشراء',cur(d.total_purchase_price),'')}
+        ${mc('amber','🏗️','تكلفة الأراضي',cur(d.total_land_cost),'شراء + مصاريف')}
         ${mc('amber','💳','المدفوع للبائعين',cur(d.total_seller_payments),'')}
         ${mc('red','⏳','المتبقي للبائعين',cur(d.total_remaining_to_sellers),'')}
         ${mc('red','⚠️','أقساط شراء متأخرة',d.overdue_purchase_installments_count,'قسط متأخر')}
@@ -268,6 +269,7 @@ async function loadDashboard(){
           <table style="width:100%;font-size:13px">
             <tr><td style="color:var(--tx2);padding:5px 0">إجمالي رأس مال المستثمرين</td><td style="font-weight:700;text-align:left">${cur(d.total_investor_capital)}</td></tr>
             <tr><td style="color:var(--tx2);padding:5px 0">إجمالي عقود الشراء</td><td style="font-weight:700;text-align:left">${cur(d.total_purchase_price)}</td></tr>
+            <tr><td style="color:var(--tx2);padding:5px 0">تكلفة الأراضي مع المصاريف</td><td style="font-weight:700;text-align:left">${cur(d.total_land_cost)}</td></tr>
             <tr><td style="color:var(--tx2);padding:5px 0">المتبقي للبائعين</td><td style="font-weight:700;text-align:left;color:var(--rd)">${cur(d.total_remaining_to_sellers)}</td></tr>
             <tr><td style="color:var(--tx2);padding:5px 0">إجمالي أرباح المستثمرين</td><td style="font-weight:700;text-align:left">${cur(d.total_investor_profit)}</td></tr>
             <tr><td style="color:var(--tx2);padding:5px 0">المتبقي للمستثمرين</td><td style="font-weight:700;text-align:left;color:var(--rd)">${cur(d.remaining_investor_obligations)}</td></tr>
@@ -483,14 +485,15 @@ function renderPurchaseContracts(q='',sellerId=null){
       </div>
     </div>
     <div class="tw"><table>
-      <thead><tr><th>رقم العقد</th><th>البائع</th><th>رقم القطعة</th><th>سعر الشراء</th><th>الدفعة الأولى</th><th>المدفوع</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+      <thead><tr><th>رقم العقد</th><th>البائع</th><th>رقم القطعة</th><th>سعر الشراء</th><th>المصاريف</th><th>التكلفة</th><th>المدفوع</th><th>الحالة</th><th>إجراءات</th></tr></thead>
       <tbody>${rows.length?rows.map(r=>`
         <tr>
           <td><strong>${esc(r.contract_number||'—')}</strong></td>
           <td>${esc(r.seller_name)}</td>
           <td>${esc(r.plot_number||'—')}</td>
           <td>${cur(r.purchase_price)}</td>
-          <td>${cur(r.down_payment)}</td>
+          <td>${cur(r.total_expenses)}</td>
+          <td><strong>${cur(Number(r.purchase_price||0)+Number(r.total_expenses||0))}</strong></td>
           <td>${cur(r.total_paid)}</td>
           <td>${statusBadge(r.status)}</td>
           <td><div style="display:flex;gap:5px">
@@ -498,7 +501,7 @@ function renderPurchaseContracts(q='',sellerId=null){
             <button class="btn btn-ghost btn-sm" onclick="showPurchaseContractEditForm(${r.id})">✏️</button>
             <button class="btn btn-danger btn-sm" onclick="deletePurchaseContract(${r.id})">🗑️</button>
           </div></td>
-        </tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد عقود شراء</td></tr>`}</tbody>
+        </tr>`).join(''):`<tr class="empty"><td colspan="9">لا توجد عقود شراء</td></tr>`}</tbody>
     </table></div>`);
 }
 
@@ -599,8 +602,10 @@ async function showPurchaseContractDetail(id){
     <div class="modal-header"><div class="modal-title">📋 كشف عقد شراء — ${esc(c.seller_name)}</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="stmt-box">
       <div class="stmt-item"><div class="sl">سعر الشراء</div><div class="sv">${cur(sum.purchase_price)}</div></div>
+      <div class="stmt-item"><div class="sl">مصاريف القطعة</div><div class="sv" style="color:var(--rd)">${cur(sum.total_expenses)}</div></div>
+      <div class="stmt-item"><div class="sl">إجمالي التكلفة</div><div class="sv">${cur(sum.total_land_cost)}</div></div>
       <div class="stmt-item"><div class="sl">المدفوع</div><div class="sv" style="color:var(--gr)">${cur(sum.total_paid)}</div></div>
-      <div class="stmt-item"><div class="sl">المتبقي</div><div class="sv" style="color:var(--rd)">${cur(sum.remaining)}</div></div>
+      <div class="stmt-item"><div class="sl">المتبقي للبائع</div><div class="sv" style="color:var(--rd)">${cur(sum.remaining)}</div></div>
     </div>
     <p style="font-size:12px;color:var(--tx2);margin-bottom:10px">القطعة: <strong>${esc(c.plot_number||'—')}</strong> | العقد: <strong>${esc(c.contract_number||'—')}</strong> | الحالة: ${statusBadge(c.status)}</p>
     <div style="display:flex;gap:8px;margin-bottom:14px"><button class="btn btn-success btn-sm" onclick="closeModal();showSellerPayFormFull(${id})">💵 تسجيل دفعة</button></div>
