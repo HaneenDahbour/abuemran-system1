@@ -413,7 +413,10 @@ function renderSellers(q=''){
       <tbody>${rows.length?rows.map(r=>`
         <tr>
           <td><strong>${esc(r.name)}</strong></td><td>${esc(r.phone||'—')}</td><td>${esc(r.address||'—')}</td><td>${esc(r.notes||'')}</td>
-          <td><button class="btn btn-ghost btn-sm" onclick="showSellerForm(${r.id})">✏️ تعديل</button></td>
+          <td><div style="display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm" onclick="showSellerForm(${r.id})">✏️ تعديل</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSeller(${r.id})">🗑️</button>
+          </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="5">لا يوجد بائعين</td></tr>`}</tbody>
     </table></div>`);
 }
@@ -440,11 +443,21 @@ async function saveSeller(id){
   const body={name:document.getElementById('sf-name').value.trim(),phone:document.getElementById('sf-phone').value.trim()||null,address:document.getElementById('sf-address').value.trim()||null,notes:document.getElementById('sf-notes').value.trim()||null};
   const err=document.getElementById('sf-err');
   if(!body.name){ err.textContent='اسم البائع مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{
     if(id) await api(`/aradi/sellers/${id}`,{method:'PUT',body:JSON.stringify(body)});
     else await api('/aradi/sellers',{method:'POST',body:JSON.stringify(body)});
     closeModal(); toast(id?'تم التعديل':'تمت الإضافة','success'); loadSellers();
-  }catch(e){ err.textContent=e.message; }
+  }catch(e){ err.textContent=e.message; _unlockSave(btn); }
+}
+
+async function deleteSeller(id){
+  const seller=S.sellers.find(x=>x.id===id);
+  const name=seller?.name||id;
+  confirm2(`هل تريد حذف البائع ${name}؟`,async()=>{
+    await api(`/aradi/sellers/${id}`,{method:'DELETE'});
+    toast('تم حذف البائع','success'); loadSellers();
+  });
 }
 
 async function loadPurchaseContracts(q='',sellerId=null){
@@ -483,6 +496,7 @@ function renderPurchaseContracts(q='',sellerId=null){
           <td><div style="display:flex;gap:5px">
             <button class="btn btn-primary btn-sm" onclick="showPurchaseContractDetail(${r.id})">📋 تفاصيل</button>
             <button class="btn btn-ghost btn-sm" onclick="showPurchaseContractEditForm(${r.id})">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="deletePurchaseContract(${r.id})">🗑️</button>
           </div></td>
         </tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد عقود شراء</td></tr>`}</tbody>
     </table></div>`);
@@ -522,28 +536,57 @@ async function savePurchaseContract(){
   const body={seller_id:parseInt(document.getElementById('pcf-seller').value)||null,plot_id:parseInt(document.getElementById('pcf-plot').value)||null,contract_number:document.getElementById('pcf-num').value.trim()||null,purchase_price:parseFloat(document.getElementById('pcf-price').value)||0,down_payment:parseFloat(document.getElementById('pcf-down').value)||0,installment_amount:parseFloat(document.getElementById('pcf-inst').value)||0,installment_count:parseInt(document.getElementById('pcf-cnt').value)||0,first_installment_date:document.getElementById('pcf-fdate').value||null,notes:document.getElementById('pcf-notes').value.trim()||null};
   if(!body.seller_id){ err.textContent='اختر البائع'; return; }
   if(!body.purchase_price){ err.textContent='سعر الشراء مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/purchase-contracts',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم إنشاء عقد الشراء بنجاح','success'); await loadPurchaseContracts(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function showPurchaseContractEditForm(id){
   const c=S.purchaseContracts.find(x=>x.id===id); if(!c) return;
+  if(!S.sellers.length) S.sellers=await api('/aradi/sellers').catch(()=>[]);
+  if(!S.plots.length) S.plots=await api('/aradi/plots').catch(()=>[]);
   openModal(`
     <div class="modal-header"><div class="modal-title">تعديل عقد الشراء</div><button class="modal-close" onclick="closeModal()">✕</button></div>
     <div class="form-row">
+      <div class="form-group"><label class="form-label">البائع *</label><select class="form-select" id="pce-seller">${S.sellers.map(s=>`<option value="${s.id}" ${c.seller_id===s.id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">القطعة</label><select class="form-select" id="pce-plot"><option value="">— بدون قطعة محددة —</option>${S.plots.map(p=>`<option value="${p.id}" ${c.plot_id===p.id?'selected':''}>${esc(p.plot_number)} — ${esc(p.project_name||p.location||'')}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="form-label">رقم العقد</label><input class="form-input" id="pce-num" value="${esc(c.contract_number||'')}"/></div>
+      <div class="form-group"><label class="form-label">سعر الشراء *</label><input class="form-input" type="number" id="pce-price" value="${c.purchase_price||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">الدفعة الأولى</label><input class="form-input" type="number" id="pce-down" value="${c.down_payment||0}"/></div>
+      <div class="form-group"><label class="form-label">قيمة القسط</label><input class="form-input" type="number" id="pce-inst" value="${c.installment_amount||0}"/></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">عدد الأقساط</label><input class="form-input" type="number" id="pce-cnt" value="${c.installment_count||0}"/></div>
+      <div class="form-group"><label class="form-label">تاريخ أول قسط</label><input class="form-input" type="date" id="pce-fdate" value="${c.first_installment_date||''}"/></div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="form-label">الحالة</label><select class="form-select" id="pce-status">${['active','completed','cancelled','defaulted'].map(s=>`<option value="${s}" ${c.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select></div>
     </div>
     <div class="form-group"><label class="form-label">ملاحظات</label><textarea class="form-input" id="pce-notes" rows="2">${esc(c.notes||'')}</textarea></div>
     <div id="pce-err" class="portal-err"></div>
-    <div style="display:flex;gap:10px;margin-top:6px"><button class="btn btn-primary" style="flex:1" onclick="updatePurchaseContract(${id})">💾 حفظ</button><button class="btn btn-ghost" onclick="closeModal()">إلغاء</button></div>`);
+    <div style="display:flex;gap:10px;margin-top:6px"><button class="btn btn-primary" style="flex:1" onclick="updatePurchaseContract(${id})">💾 حفظ</button><button class="btn btn-ghost" onclick="closeModal()">إلغاء</button></div>`,`600px`);
 }
 
 async function updatePurchaseContract(id){
-  const c=S.purchaseContracts.find(x=>x.id===id); if(!c) return;
-  const body={seller_id:c.seller_id,purchase_price:c.purchase_price,contract_number:document.getElementById('pce-num').value.trim()||null,status:document.getElementById('pce-status').value,notes:document.getElementById('pce-notes').value.trim()||null};
+  const body={seller_id:parseInt(document.getElementById('pce-seller').value)||null,plot_id:parseInt(document.getElementById('pce-plot').value)||null,contract_number:document.getElementById('pce-num').value.trim()||null,purchase_price:parseFloat(document.getElementById('pce-price').value)||0,down_payment:parseFloat(document.getElementById('pce-down').value)||0,installment_amount:parseFloat(document.getElementById('pce-inst').value)||0,installment_count:parseInt(document.getElementById('pce-cnt').value)||0,first_installment_date:document.getElementById('pce-fdate').value||null,status:document.getElementById('pce-status').value,notes:document.getElementById('pce-notes').value.trim()||null};
+  const err=document.getElementById('pce-err');
+  if(!body.seller_id){ err.textContent='اختر البائع'; return; }
+  if(!body.purchase_price){ err.textContent='سعر الشراء مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api(`/aradi/purchase-contracts/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); await loadPurchaseContracts(); }
-  catch(e){ document.getElementById('pce-err').textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
+}
+
+async function deletePurchaseContract(id){
+  const c=S.purchaseContracts.find(x=>x.id===id);
+  confirm2(`هل تريد حذف عقد الشراء ${c?.contract_number||id}؟`,async()=>{
+    await api(`/aradi/purchase-contracts/${id}`,{method:'DELETE'});
+    toast('تم حذف عقد الشراء','success'); loadPurchaseContracts();
+  });
 }
 
 async function showPurchaseContractDetail(id){
@@ -590,8 +633,9 @@ async function saveSellerPay(contractId,installmentId){
   const body={contract_id:contractId,installment_id:installmentId||null,payment_type:document.getElementById('spf-type')?document.getElementById('spf-type').value:'installment',amount:parseFloat(document.getElementById('spf-amt').value)||0,payment_date:document.getElementById('spf-date').value,method:document.getElementById('spf-meth').value,status:document.getElementById('spf-stat')?document.getElementById('spf-stat').value:'confirmed',notes:document.getElementById('spf-notes').value.trim()||null};
   const err=document.getElementById('spf-err');
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/seller-payments',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم تسجيل الدفعة','success'); loadPurchaseContracts(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function loadPurchaseInstallments(){
@@ -599,8 +643,36 @@ async function loadPurchaseInstallments(){
   try{
     const rows=await api('/aradi/purchase-installments');
     setMain(`<div class="ph"><div><div class="page-title" style="font-size:20px;font-weight:800">أقساط الشراء</div><div style="font-size:12px;color:var(--tx3)">${rows.length} قسط</div></div></div>
-    <div class="tw"><table><thead><tr><th>العقد</th><th>البائع</th><th>#</th><th>الاستحقاق</th><th>القيمة</th><th>المدفوع</th><th>الحالة</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td>${esc(r.contract_number||'—')}</td><td>${esc(r.seller_name)}</td><td>${r.installment_number}</td><td>${fmtDate(r.due_date)}</td><td>${cur(r.amount)}</td><td>${cur(r.paid)}</td><td>${statusBadge(r.computed_status)}</td></tr>`).join(''):`<tr class="empty"><td colspan="7">لا توجد أقساط شراء</td></tr>`}</tbody></table></div>`);
+    <div class="tw"><table><thead><tr><th>العقد</th><th>البائع</th><th>#</th><th>الاستحقاق</th><th>القيمة</th><th>المدفوع</th><th>الحالة</th><th>إجراءات</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td>${esc(r.contract_number||'—')}</td><td>${esc(r.seller_name)}</td><td>${r.installment_number}</td><td>${fmtDate(r.due_date)}</td><td>${cur(r.amount)}</td><td>${cur(r.paid)}</td><td>${statusBadge(r.computed_status)}</td><td><div style="display:flex;gap:4px"><button class="btn btn-ghost btn-sm" onclick="showPurchaseInstallmentEdit(${r.id})">✏️</button><button class="btn btn-danger btn-sm" onclick="deletePurchaseInstallment(${r.id},${r.installment_number})">🗑️</button></div></td></tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد أقساط شراء</td></tr>`}</tbody></table></div>`);
   }catch(e){ errPage(e.message); }
+}
+
+async function showPurchaseInstallmentEdit(id){
+  const rows=await api('/aradi/purchase-installments').catch(()=>[]);
+  const r=rows.find(x=>x.id===id); if(!r) return;
+  openModal(`
+    <div class="modal-header"><div class="modal-title">تعديل قسط شراء #${r.installment_number}</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">تاريخ الاستحقاق</label><input class="form-input" type="date" id="pie-date" value="${r.due_date||''}"/></div>
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="pie-amt" value="${r.amount}"/></div>
+    </div>
+    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="pie-notes" value="${esc(r.notes||'')}"/></div>
+    <div id="pie-err" class="portal-err"></div>
+    <div style="display:flex;gap:10px;margin-top:6px"><button class="btn btn-primary" style="flex:1" onclick="updatePurchaseInstallment(${id})">💾 حفظ</button><button class="btn btn-ghost" onclick="closeModal()">إلغاء</button></div>`,`420px`);
+}
+
+async function updatePurchaseInstallment(id){
+  const body={due_date:document.getElementById('pie-date').value||null,amount:parseFloat(document.getElementById('pie-amt').value)||0,notes:document.getElementById('pie-notes').value.trim()||null};
+  const btn=_lockSave(); if(!btn) return;
+  try{ await api(`/aradi/purchase-installments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم تعديل القسط','success'); loadPurchaseInstallments(); }
+  catch(e){ document.getElementById('pie-err').textContent=e.message; _unlockSave(btn); }
+}
+
+async function deletePurchaseInstallment(id,num){
+  confirm2(`هل تريد حذف قسط الشراء #${num}؟`,async()=>{
+    await api(`/aradi/purchase-installments/${id}`,{method:'DELETE'});
+    toast('تم حذف القسط','success'); loadPurchaseInstallments();
+  });
 }
 
 async function loadSellerPayments(){
@@ -608,8 +680,34 @@ async function loadSellerPayments(){
   try{
     const rows=await api('/aradi/seller-payments');
     setMain(`<div class="ph"><div><div class="page-title" style="font-size:20px;font-weight:800">دفعات البائعين</div><div style="font-size:12px;color:var(--tx3)">${rows.length} دفعة</div></div><button class="btn btn-primary btn-sm" onclick="showSellerPayStandalone()">+ دفعة للبائع</button></div>
-    <div class="tw"><table><thead><tr><th>التاريخ</th><th>البائع</th><th>العقد</th><th>المبلغ</th><th>النوع</th><th>الطريقة</th><th>الحالة</th><th></th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td>${fmtDate(r.payment_date)}</td><td>${esc(r.seller_name)}</td><td>${esc(r.contract_number||'—')}</td><td>${cur(r.amount)}</td><td>${payTypeLabel(r.payment_type)}</td><td>${methodLabel(r.method)}</td><td>${statusBadge(r.status)}</td><td>${r.status!=='void'?`<button class="btn btn-danger btn-sm" onclick="voidSellerPayment(${r.id})">إلغاء</button>`:''}</td></tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد دفعات</td></tr>`}</tbody></table></div>`);
+    <div class="tw"><table><thead><tr><th>التاريخ</th><th>البائع</th><th>العقد</th><th>المبلغ</th><th>النوع</th><th>الطريقة</th><th>الحالة</th><th>إجراءات</th></tr></thead><tbody>${rows.length?rows.map(r=>`<tr><td>${fmtDate(r.payment_date)}</td><td>${esc(r.seller_name)}</td><td>${esc(r.contract_number||'—')}</td><td>${cur(r.amount)}</td><td>${payTypeLabel(r.payment_type)}</td><td>${methodLabel(r.method)}</td><td>${statusBadge(r.status)}</td><td><div style="display:flex;gap:4px">${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="editSellerPay(${r.id})">✏️</button>`:''}${r.status!=='void'?`<button class="btn btn-ghost btn-sm" onclick="voidSellerPayment(${r.id})">🚫 إلغاء</button>`:''}<button class="btn btn-danger btn-sm" onclick="deleteSellerPay(${r.id})">🗑️</button></div></td></tr>`).join(''):`<tr class="empty"><td colspan="8">لا توجد دفعات</td></tr>`}</tbody></table></div>`);
   }catch(e){ errPage(e.message); }
+}
+
+async function editSellerPay(id){
+  const rows=await api('/aradi/seller-payments').catch(()=>[]);
+  const r=rows.find(x=>x.id===id); if(!r) return;
+  openModal(`
+    <div class="modal-header"><div class="modal-title">تعديل دفعة بائع</div><button class="modal-close" onclick="closeModal()">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">المبلغ</label><input class="form-input" type="number" id="esp-amt" value="${r.amount}"/></div>
+      <div class="form-group"><label class="form-label">نوع الدفعة</label><select class="form-select" id="esp-type">${['installment','down_payment','extra','correction'].map(t=>`<option value="${t}" ${r.payment_type===t?'selected':''}>${payTypeLabel(t)}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">التاريخ</label><input class="form-input" type="date" id="esp-date" value="${r.payment_date||''}"/></div>
+      <div class="form-group"><label class="form-label">طريقة الدفع</label><select class="form-select" id="esp-meth">${['cash','check','bank_transfer','other'].map(m=>`<option value="${m}" ${r.method===m?'selected':''}>${methodLabel(m)}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">الحالة</label><select class="form-select" id="esp-stat">${['pending','confirmed','rejected','void'].map(s=>`<option value="${s}" ${r.status===s?'selected':''}>${statusText(s)}</option>`).join('')}</select></div>
+    <div class="form-group"><label class="form-label">ملاحظات</label><input class="form-input" id="esp-notes" value="${esc(r.notes||'')}"/></div>
+    <div id="esp-err" class="portal-err"></div>
+    <div style="display:flex;gap:10px;margin-top:6px"><button class="btn btn-primary" style="flex:1" onclick="saveSellerPayEdit(${id})">💾 حفظ</button><button class="btn btn-ghost" onclick="closeModal()">إلغاء</button></div>`,`480px`);
+}
+
+async function saveSellerPayEdit(id){
+  const body={amount:parseFloat(document.getElementById('esp-amt').value)||null,payment_type:document.getElementById('esp-type').value,payment_date:document.getElementById('esp-date').value||null,method:document.getElementById('esp-meth').value,status:document.getElementById('esp-stat').value,notes:document.getElementById('esp-notes').value.trim()||null};
+  const btn=_lockSave(); if(!btn) return;
+  try{ await api(`/aradi/seller-payments/${id}`,{method:'PUT',body:JSON.stringify(body)}); closeModal(); toast('تم التعديل','success'); loadSellerPayments(); }
+  catch(e){ document.getElementById('esp-err').textContent=e.message; _unlockSave(btn); }
 }
 
 async function showSellerPayStandalone(){
@@ -628,12 +726,20 @@ async function saveSellerPayStandalone(){
   const err=document.getElementById('spx-err');
   if(!body.contract_id){ err.textContent='اختر عقد الشراء'; return; }
   if(!body.amount){ err.textContent='المبلغ مطلوب'; return; }
+  const btn=_lockSave(); if(!btn) return;
   try{ await api('/aradi/seller-payments',{method:'POST',body:JSON.stringify(body)}); closeModal(); toast('تم تسجيل الدفعة','success'); loadSellerPayments(); }
-  catch(e){ err.textContent=e.message; }
+  catch(e){ err.textContent=e.message; _unlockSave(btn); }
 }
 
 async function voidSellerPayment(id){
   confirm2('إلغاء هذه الدفعة؟',async()=>{ await api(`/aradi/seller-payments/${id}`,{method:'PUT',body:JSON.stringify({status:'void'})}); toast('تم الإلغاء','success'); loadSellerPayments(); });
+}
+
+async function deleteSellerPay(id){
+  confirm2('هل تريد حذف هذه الدفعة نهائياً؟',async()=>{
+    await api(`/aradi/seller-payments/${id}`,{method:'DELETE'});
+    toast('تم حذف الدفعة','success'); loadSellerPayments();
+  });
 }
 
 /* ════════════ BUYERS ════════════ */
