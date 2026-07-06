@@ -47,7 +47,89 @@ CREATE TABLE IF NOT EXISTS aradi_buyers (
 );
 
 
--- 3. aradi_sale_contracts — عقود البيع
+-- 3. aradi_sellers — البائعون / ملاك الأراضي
+CREATE TABLE IF NOT EXISTS aradi_sellers (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    phone       TEXT,
+    address     TEXT,
+    notes       TEXT,
+    created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+
+-- 4. aradi_purchase_contracts — عقود الشراء
+CREATE TABLE IF NOT EXISTS aradi_purchase_contracts (
+    id                      BIGSERIAL PRIMARY KEY,
+    plot_id                 BIGINT REFERENCES aradi_plots(id) ON DELETE RESTRICT,
+    seller_id               BIGINT NOT NULL REFERENCES aradi_sellers(id) ON DELETE RESTRICT,
+    contract_number         TEXT,
+    purchase_price          NUMERIC(14,3) NOT NULL CHECK (purchase_price >= 0),
+    down_payment            NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK (down_payment >= 0),
+    installment_amount      NUMERIC(14,3) NOT NULL DEFAULT 0 CHECK (installment_amount >= 0),
+    installment_count       INTEGER NOT NULL DEFAULT 0 CHECK (installment_count >= 0),
+    first_installment_date  DATE,
+    status                  TEXT NOT NULL DEFAULT 'active'
+                            CHECK (status IN ('active','completed','cancelled','defaulted')),
+    notes                   TEXT,
+    created_by              INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_aradi_purchase_contracts_seller ON aradi_purchase_contracts(seller_id);
+CREATE INDEX IF NOT EXISTS idx_aradi_purchase_contracts_plot   ON aradi_purchase_contracts(plot_id);
+CREATE INDEX IF NOT EXISTS idx_aradi_purchase_contracts_status ON aradi_purchase_contracts(status);
+
+
+-- 5. aradi_purchase_installments — أقساط الشراء المتوقعة
+CREATE TABLE IF NOT EXISTS aradi_purchase_installments (
+    id                  BIGSERIAL PRIMARY KEY,
+    contract_id         BIGINT NOT NULL REFERENCES aradi_purchase_contracts(id) ON DELETE CASCADE,
+    installment_number  INTEGER NOT NULL,
+    due_date            DATE NOT NULL,
+    amount              NUMERIC(14,3) NOT NULL CHECK (amount >= 0),
+    notes               TEXT,
+    created_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (contract_id, installment_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_aradi_purchase_installments_contract ON aradi_purchase_installments(contract_id);
+CREATE INDEX IF NOT EXISTS idx_aradi_purchase_installments_due_date ON aradi_purchase_installments(due_date);
+
+
+-- 6. aradi_seller_payments — المبالغ المدفوعة فعلياً للبائعين
+CREATE TABLE IF NOT EXISTS aradi_seller_payments (
+    id              BIGSERIAL PRIMARY KEY,
+    contract_id     BIGINT NOT NULL REFERENCES aradi_purchase_contracts(id) ON DELETE RESTRICT,
+    installment_id  BIGINT REFERENCES aradi_purchase_installments(id) ON DELETE SET NULL,
+    payment_type    TEXT NOT NULL DEFAULT 'installment'
+                    CHECK (payment_type IN ('down_payment','installment','extra','correction')),
+    amount          NUMERIC(14,3) NOT NULL,
+    payment_date    DATE NOT NULL,
+    method          TEXT NOT NULL DEFAULT 'cash'
+                    CHECK (method IN ('cash','check','bank_transfer','other')),
+    status          TEXT NOT NULL DEFAULT 'confirmed'
+                    CHECK (status IN ('pending','confirmed','rejected','void')),
+    notes           TEXT,
+    created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE aradi_seller_payments
+    DROP CONSTRAINT IF EXISTS aradi_seller_payments_amount_check;
+ALTER TABLE aradi_seller_payments
+    ADD CONSTRAINT aradi_seller_payments_amount_check
+    CHECK (amount > 0 OR payment_type = 'correction');
+
+CREATE INDEX IF NOT EXISTS idx_aradi_seller_payments_contract ON aradi_seller_payments(contract_id);
+CREATE INDEX IF NOT EXISTS idx_aradi_seller_payments_status   ON aradi_seller_payments(status);
+
+
+-- 7. aradi_sale_contracts — عقود البيع
 CREATE TABLE IF NOT EXISTS aradi_sale_contracts (
     id                      BIGSERIAL PRIMARY KEY,
     plot_id                 BIGINT REFERENCES aradi_plots(id) ON DELETE RESTRICT,
@@ -193,7 +275,7 @@ CREATE INDEX IF NOT EXISTS idx_aradi_investor_payments_status     ON aradi_inves
 CREATE TABLE IF NOT EXISTS aradi_checks (
     id              BIGSERIAL PRIMARY KEY,
     related_type    TEXT NOT NULL
-                    CHECK (related_type IN ('buyer_payment','investor_payment','expense','manual')),
+                    CHECK (related_type IN ('buyer_payment','seller_payment','investor_payment','expense','manual')),
     related_id      BIGINT,
     person_name     TEXT,
     check_number    TEXT,
@@ -209,6 +291,12 @@ CREATE TABLE IF NOT EXISTS aradi_checks (
     created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE aradi_checks
+    DROP CONSTRAINT IF EXISTS aradi_checks_related_type_check;
+ALTER TABLE aradi_checks
+    ADD CONSTRAINT aradi_checks_related_type_check
+    CHECK (related_type IN ('buyer_payment','seller_payment','investor_payment','expense','manual'));
 
 CREATE INDEX IF NOT EXISTS idx_aradi_checks_status    ON aradi_checks(status);
 CREATE INDEX IF NOT EXISTS idx_aradi_checks_direction ON aradi_checks(direction);
@@ -318,7 +406,118 @@ JOIN aradi_buyers b ON b.id = sc.buyer_id
 LEFT JOIN aradi_plots p ON p.id = sc.plot_id;
 
 
--- V2: Installment balance view
+-- V2: Purchase contract balance view
+CREATE OR REPLACE VIEW aradi_v_purchase_contract_balance AS
+SELECT
+    pc.id                                               AS contract_id,
+    pc.contract_number,
+    pc.seller_id,
+    s.name                                              AS seller_name,
+    pc.plot_id,
+    p.plot_number,
+    pc.purchase_price,
+    pc.down_payment,
+    pc.installment_amount,
+    pc.installment_count,
+    pc.first_installment_date,
+    pc.status,
+
+    COALESCE((
+        SELECT SUM(sp.amount)
+        FROM aradi_seller_payments sp
+        WHERE sp.contract_id = pc.id
+          AND sp.status = 'confirmed'
+    ), 0)                                               AS total_paid,
+
+    pc.purchase_price - COALESCE((
+        SELECT SUM(sp.amount)
+        FROM aradi_seller_payments sp
+        WHERE sp.contract_id = pc.id
+          AND sp.status = 'confirmed'
+    ), 0)                                               AS remaining,
+
+    COALESCE((
+        SELECT SUM(pi.amount)
+        FROM aradi_purchase_installments pi
+        WHERE pi.contract_id = pc.id
+    ), 0)                                               AS installment_total_expected,
+
+    (
+        SELECT COUNT(*)
+        FROM aradi_purchase_installments pi
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(SUM(sp2.amount), 0) AS paid
+            FROM aradi_seller_payments sp2
+            WHERE sp2.installment_id = pi.id
+              AND sp2.status = 'confirmed'
+        ) pay ON TRUE
+        WHERE pi.contract_id = pc.id
+          AND pi.due_date < CURRENT_DATE
+          AND pay.paid < pi.amount
+    )                                                   AS overdue_installments_count,
+
+    (
+        SELECT MIN(pi.due_date)
+        FROM aradi_purchase_installments pi
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(SUM(sp2.amount), 0) AS paid
+            FROM aradi_seller_payments sp2
+            WHERE sp2.installment_id = pi.id
+              AND sp2.status = 'confirmed'
+        ) pay ON TRUE
+        WHERE pi.contract_id = pc.id
+          AND pay.paid < pi.amount
+          AND pi.due_date >= CURRENT_DATE
+    )                                                   AS next_installment_date
+
+FROM aradi_purchase_contracts pc
+JOIN aradi_sellers s ON s.id = pc.seller_id
+LEFT JOIN aradi_plots p ON p.id = pc.plot_id;
+
+
+-- V3: Purchase installment balance view
+CREATE OR REPLACE VIEW aradi_v_purchase_installment_balance AS
+SELECT
+    pi.id                       AS installment_id,
+    pi.contract_id,
+    pi.installment_number,
+    pi.due_date,
+    pi.amount,
+    COALESCE((
+        SELECT SUM(sp.amount)
+        FROM aradi_seller_payments sp
+        WHERE sp.installment_id = pi.id
+          AND sp.status = 'confirmed'
+    ), 0)                       AS paid,
+
+    pi.amount - COALESCE((
+        SELECT SUM(sp.amount)
+        FROM aradi_seller_payments sp
+        WHERE sp.installment_id = pi.id
+          AND sp.status = 'confirmed'
+    ), 0)                       AS remaining,
+
+    CASE
+        WHEN COALESCE((
+            SELECT SUM(sp.amount)
+            FROM aradi_seller_payments sp
+            WHERE sp.installment_id = pi.id
+              AND sp.status = 'confirmed'
+        ), 0) >= pi.amount                          THEN 'paid'
+        WHEN COALESCE((
+            SELECT SUM(sp.amount)
+            FROM aradi_seller_payments sp
+            WHERE sp.installment_id = pi.id
+              AND sp.status = 'confirmed'
+        ), 0) > 0                                   THEN 'partial'
+        WHEN pi.due_date < CURRENT_DATE             THEN 'overdue'
+        ELSE 'pending'
+    END                         AS computed_status
+
+FROM aradi_purchase_installments pi;
+
+
+-- V4: Installment balance view
 CREATE OR REPLACE VIEW aradi_v_installment_balance AS
 SELECT
     i.id                        AS installment_id,
@@ -360,7 +559,7 @@ SELECT
 FROM aradi_installments i;
 
 
--- V3: Investment balance view
+-- V5: Investment balance view
 CREATE OR REPLACE VIEW aradi_v_investment_balance AS
 SELECT
     inv.id                          AS investment_id,
