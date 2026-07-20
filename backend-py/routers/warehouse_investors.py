@@ -108,6 +108,29 @@ async def get_category_total_profit(pool, category_id: int) -> float:
         return {"total_sold": 0, "total_cost": 0, "total_profit": 0}
 
 
+async def link_all_investors_to_category(conn, category_id: int, created_by=None):
+    """يربط كل المستثمرين بهذه الفئة، ناسخاً رأس مال كل مستثمر (المبلغ نفسه
+    المسجَّل في فئاته الأخرى — رأس المال يُحسب مرة واحدة). لا يستبدل أي مساهمة
+    موجودة مسبقاً، بل يضيف فقط الروابط الناقصة."""
+    await conn.execute(
+        """
+        INSERT INTO warehouse_category_investments
+            (category_id, investor_id, amount, paid_amount, created_by)
+        SELECT $1, i.id, COALESCE(p.principal, 0), COALESCE(p.paid, 0), $2
+        FROM warehouse_investors i
+        LEFT JOIN (
+            SELECT investor_id,
+                   MAX(amount)      AS principal,
+                   MAX(paid_amount) AS paid
+            FROM warehouse_category_investments
+            GROUP BY investor_id
+        ) p ON p.investor_id = i.id
+        ON CONFLICT (category_id, investor_id) DO NOTHING
+        """,
+        category_id, created_by,
+    )
+
+
 # ── Pydantic models ──────────────────────────────────────────
 
 class InvestorIn(BaseModel):

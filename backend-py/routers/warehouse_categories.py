@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from config.db import get_pool
 from middleware.auth import get_current_user
 from middleware.roles import require_role
+from routers.warehouse_investors import link_all_investors_to_category
 
 router = APIRouter()
 
@@ -395,6 +396,12 @@ async def create_category(data: CategoryRequest, user=Depends(get_current_user))
                     """,
                     name,
                     icon,
+                )
+
+                # يربط كل المستثمرين تلقائياً بالفئة الجديدة (بنفس رأس مالهم)
+                # حتى تظهر الفئة فوراً في تفاصيل كل مستثمر وحصته من الربح
+                await link_all_investors_to_category(
+                    conn, row["id"], user.get("id")
                 )
 
                 await insert_category_audit(

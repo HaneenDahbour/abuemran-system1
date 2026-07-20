@@ -60,6 +60,30 @@ async def startup():
             ADD COLUMN IF NOT EXISTS paid_amount NUMERIC(14,3) DEFAULT 0
         """)
 
+        # يعالج الفئات (الحاويات) التي أُنشئت قبل ميزة الربط التلقائي وما زالت
+        # بلا أي مستثمرين: يربط كل المستثمرين بها بنسخ رأس مال كل مستثمر.
+        # يقتصر على الفئات الفارغة فقط حتى لا يمسّ أي مساهمات مضبوطة يدوياً،
+        # وهو idempotent — بمجرد أن تحوي الفئة روابط يتم تخطيها.
+        await conn.execute("""
+            INSERT INTO warehouse_category_investments
+                (category_id, investor_id, amount, paid_amount)
+            SELECT c.id, i.id, COALESCE(p.principal, 0), COALESCE(p.paid, 0)
+            FROM warehouse_categories c
+            CROSS JOIN warehouse_investors i
+            LEFT JOIN (
+                SELECT investor_id,
+                       MAX(amount)      AS principal,
+                       MAX(paid_amount) AS paid
+                FROM warehouse_category_investments
+                GROUP BY investor_id
+            ) p ON p.investor_id = i.id
+            WHERE NOT EXISTS (
+                SELECT 1 FROM warehouse_category_investments w
+                WHERE w.category_id = c.id
+            )
+            ON CONFLICT (category_id, investor_id) DO NOTHING
+        """)
+
 
 @app.on_event("shutdown")
 async def shutdown():
