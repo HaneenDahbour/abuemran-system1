@@ -255,13 +255,36 @@ async def update_user(user_id: int, data: CreateUserRequest, user=Depends(get_cu
     if data.role not in valid_roles:
         raise HTTPException(status_code=400, detail="الصلاحية غير صالحة")
     pool = await get_pool()
+    current = await pool.fetchrow(
+        "SELECT client_id, recipient_name, shop_id, permissions FROM users WHERE id=$1",
+        user_id,
+    )
+    if not current:
+        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
+
+    fields_set = getattr(data, "model_fields_set", getattr(data, "__fields_set__", set()))
+    client_id = data.client_id if "client_id" in fields_set else current["client_id"]
+    recipient_name = data.recipient_name if "recipient_name" in fields_set else current["recipient_name"]
+    shop_id = data.shop_id if "shop_id" in fields_set else current["shop_id"]
+    if "permissions" in fields_set:
+        permissions = json.dumps(data.permissions) if data.permissions is not None else None
+    else:
+        permissions = current["permissions"]
+
+    if data.role == "client" and not client_id:
+        raise HTTPException(status_code=400, detail="حساب العميل يحتاج ربطه بعميل رئيسي")
+    if data.role == "recipient" and not recipient_name:
+        raise HTTPException(status_code=400, detail="حساب الزبون يحتاج اسم الزبون")
+    if data.role in ("shop_manager", "shop_employee") and not shop_id:
+        raise HTTPException(status_code=400, detail="حساب موظف المحل يحتاج ربطه بمحل")
+
     updates = ["full_name=$1", "role=$2", "client_id=$3", "recipient_name=$4",
                "base_salary=COALESCE($5, base_salary)", "shop_id=$6"]
-    params = [full_name, data.role, data.client_id, data.recipient_name,
+    params = [full_name, data.role, client_id, recipient_name,
               round(float(data.base_salary), 3) if data.base_salary is not None else None,
-              data.shop_id]
+              shop_id]
     updates.append(f"permissions=${len(params)+1}")
-    params.append(json.dumps(data.permissions) if data.permissions is not None else None)
+    params.append(permissions)
     if data.password:
         hashed = pwd_context.hash(data.password)
         updates.append(f"password_hash=${len(params)+1}")
@@ -271,8 +294,6 @@ async def update_user(user_id: int, data: CreateUserRequest, user=Depends(get_cu
         f"UPDATE users SET {', '.join(updates)} WHERE id=${len(params)} RETURNING id, username, full_name, role, client_id, recipient_name, base_salary, shop_id, permissions",
         *params
     )
-    if not row:
-        raise HTTPException(status_code=404, detail="المستخدم غير موجود")
     result = dict(row)
     result["permissions"] = parse_permissions(result.get("permissions"))
     return result

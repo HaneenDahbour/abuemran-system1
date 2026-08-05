@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from config.db import get_pool
 from middleware.auth import get_current_user
-from middleware.roles import require_role
+from middleware.roles import require_permission, require_role
 
 router = APIRouter()
 
@@ -98,6 +98,7 @@ def next_month(value: date) -> date:
 @router.get("")
 async def list_expenses(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
     try:
         rows = await pool.fetch("""
@@ -107,13 +108,14 @@ async def list_expenses(user=Depends(get_current_user)):
             ORDER BY e.expense_date DESC, e.id DESC
         """)
         return [row_to_dict(r) for r in rows]
-    except Exception:
-        return []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر تحميل المصاريف: {str(e)}")
 
 
 @router.post("")
 async def create_expense(data: ExpenseIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
 
     name = str(data.name or "").strip()
     if not name:
@@ -163,6 +165,7 @@ async def create_expense(data: ExpenseIn, user=Depends(get_current_user)):
 @router.put("/{expense_id}")
 async def update_expense(expense_id: int, data: ExpenseIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     name = str(data.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="اسم المصروف مطلوب")
@@ -188,6 +191,7 @@ async def update_expense(expense_id: int, data: ExpenseIn, user=Depends(get_curr
 @router.delete("/{expense_id}")
 async def delete_expense(expense_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "expenses")
     pool = await get_pool()
     deleted = await pool.fetchrow(
         "DELETE FROM cashbox_expenses WHERE id=$1 RETURNING id", expense_id
@@ -202,6 +206,7 @@ async def delete_expense(expense_id: int, user=Depends(get_current_user)):
 @router.get("/salaries")
 async def list_salaries(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
     try:
         rows = await pool.fetch("""
@@ -211,13 +216,14 @@ async def list_salaries(user=Depends(get_current_user)):
             ORDER BY s.salary_month DESC, s.id DESC
         """)
         return [row_to_dict(r) for r in rows]
-    except Exception:
-        return []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر تحميل الرواتب: {str(e)}")
 
 
 @router.post("/salaries")
 async def create_salary(data: SalaryIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
 
     employee_name = str(data.employee_name or "").strip()
     if not employee_name:
@@ -228,28 +234,47 @@ async def create_salary(data: SalaryIn, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="قيمة الراتب يجب أن تكون أكبر من صفر")
 
     salary_month = parse_date(data.salary_month)
-    paid_date    = parse_date(data.paid_date)
+    status = (data.status or "paid").strip().lower()
+    if status not in ("paid", "pending"):
+        raise HTTPException(status_code=400, detail="حالة الراتب غير صحيحة")
+    paid_date = parse_date(data.paid_date) if status == "paid" else None
     pool = await get_pool()
 
     try:
-        row = await pool.fetchrow(
-            """
-            INSERT INTO employee_salaries
-              (employee_user_id, employee_name, salary_amount, salary_month,
-               paid_date, status, notes, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-            RETURNING *
-            """,
-            data.employee_user_id,
-            employee_name,
-            amount,
-            salary_month,
-            paid_date,
-            data.status or "paid",
-            data.notes,
-            user.get("id"),
-        )
-        return row_to_dict(row)
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                if data.employee_user_id:
+                    employee_exists = await conn.fetchval(
+                        "SELECT id FROM users WHERE id=$1 FOR UPDATE", data.employee_user_id
+                    )
+                    if not employee_exists:
+                        raise HTTPException(status_code=400, detail="الموظف غير موجود")
+                    duplicate = await conn.fetchval(
+                        """
+                        SELECT EXISTS(
+                          SELECT 1 FROM employee_salaries
+                          WHERE employee_user_id=$1
+                            AND date_trunc('month', salary_month)=date_trunc('month', $2::date)
+                        )
+                        """,
+                        data.employee_user_id, salary_month,
+                    )
+                    if duplicate:
+                        raise HTTPException(status_code=409, detail="راتب هذا الموظف مسجل لهذا الشهر مسبقاً")
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO employee_salaries
+                      (employee_user_id, employee_name, salary_amount, salary_month,
+                       paid_date, status, notes, created_by)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                    RETURNING *
+                    """,
+                    data.employee_user_id, employee_name, amount, salary_month,
+                    paid_date, status, data.notes, user.get("id"),
+                )
+                return row_to_dict(row)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"تعذر حفظ الراتب: {str(e)}")
 
@@ -259,6 +284,7 @@ async def create_salary(data: SalaryIn, user=Depends(get_current_user)):
 @router.put("/salaries/{salary_id}")
 async def update_salary(salary_id: int, data: SalaryIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     employee_name = str(data.employee_name or "").strip()
     if not employee_name:
         raise HTTPException(status_code=400, detail="اسم الموظف مطلوب")
@@ -266,28 +292,63 @@ async def update_salary(salary_id: int, data: SalaryIn, user=Depends(get_current
     if amount <= 0:
         raise HTTPException(status_code=400, detail="قيمة الراتب يجب أن تكون أكبر من صفر")
     salary_month = parse_date(data.salary_month)
-    paid_date = parse_date(data.paid_date)
+    status = (data.status or "paid").strip().lower()
+    if status not in ("paid", "pending"):
+        raise HTTPException(status_code=400, detail="حالة الراتب غير صحيحة")
+    paid_date = parse_date(data.paid_date) if status == "paid" else None
     pool = await get_pool()
     try:
-        row = await pool.fetchrow(
-            """
-            UPDATE employee_salaries
-            SET employee_user_id=$1, employee_name=$2, salary_amount=$3,
-                salary_month=$4, paid_date=$5, status=$6, notes=$7
-            WHERE id=$8 RETURNING *
-            """,
-            data.employee_user_id, employee_name, amount,
-            salary_month, paid_date, data.status or "paid", data.notes, salary_id,
-        )
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                current = await conn.fetchrow(
+                    "SELECT employee_user_id, salary_month FROM employee_salaries WHERE id=$1 FOR UPDATE",
+                    salary_id,
+                )
+                if not current:
+                    raise HTTPException(status_code=404, detail="الراتب غير موجود")
+                if data.employee_user_id:
+                    employee_exists = await conn.fetchval(
+                        "SELECT id FROM users WHERE id=$1 FOR UPDATE", data.employee_user_id
+                    )
+                    if not employee_exists:
+                        raise HTTPException(status_code=400, detail="الموظف غير موجود")
+                same_identity_month = (
+                    current["employee_user_id"] == data.employee_user_id
+                    and current["salary_month"].replace(day=1) == salary_month.replace(day=1)
+                )
+                if data.employee_user_id and not same_identity_month:
+                    duplicate = await conn.fetchval(
+                        """
+                        SELECT EXISTS(
+                          SELECT 1 FROM employee_salaries
+                          WHERE employee_user_id=$1 AND id<>$2
+                            AND date_trunc('month', salary_month)=date_trunc('month', $3::date)
+                        )
+                        """,
+                        data.employee_user_id, salary_id, salary_month,
+                    )
+                    if duplicate:
+                        raise HTTPException(status_code=409, detail="راتب هذا الموظف مسجل لهذا الشهر مسبقاً")
+                row = await conn.fetchrow(
+                    """
+                    UPDATE employee_salaries
+                    SET employee_user_id=$1, employee_name=$2, salary_amount=$3,
+                        salary_month=$4, paid_date=$5, status=$6, notes=$7
+                    WHERE id=$8 RETURNING *
+                    """,
+                    data.employee_user_id, employee_name, amount,
+                    salary_month, paid_date, status, data.notes, salary_id,
+                )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"تعذر تعديل الراتب: {str(e)}")
-    if not row:
-        raise HTTPException(status_code=404, detail="الراتب غير موجود")
     return row_to_dict(row)
 
 @router.delete("/salaries/{salary_id}")
 async def delete_salary(salary_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "expenses")
     pool = await get_pool()
     deleted = await pool.fetchrow(
         "DELETE FROM employee_salaries WHERE id=$1 RETURNING id", salary_id
@@ -302,6 +363,7 @@ async def delete_salary(salary_id: int, user=Depends(get_current_user)):
 @router.get("/advances")
 async def list_advances(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
     try:
         rows = await pool.fetch("""
@@ -311,13 +373,14 @@ async def list_advances(user=Depends(get_current_user)):
             ORDER BY ea.advance_date DESC, ea.id DESC
         """)
         return [row_to_dict(r) for r in rows]
-    except Exception:
-        return []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر تحميل السلف: {str(e)}")
 
 
 @router.post("/advances")
 async def create_advance(data: AdvanceIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
 
     employee_name = str(data.employee_name or "").strip()
     if not employee_name:
@@ -350,10 +413,42 @@ async def create_advance(data: AdvanceIn, user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"تعذر حفظ السلفة: {str(e)}")
 
     out = row_to_dict(row)
-    out["settlement"] = await settle_advance_against_salary(
-        pool, data.user_id, employee_name, amount, advance_date, user
+    # Advances remain immutable ledger entries. Salary coverage is calculated
+    # from the ledger instead of mutating/creating salary rows as a side effect.
+    out["settlement"] = await preview_advance_against_salary(
+        pool, data.user_id, advance_date
     )
     return out
+
+
+async def preview_advance_against_salary(pool, user_id, advance_date):
+    result = {
+        "auto_settled": False,
+        "already_paid": False,
+        "base_salary": 0.0,
+        "month_advances": 0.0,
+        "remaining_salary": None,
+    }
+    if not user_id:
+        return result
+
+    start = advance_date.replace(day=1)
+    end = next_month(start)
+    base_salary = float(await pool.fetchval(
+        "SELECT COALESCE(base_salary, 0) FROM users WHERE id=$1", user_id
+    ) or 0)
+    month_advances = float(await pool.fetchval(
+        """
+        SELECT COALESCE(SUM(amount), 0) FROM employee_advances
+        WHERE user_id=$1 AND advance_date >= $2 AND advance_date < $3
+        """,
+        user_id, start, end,
+    ) or 0)
+    result["base_salary"] = round(base_salary, 3)
+    result["month_advances"] = round(month_advances, 3)
+    if base_salary > 0:
+        result["remaining_salary"] = round(max(base_salary - month_advances, 0), 3)
+    return result
 
 
 async def settle_advance_against_salary(pool, user_id, employee_name, amount, advance_date, user):
@@ -472,6 +567,7 @@ async def settle_advance_against_salary(pool, user_id, employee_name, amount, ad
 @router.put("/advances/{advance_id}")
 async def update_advance(advance_id: int, data: AdvanceIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     employee_name = str(data.employee_name or "").strip()
     if not employee_name:
         raise HTTPException(status_code=400, detail="اسم الموظف مطلوب")
@@ -497,6 +593,7 @@ async def update_advance(advance_id: int, data: AdvanceIn, user=Depends(get_curr
 @router.delete("/advances/{advance_id}")
 async def delete_advance(advance_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "expenses")
     pool = await get_pool()
     deleted = await pool.fetchrow(
         "DELETE FROM employee_advances WHERE id=$1 RETURNING id", advance_id
@@ -511,6 +608,7 @@ async def delete_advance(advance_id: int, user=Depends(get_current_user)):
 @router.get("/warehouse-rents")
 async def list_warehouse_rents(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
     try:
         rows = await pool.fetch("""
@@ -523,13 +621,14 @@ async def list_warehouse_rents(user=Depends(get_current_user)):
             ORDER BY r.created_at DESC, r.id DESC
         """)
         return [row_to_dict(r) for r in rows]
-    except Exception:
-        return []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"تعذر تحميل إيجارات المستودع: {str(e)}")
 
 
 @router.post("/warehouse-rents")
 async def create_warehouse_rent(data: WarehouseRentIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
 
     name = str(data.name or "").strip()
     if not name:
@@ -566,6 +665,7 @@ async def create_warehouse_rent(data: WarehouseRentIn, user=Depends(get_current_
 @router.put("/warehouse-rents/{rent_id}")
 async def update_warehouse_rent(rent_id: int, data: WarehouseRentIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
 
     name = str(data.name or "").strip()
     if not name:
@@ -600,6 +700,7 @@ async def update_warehouse_rent(rent_id: int, data: WarehouseRentIn, user=Depend
 @router.delete("/warehouse-rents/{rent_id}")
 async def delete_warehouse_rent(rent_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "expenses")
     pool = await get_pool()
     deleted = await pool.fetchrow(
         "DELETE FROM warehouse_rents WHERE id=$1 RETURNING id", rent_id
@@ -612,6 +713,7 @@ async def delete_warehouse_rent(rent_id: int, user=Depends(get_current_user)):
 @router.get("/warehouse-rents/{rent_id}/payments")
 async def list_warehouse_rent_payments(rent_id: int, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
 
     rent = await pool.fetchrow("SELECT * FROM warehouse_rents WHERE id=$1", rent_id)
@@ -659,6 +761,7 @@ async def list_warehouse_rent_payments(rent_id: int, user=Depends(get_current_us
 @router.post("/warehouse-rents/{rent_id}/payments/toggle")
 async def toggle_warehouse_rent_payment(rent_id: int, data: WarehouseRentPaymentIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
 
     status = (data.status or "pending").strip().lower()
     if status not in ("paid", "pending"):
@@ -692,6 +795,7 @@ async def toggle_warehouse_rent_payment(rent_id: int, data: WarehouseRentPayment
 @router.get("/unlinked-names")
 async def get_unlinked_employee_names(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
     rows = await pool.fetch("""
         SELECT DISTINCT employee_name FROM employee_salaries
@@ -711,6 +815,7 @@ async def employee_financial_statement(
     user_id: int, user=Depends(get_current_user)
 ):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
 
     employee = await pool.fetchrow(
@@ -759,6 +864,7 @@ async def employee_financial_statement(
 @router.get("/employees-list")
 async def get_employees_for_dropdown(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "expenses")
     pool = await get_pool()
     rows = await pool.fetch("""
         SELECT id, full_name, role FROM users

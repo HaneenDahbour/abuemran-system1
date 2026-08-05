@@ -125,6 +125,16 @@ async def get_aradi_dashboard(user=Depends(get_current_user)):
                 FROM aradi_sale_contracts
                 WHERE status IN ('active', 'completed')
             ),
+            purchase_contracts AS (
+                SELECT COALESCE(SUM(purchase_price), 0) AS total_purchase_price
+                FROM aradi_purchase_contracts
+                WHERE status IN ('active', 'completed')
+            ),
+            seller_payments AS (
+                SELECT COALESCE(SUM(amount), 0) AS total
+                FROM aradi_seller_payments
+                WHERE status = 'confirmed'
+            ),
             overdue AS (
                 SELECT COUNT(*) AS cnt
                 FROM aradi_installments i
@@ -135,6 +145,17 @@ async def get_aradi_dashboard(user=Depends(get_current_user)):
                       WHERE bp.installment_id = i.id
                         AND bp.status = 'confirmed'
                   ), 0) < i.amount
+            ),
+            overdue_purchase AS (
+                SELECT COUNT(*) AS cnt
+                FROM aradi_purchase_installments pi
+                WHERE pi.due_date < CURRENT_DATE
+                  AND COALESCE((
+                      SELECT SUM(sp.amount)
+                      FROM aradi_seller_payments sp
+                      WHERE sp.installment_id = pi.id
+                        AND sp.status = 'confirmed'
+                  ), 0) < pi.amount
             ),
             investments AS (
                 SELECT
@@ -164,15 +185,21 @@ async def get_aradi_dashboard(user=Depends(get_current_user)):
                 contracts.total_sale_price,
                 buyer_payments.total                                            AS total_buyer_payments,
                 contracts.total_sale_price - buyer_payments.total               AS total_remaining_from_buyers,
+                purchase_contracts.total_purchase_price,
+                seller_payments.total                                           AS total_seller_payments,
+                purchase_contracts.total_purchase_price - seller_payments.total AS total_remaining_to_sellers,
+                purchase_contracts.total_purchase_price + expenses.total        AS total_land_cost,
                 overdue.cnt                                                     AS overdue_installments_count,
+                overdue_purchase.cnt                                            AS overdue_purchase_installments_count,
                 investments.total_capital                                       AS total_investor_capital,
                 investments.total_profit                                        AS total_investor_profit,
                 investments.total_due                                           AS total_investor_due,
                 investor_payments.total                                         AS total_investor_payments,
                 investments.total_due - investor_payments.total                 AS remaining_investor_obligations,
                 expenses.total                                                  AS total_expenses,
-                buyer_payments.total - investor_payments.total - expenses.total AS net_cash
-            FROM plots, buyer_payments, contracts, overdue, investments, investor_payments, expenses
+                buyer_payments.total - seller_payments.total - investor_payments.total - expenses.total AS net_cash
+            FROM plots, buyer_payments, contracts, purchase_contracts, seller_payments,
+                 overdue, overdue_purchase, investments, investor_payments, expenses
         """)
         return row_to_dict(row)
     except Exception as e:
@@ -328,6 +355,11 @@ async def delete_plot(plot_id: int, user=Depends(get_current_user)):
             )
             if contracts > 0:
                 raise HTTPException(status_code=400, detail="لا يمكن حذف القطعة لوجود عقود مرتبطة بها")
+            purchase_contracts = await conn.fetchval(
+                "SELECT COUNT(*) FROM aradi_purchase_contracts WHERE plot_id=$1", plot_id
+            )
+            if purchase_contracts > 0:
+                raise HTTPException(status_code=400, detail="لا يمكن حذف القطعة لوجود عقود شراء مرتبطة بها")
             investments = await conn.fetchval(
                 "SELECT COUNT(*) FROM aradi_investments WHERE plot_id=$1", plot_id
             )
@@ -445,6 +477,744 @@ async def delete_buyer(buyer_id: int, user=Depends(get_current_user)):
                 raise HTTPException(status_code=404, detail="المشتري غير موجود")
             await audit(conn, user, "delete", "aradi_buyer", buyer_id,
                         f"حذف المشتري: {row['name']}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# Sellers — البائعون
+# ═══════════════════════════════════════════════════════════════
+
+class SellerRequest(BaseModel):
+    name: str
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.get("/sellers")
+async def list_sellers(user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("SELECT * FROM aradi_sellers ORDER BY id DESC")
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sellers")
+async def create_seller(data: SellerRequest, user=Depends(get_current_user)):
+    require_access(user)
+    if not data.name.strip():
+        raise HTTPException(status_code=400, detail="اسم البائع مطلوب")
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO aradi_sellers (name, phone, address, notes)
+                VALUES ($1,$2,$3,$4) RETURNING *
+            """, data.name.strip(), data.phone, data.address, data.notes)
+            await audit(conn, user, "create", "aradi_seller", row["id"],
+                        f"إضافة بائع: {row['name']}")
+            return row_to_dict(row)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sellers/{seller_id}")
+async def get_seller(seller_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        row = await pool.fetchrow("SELECT * FROM aradi_sellers WHERE id = $1", seller_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="البائع غير موجود")
+        return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/sellers/{seller_id}")
+async def update_seller(seller_id: int, data: SellerRequest, user=Depends(get_current_user)):
+    require_access(user)
+    if not data.name.strip():
+        raise HTTPException(status_code=400, detail="اسم البائع مطلوب")
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE aradi_sellers
+                SET name=COALESCE($1,name), phone=$2, address=$3, notes=$4, updated_at=NOW()
+                WHERE id=$5 RETURNING *
+            """, data.name.strip(), data.phone, data.address, data.notes, seller_id)
+            if not row:
+                raise HTTPException(status_code=404, detail="البائع غير موجود")
+            await audit(conn, user, "update", "aradi_seller", seller_id,
+                        f"تعديل بيانات البائع: {row['name']}")
+            return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/sellers/{seller_id}")
+async def delete_seller(seller_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            contracts = await conn.fetchval(
+                "SELECT COUNT(*) FROM aradi_purchase_contracts WHERE seller_id=$1",
+                seller_id,
+            )
+            if contracts > 0:
+                raise HTTPException(status_code=400, detail="لا يمكن حذف البائع لوجود عقود شراء مرتبطة به")
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_sellers WHERE id=$1 RETURNING *", seller_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="البائع غير موجود")
+            await audit(conn, user, "delete", "aradi_seller", seller_id,
+                        f"حذف البائع: {row['name']}")
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# Purchase Contracts — عقود الشراء
+# ═══════════════════════════════════════════════════════════════
+
+ALLOWED_CONTRACT_STATUSES = {"active", "completed", "cancelled", "defaulted"}
+ALLOWED_PAYMENT_TYPES = {"down_payment", "installment", "extra", "correction"}
+ALLOWED_PAYMENT_METHODS = {"cash", "check", "bank_transfer", "other"}
+ALLOWED_PAYMENT_STATUSES = {"pending", "confirmed", "rejected", "void"}
+
+class PurchaseContractRequest(BaseModel):
+    plot_id: Optional[int] = None
+    seller_id: int
+    contract_number: Optional[str] = None
+    purchase_price: float
+    down_payment: Optional[float] = 0
+    installment_amount: Optional[float] = 0
+    installment_count: Optional[int] = 0
+    first_installment_date: Optional[str] = None
+    status: Optional[str] = "active"
+    notes: Optional[str] = None
+
+
+@router.get("/purchase-contracts")
+async def list_purchase_contracts(user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT pc.*,
+                   s.name AS seller_name,
+                   p.plot_number,
+                   COALESCE((
+                       SELECT SUM(e.amount)
+                       FROM aradi_expenses e
+                       WHERE e.plot_id = pc.plot_id
+                         AND e.status = 'confirmed'
+                   ), 0) AS total_expenses,
+                   COALESCE((
+                       SELECT SUM(sp.amount)
+                       FROM aradi_seller_payments sp
+                       WHERE sp.contract_id = pc.id
+                         AND sp.status = 'confirmed'
+                   ), 0) AS total_paid
+            FROM aradi_purchase_contracts pc
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            LEFT JOIN aradi_plots p ON p.id = pc.plot_id
+            ORDER BY pc.id DESC
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/purchase-contracts")
+async def create_purchase_contract(data: PurchaseContractRequest, user=Depends(get_current_user)):
+    require_access(user)
+    purchase_price = validate_amount(data.purchase_price, "سعر الشراء")
+    down_payment = validate_amount(data.down_payment or 0, "الدفعة الأولى")
+    installment_amount = validate_amount(data.installment_amount or 0, "مبلغ القسط")
+    installment_count = int(data.installment_count or 0)
+    if installment_count < 0:
+        raise HTTPException(status_code=400, detail="عدد الأقساط لا يمكن أن يكون سالباً")
+    if (data.status or "active") not in ALLOWED_CONTRACT_STATUSES:
+        raise HTTPException(status_code=400, detail="حالة العقد غير صحيحة")
+    first_date = parse_date(data.first_installment_date, "تاريخ أول قسط")
+    if installment_count > 0 and installment_amount > 0 and first_date is None:
+        raise HTTPException(status_code=400, detail="تاريخ أول قسط مطلوب عند تحديد الأقساط")
+
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                contract = await conn.fetchrow("""
+                    INSERT INTO aradi_purchase_contracts
+                        (plot_id, seller_id, contract_number, purchase_price,
+                         down_payment, installment_amount, installment_count,
+                         first_installment_date, status, notes, created_by)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                    RETURNING *
+                """,
+                    data.plot_id,
+                    data.seller_id,
+                    data.contract_number,
+                    purchase_price,
+                    down_payment,
+                    installment_amount,
+                    installment_count,
+                    first_date,
+                    data.status or "active",
+                    data.notes,
+                    user.get("id"),
+                )
+                contract_id = contract["id"]
+
+                if down_payment > 0:
+                    await conn.execute("""
+                        INSERT INTO aradi_seller_payments
+                            (contract_id, payment_type, amount, payment_date,
+                             method, status, notes, created_by)
+                        VALUES ($1,'down_payment',$2,CURRENT_DATE,'cash','confirmed',
+                                'دفعة أولى عند إنشاء عقد الشراء',$3)
+                    """, contract_id, down_payment, user.get("id"))
+
+                if installment_count > 0 and installment_amount > 0 and first_date:
+                    for n in range(1, installment_count + 1):
+                        await conn.execute("""
+                            INSERT INTO aradi_purchase_installments
+                                (contract_id, installment_number, due_date, amount)
+                            VALUES ($1, $2, $3, $4)
+                        """, contract_id, n, add_months(first_date, n - 1), installment_amount)
+
+                if data.plot_id:
+                    await conn.execute("""
+                        UPDATE aradi_plots
+                        SET purchase_price = $1, updated_at = NOW()
+                        WHERE id = $2
+                    """, purchase_price, data.plot_id)
+
+                await audit(conn, user, "create", "aradi_purchase_contract", contract_id,
+                            f"إنشاء عقد شراء رقم {contract['contract_number'] or contract_id}")
+
+        return row_to_dict(contract)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"خطأ في إنشاء عقد الشراء: {str(e)}")
+
+
+@router.get("/purchase-contracts/{contract_id}")
+async def get_purchase_contract(contract_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        row = await pool.fetchrow("""
+            SELECT pc.*, s.name AS seller_name, p.plot_number
+            FROM aradi_purchase_contracts pc
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            LEFT JOIN aradi_plots p ON p.id = pc.plot_id
+            WHERE pc.id = $1
+        """, contract_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="عقد الشراء غير موجود")
+        return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/purchase-contracts/{contract_id}")
+async def update_purchase_contract(
+    contract_id: int,
+    data: PurchaseContractRequest,
+    user=Depends(get_current_user),
+):
+    require_access(user)
+    purchase_price = validate_amount(data.purchase_price, "سعر الشراء")
+    down_payment = validate_amount(data.down_payment or 0, "الدفعة الأولى")
+    installment_amount = validate_amount(data.installment_amount or 0, "مبلغ القسط")
+    installment_count = int(data.installment_count or 0)
+    if installment_count < 0:
+        raise HTTPException(status_code=400, detail="عدد الأقساط لا يمكن أن يكون سالباً")
+    if (data.status or "active") not in ALLOWED_CONTRACT_STATUSES:
+        raise HTTPException(status_code=400, detail="حالة العقد غير صحيحة")
+    first_date = parse_date(data.first_installment_date, "تاريخ أول قسط")
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                UPDATE aradi_purchase_contracts
+                SET plot_id=$1, seller_id=$2, contract_number=$3,
+                    purchase_price=$4, down_payment=$5,
+                    installment_amount=$6, installment_count=$7,
+                    first_installment_date=$8, status=$9,
+                    notes=$10, updated_at=NOW()
+                WHERE id=$11 RETURNING *
+            """,
+                data.plot_id,
+                data.seller_id,
+                data.contract_number,
+                purchase_price,
+                down_payment,
+                installment_amount,
+                installment_count,
+                first_date,
+                data.status or "active",
+                data.notes,
+                contract_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="عقد الشراء غير موجود")
+            if data.plot_id:
+                await conn.execute("""
+                    UPDATE aradi_plots
+                    SET purchase_price=$1, updated_at=NOW()
+                    WHERE id=$2
+                """, purchase_price, data.plot_id)
+            await audit(conn, user, "update", "aradi_purchase_contract", contract_id,
+                        f"تعديل عقد شراء رقم {contract_id}")
+            return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/purchase-contracts/{contract_id}")
+async def delete_purchase_contract(contract_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT * FROM aradi_purchase_contracts WHERE id=$1", contract_id
+                )
+                if not row:
+                    raise HTTPException(status_code=404, detail="عقد الشراء غير موجود")
+                confirmed = await conn.fetchval(
+                    "SELECT COUNT(*) FROM aradi_seller_payments WHERE contract_id=$1 AND status='confirmed'",
+                    contract_id,
+                )
+                if confirmed > 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="لا يمكن حذف عقد الشراء لوجود دفعات مؤكدة مرتبطة به، قم بإلغائها أولاً",
+                    )
+                await conn.execute(
+                    "DELETE FROM aradi_seller_payments WHERE contract_id=$1", contract_id
+                )
+                await conn.execute(
+                    "DELETE FROM aradi_purchase_installments WHERE contract_id=$1", contract_id
+                )
+                await conn.execute(
+                    "DELETE FROM aradi_purchase_contracts WHERE id=$1", contract_id
+                )
+                if row["plot_id"]:
+                    await conn.execute("""
+                        UPDATE aradi_plots
+                        SET purchase_price = 0, updated_at = NOW()
+                        WHERE id=$1
+                          AND NOT EXISTS (
+                              SELECT 1 FROM aradi_purchase_contracts
+                              WHERE plot_id=$1 AND status IN ('active','completed')
+                          )
+                    """, row["plot_id"])
+                await audit(conn, user, "delete", "aradi_purchase_contract", contract_id,
+                            f"حذف عقد شراء رقم {row['contract_number'] or contract_id}")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/purchase-contracts/{contract_id}/installments")
+async def get_purchase_contract_installments(contract_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT pi.*,
+                   COALESCE((
+                       SELECT SUM(sp.amount)
+                       FROM aradi_seller_payments sp
+                       WHERE sp.installment_id = pi.id
+                         AND sp.status = 'confirmed'
+                   ), 0) AS paid,
+                   pi.amount - COALESCE((
+                       SELECT SUM(sp.amount)
+                       FROM aradi_seller_payments sp
+                       WHERE sp.installment_id = pi.id
+                         AND sp.status = 'confirmed'
+                   ), 0) AS remaining,
+                   CASE
+                       WHEN COALESCE((
+                           SELECT SUM(sp.amount)
+                           FROM aradi_seller_payments sp
+                           WHERE sp.installment_id = pi.id
+                             AND sp.status = 'confirmed'
+                       ), 0) >= pi.amount       THEN 'paid'
+                       WHEN COALESCE((
+                           SELECT SUM(sp.amount)
+                           FROM aradi_seller_payments sp
+                           WHERE sp.installment_id = pi.id
+                             AND sp.status = 'confirmed'
+                       ), 0) > 0                THEN 'partial'
+                       WHEN pi.due_date < CURRENT_DATE THEN 'overdue'
+                       ELSE 'pending'
+                   END AS computed_status
+            FROM aradi_purchase_installments pi
+            WHERE pi.contract_id = $1
+            ORDER BY pi.installment_number
+        """, contract_id)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/purchase-contracts/{contract_id}/payments")
+async def get_purchase_contract_payments(contract_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT sp.*, pi.installment_number, pi.due_date AS installment_due_date
+            FROM aradi_seller_payments sp
+            LEFT JOIN aradi_purchase_installments pi ON pi.id = sp.installment_id
+            WHERE sp.contract_id = $1
+            ORDER BY sp.payment_date DESC, sp.id DESC
+        """, contract_id)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/purchase-contracts/{contract_id}/statement")
+async def get_purchase_contract_statement(contract_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        contract = await pool.fetchrow("""
+            SELECT pc.*, s.name AS seller_name, s.phone AS seller_phone,
+                   p.plot_number, p.location
+            FROM aradi_purchase_contracts pc
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            LEFT JOIN aradi_plots p ON p.id = pc.plot_id
+            WHERE pc.id = $1
+        """, contract_id)
+        if not contract:
+            raise HTTPException(status_code=404, detail="عقد الشراء غير موجود")
+
+        installments = await get_purchase_contract_installments(contract_id, user)
+        payments_rows = await pool.fetch("""
+            SELECT * FROM aradi_seller_payments
+            WHERE contract_id = $1
+            ORDER BY payment_date, id
+        """, contract_id)
+        expenses_rows = await pool.fetch("""
+            SELECT *
+            FROM aradi_expenses
+            WHERE plot_id = $1
+            ORDER BY expense_date DESC, id DESC
+        """, contract["plot_id"])
+        payments = [row_to_dict(r) for r in payments_rows]
+        expenses = [row_to_dict(r) for r in expenses_rows]
+        total_paid = sum(float(p["amount"]) for p in payments if p["status"] == "confirmed")
+        purchase_price = float(contract["purchase_price"])
+        total_expenses = sum(float(e["amount"]) for e in expenses if e["status"] == "confirmed")
+
+        return {
+            "contract": row_to_dict(contract),
+            "installments": installments,
+            "payments": payments,
+            "expenses": expenses,
+            "summary": {
+                "purchase_price": purchase_price,
+                "total_expenses": round(total_expenses, 3),
+                "total_land_cost": round(purchase_price + total_expenses, 3),
+                "total_paid": round(total_paid, 3),
+                "remaining": round(purchase_price - total_paid, 3),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class PurchaseInstallmentUpdateRequest(BaseModel):
+    due_date: Optional[str] = None
+    amount: Optional[float] = None
+    notes: Optional[str] = None
+
+
+@router.get("/purchase-installments")
+async def list_purchase_installments(user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT pi.*,
+                   pc.contract_number,
+                   s.name AS seller_name,
+                   COALESCE((
+                       SELECT SUM(sp.amount)
+                       FROM aradi_seller_payments sp
+                       WHERE sp.installment_id = pi.id
+                         AND sp.status = 'confirmed'
+                   ), 0) AS paid,
+                   CASE
+                       WHEN COALESCE((
+                           SELECT SUM(sp.amount)
+                           FROM aradi_seller_payments sp
+                           WHERE sp.installment_id = pi.id
+                             AND sp.status = 'confirmed'
+                       ), 0) >= pi.amount       THEN 'paid'
+                       WHEN COALESCE((
+                           SELECT SUM(sp.amount)
+                           FROM aradi_seller_payments sp
+                           WHERE sp.installment_id = pi.id
+                             AND sp.status = 'confirmed'
+                       ), 0) > 0                THEN 'partial'
+                       WHEN pi.due_date < CURRENT_DATE THEN 'overdue'
+                       ELSE 'pending'
+                   END AS computed_status
+            FROM aradi_purchase_installments pi
+            JOIN aradi_purchase_contracts pc ON pc.id = pi.contract_id
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            ORDER BY pi.due_date, pi.id
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/purchase-installments/{installment_id}")
+async def update_purchase_installment(
+    installment_id: int,
+    data: PurchaseInstallmentUpdateRequest,
+    user=Depends(get_current_user),
+):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                "SELECT * FROM aradi_purchase_installments WHERE id=$1", installment_id
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="قسط الشراء غير موجود")
+            new_due = parse_date(data.due_date, "تاريخ الاستحقاق") or existing["due_date"]
+            new_amount = round(float(data.amount), 3) if data.amount is not None else float(existing["amount"])
+            if new_amount < 0:
+                raise HTTPException(status_code=400, detail="مبلغ القسط لا يمكن أن يكون سالباً")
+            row = await conn.fetchrow("""
+                UPDATE aradi_purchase_installments
+                SET due_date=$1, amount=$2, notes=$3, updated_at=NOW()
+                WHERE id=$4 RETURNING *
+            """, new_due, new_amount, data.notes, installment_id)
+            await audit(conn, user, "update", "aradi_purchase_installment", installment_id,
+                        f"تعديل قسط شراء رقم {existing['installment_number']}")
+            return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/purchase-installments/{installment_id}")
+async def delete_purchase_installment(installment_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT * FROM aradi_purchase_installments WHERE id=$1",
+                    installment_id,
+                )
+                if not row:
+                    raise HTTPException(status_code=404, detail="قسط الشراء غير موجود")
+                confirmed = await conn.fetchval(
+                    "SELECT COUNT(*) FROM aradi_seller_payments WHERE installment_id=$1 AND status='confirmed'",
+                    installment_id,
+                )
+                if confirmed > 0:
+                    raise HTTPException(status_code=400, detail="لا يمكن حذف قسط عليه دفعات مؤكدة")
+                await conn.execute(
+                    "UPDATE aradi_seller_payments SET installment_id=NULL WHERE installment_id=$1",
+                    installment_id,
+                )
+                await conn.execute(
+                    "DELETE FROM aradi_purchase_installments WHERE id=$1",
+                    installment_id,
+                )
+                await audit(conn, user, "delete", "aradi_purchase_installment", installment_id,
+                            f"حذف قسط شراء رقم {row['installment_number']}")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SellerPaymentRequest(BaseModel):
+    contract_id: int
+    installment_id: Optional[int] = None
+    payment_type: Optional[str] = "installment"
+    amount: float
+    payment_date: Optional[str] = None
+    method: Optional[str] = "cash"
+    status: Optional[str] = "confirmed"
+    notes: Optional[str] = None
+
+
+@router.get("/seller-payments")
+async def list_seller_payments(user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT sp.*,
+                   s.name AS seller_name,
+                   pc.contract_number
+            FROM aradi_seller_payments sp
+            JOIN aradi_purchase_contracts pc ON pc.id = sp.contract_id
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            ORDER BY sp.payment_date DESC, sp.id DESC
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/seller-payments")
+async def create_seller_payment(data: SellerPaymentRequest, user=Depends(get_current_user)):
+    require_access(user)
+    payment_type = data.payment_type or "installment"
+    if payment_type not in ALLOWED_PAYMENT_TYPES:
+        raise HTTPException(status_code=400, detail="نوع الدفعة غير صحيح")
+    amount = float(data.amount)
+    if payment_type != "correction" and amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+    method = data.method or "cash"
+    if method not in ALLOWED_PAYMENT_METHODS:
+        raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
+    status = data.status or "confirmed"
+    if status not in ALLOWED_PAYMENT_STATUSES:
+        raise HTTPException(status_code=400, detail="حالة الدفعة غير صحيحة")
+    pay_date = parse_date(data.payment_date, "تاريخ الدفعة") or date.today()
+
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO aradi_seller_payments
+                    (contract_id, installment_id, payment_type, amount,
+                     payment_date, method, status, notes, created_by)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                RETURNING *
+            """,
+                data.contract_id,
+                data.installment_id,
+                payment_type,
+                round(amount, 3),
+                pay_date,
+                method,
+                status,
+                data.notes,
+                user.get("id"),
+            )
+            await audit(conn, user, "create", "aradi_seller_payment", row["id"],
+                        f"تسجيل دفعة {amount} للبائع في عقد الشراء {data.contract_id}")
+            return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SellerPaymentUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    payment_date: Optional[str] = None
+    method: Optional[str] = None
+    amount: Optional[float] = None
+    payment_type: Optional[str] = None
+
+
+@router.put("/seller-payments/{payment_id}")
+async def update_seller_payment(
+    payment_id: int,
+    data: SellerPaymentUpdateRequest,
+    user=Depends(get_current_user),
+):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            existing = await conn.fetchrow(
+                "SELECT * FROM aradi_seller_payments WHERE id=$1", payment_id
+            )
+            if not existing:
+                raise HTTPException(status_code=404, detail="دفعة البائع غير موجودة")
+            new_status = data.status or existing["status"]
+            if new_status not in ALLOWED_PAYMENT_STATUSES:
+                raise HTTPException(status_code=400, detail="حالة الدفعة غير صحيحة")
+            new_date = parse_date(data.payment_date, "تاريخ الدفعة") or existing["payment_date"]
+            new_method = data.method or existing["method"]
+            if new_method not in ALLOWED_PAYMENT_METHODS:
+                raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
+            new_amount = round(float(data.amount), 3) if data.amount is not None else float(existing["amount"])
+            new_type = data.payment_type or existing["payment_type"]
+            if new_type not in ALLOWED_PAYMENT_TYPES:
+                raise HTTPException(status_code=400, detail="نوع الدفعة غير صحيح")
+            row = await conn.fetchrow("""
+                UPDATE aradi_seller_payments
+                SET status=$1, notes=COALESCE($2,notes), payment_date=$3,
+                    method=$4, amount=$5, payment_type=$6, updated_at=NOW()
+                WHERE id=$7 RETURNING *
+            """, new_status, data.notes, new_date, new_method, new_amount, new_type, payment_id)
+            await audit(conn, user, "update", "aradi_seller_payment", payment_id,
+                        f"تعديل دفعة بائع رقم {payment_id} → {new_status}")
+            return row_to_dict(row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/seller-payments/{payment_id}")
+async def delete_seller_payment(payment_id: int, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "DELETE FROM aradi_seller_payments WHERE id=$1 RETURNING *",
+                payment_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="دفعة البائع غير موجودة")
+            await audit(conn, user, "delete", "aradi_seller_payment", payment_id,
+                        f"حذف دفعة بائع رقم {payment_id}")
             return {"ok": True}
     except HTTPException:
         raise
@@ -1699,7 +2469,7 @@ async def delete_investor_payment(payment_id: int, user=Depends(get_current_user
 # ═══════════════════════════════════════════════════════════════
 
 ALLOWED_CHECK_STATUSES = {"received", "deposited", "cleared", "returned", "cancelled"}
-ALLOWED_CHECK_RELATED_TYPES = {"buyer_payment", "investor_payment", "expense", "manual"}
+ALLOWED_CHECK_RELATED_TYPES = {"buyer_payment", "seller_payment", "investor_payment", "expense", "manual"}
 ALLOWED_CHECK_DIRECTIONS = {"in", "out"}
 
 
@@ -2091,6 +2861,89 @@ async def report_upcoming_installments(days: int = 30, user=Depends(get_current_
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/reports/overdue-purchase-installments")
+async def report_overdue_purchase_installments(user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                pi.id,
+                pi.contract_id,
+                pi.installment_number,
+                pi.due_date,
+                pi.amount,
+                COALESCE((
+                    SELECT SUM(sp.amount)
+                    FROM aradi_seller_payments sp
+                    WHERE sp.installment_id = pi.id AND sp.status = 'confirmed'
+                ), 0) AS paid,
+                pi.amount - COALESCE((
+                    SELECT SUM(sp.amount)
+                    FROM aradi_seller_payments sp
+                    WHERE sp.installment_id = pi.id AND sp.status = 'confirmed'
+                ), 0) AS remaining,
+                s.name AS seller_name,
+                s.phone AS seller_phone,
+                p.plot_number,
+                pc.contract_number
+            FROM aradi_purchase_installments pi
+            JOIN aradi_purchase_contracts pc ON pc.id = pi.contract_id
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            LEFT JOIN aradi_plots p ON p.id = pc.plot_id
+            WHERE pi.due_date < CURRENT_DATE
+              AND COALESCE((
+                  SELECT SUM(sp.amount)
+                  FROM aradi_seller_payments sp
+                  WHERE sp.installment_id = pi.id AND sp.status = 'confirmed'
+              ), 0) < pi.amount
+              AND pc.status NOT IN ('cancelled')
+            ORDER BY pi.due_date
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/reports/upcoming-purchase-installments")
+async def report_upcoming_purchase_installments(days: int = 30, user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                pi.id,
+                pi.contract_id,
+                pi.installment_number,
+                pi.due_date,
+                pi.amount,
+                COALESCE((
+                    SELECT SUM(sp.amount)
+                    FROM aradi_seller_payments sp
+                    WHERE sp.installment_id = pi.id AND sp.status = 'confirmed'
+                ), 0) AS paid,
+                s.name AS seller_name,
+                s.phone AS seller_phone,
+                p.plot_number,
+                pc.contract_number
+            FROM aradi_purchase_installments pi
+            JOIN aradi_purchase_contracts pc ON pc.id = pi.contract_id
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            LEFT JOIN aradi_plots p ON p.id = pc.plot_id
+            WHERE pi.due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + ($1 || ' days')::INTERVAL
+              AND COALESCE((
+                  SELECT SUM(sp.amount)
+                  FROM aradi_seller_payments sp
+                  WHERE sp.installment_id = pi.id AND sp.status = 'confirmed'
+              ), 0) < pi.amount
+              AND pc.status = 'active'
+            ORDER BY pi.due_date
+        """, days)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/reports/upcoming-checks")
 async def report_upcoming_checks(days: int = 30, user=Depends(get_current_user)):
     require_access(user)
@@ -2138,6 +2991,42 @@ async def report_buyer_balances(user=Depends(get_current_user)):
             LEFT JOIN aradi_plots p ON p.id = sc.plot_id
             WHERE sc.status NOT IN ('cancelled')
             ORDER BY remaining DESC, b.name
+        """)
+        return [row_to_dict(r) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/reports/seller-balances")
+async def report_seller_balances(user=Depends(get_current_user)):
+    require_access(user)
+    pool = await get_pool()
+    try:
+        rows = await pool.fetch("""
+            SELECT
+                pc.id          AS contract_id,
+                pc.contract_number,
+                s.id           AS seller_id,
+                s.name         AS seller_name,
+                s.phone        AS seller_phone,
+                p.plot_number,
+                pc.purchase_price,
+                pc.status      AS contract_status,
+                COALESCE((
+                    SELECT SUM(sp.amount)
+                    FROM aradi_seller_payments sp
+                    WHERE sp.contract_id = pc.id AND sp.status = 'confirmed'
+                ), 0)           AS total_paid,
+                pc.purchase_price - COALESCE((
+                    SELECT SUM(sp.amount)
+                    FROM aradi_seller_payments sp
+                    WHERE sp.contract_id = pc.id AND sp.status = 'confirmed'
+                ), 0)           AS remaining
+            FROM aradi_purchase_contracts pc
+            JOIN aradi_sellers s ON s.id = pc.seller_id
+            LEFT JOIN aradi_plots p ON p.id = pc.plot_id
+            WHERE pc.status NOT IN ('cancelled')
+            ORDER BY remaining DESC, s.name
         """)
         return [row_to_dict(r) for r in rows]
     except Exception as e:
@@ -2208,6 +3097,13 @@ async def report_plot_profitability(user=Depends(get_current_user)):
                     FROM aradi_expenses e
                     WHERE e.plot_id = p.id AND e.status = 'confirmed'
                 ), 0) AS total_expenses,
+                -- Confirmed purchase payments to sellers linked to this plot
+                COALESCE((
+                    SELECT SUM(sp.amount)
+                    FROM aradi_seller_payments sp
+                    JOIN aradi_purchase_contracts pc ON pc.id = sp.contract_id
+                    WHERE pc.plot_id = p.id AND sp.status = 'confirmed'
+                ), 0) AS total_seller_payments,
                 -- Confirmed payouts to investors linked to this plot
                 COALESCE((
                     SELECT SUM(ip.amount)
@@ -2215,12 +3111,18 @@ async def report_plot_profitability(user=Depends(get_current_user)):
                     JOIN aradi_investments inv ON inv.id = ip.investment_id
                     WHERE inv.plot_id = p.id AND ip.status = 'confirmed'
                 ), 0) AS total_investor_payouts,
-                -- Net = buyer_payments - expenses - investor_payouts
+                -- Net = buyer_payments - seller_payments - expenses - investor_payouts
                 COALESCE((
                     SELECT SUM(bp.amount)
                     FROM aradi_buyer_payments bp
                     JOIN aradi_sale_contracts sc ON sc.id = bp.contract_id
                     WHERE sc.plot_id = p.id AND bp.status = 'confirmed'
+                ), 0)
+                - COALESCE((
+                    SELECT SUM(sp.amount)
+                    FROM aradi_seller_payments sp
+                    JOIN aradi_purchase_contracts pc ON pc.id = sp.contract_id
+                    WHERE pc.plot_id = p.id AND sp.status = 'confirmed'
                 ), 0)
                 - COALESCE((
                     SELECT SUM(e.amount)

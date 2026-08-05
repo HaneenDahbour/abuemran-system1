@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from config.db import get_pool
 from middleware.auth import get_current_user
-from middleware.roles import require_role
+from middleware.roles import require_permission, require_role
 
 router = APIRouter()
 
@@ -45,6 +45,8 @@ class PaymentIn(BaseModel):
 
 @router.get("")
 async def list_recipients(user=Depends(get_current_user)):
+    if user.get("role") != "recipient":
+        require_permission(user, "recipients")
     pool = await get_pool()
 
     try:
@@ -55,35 +57,48 @@ async def list_recipients(user=Depends(get_current_user)):
                     COUNT(i.id) AS invoice_count,
                     COALESCE(SUM(i.total_amount), 0) AS total_invoiced,
                     COALESCE(SUM(COALESCE(i.initial_paid_amount, 0)), 0) AS invoice_paid,
+                    MIN(i.client_id) AS client_id,
+                    STRING_AGG(DISTINCT c.name, ', ') AS client_name,
                     STRING_AGG(
                         DISTINCT COALESCE(u.full_name, 'غير معروف'),
                         ', '
                     ) AS employee_names
                 FROM invoices i
-LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)                WHERE i.recipient_name IS NOT NULL
+                LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
+                LEFT JOIN clients c ON c.id = i.client_id
+                WHERE i.recipient_name IS NOT NULL
                   AND TRIM(i.recipient_name) <> ''
                   AND COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
                 GROUP BY TRIM(i.recipient_name)
             ),
             pay_sum AS (
-                SELECT
-                    TRIM(rp.recipient_name) AS name,
-                    COALESCE(SUM(rp.amount), 0) AS extra_paid
-                FROM recipient_payments rp
-                LEFT JOIN invoices i ON i.id = rp.invoice_id
-                WHERE rp.recipient_name IS NOT NULL
-                  AND TRIM(rp.recipient_name) <> ''
-                  AND (
-                    rp.invoice_id IS NULL
-                    OR COALESCE(NULLIF(i.status, ''), 'approved') = 'approved'
-                  )
-                GROUP BY TRIM(rp.recipient_name)
+                SELECT name, COALESCE(SUM(amount), 0) AS extra_paid
+                FROM (
+                    SELECT TRIM(rp.recipient_name) AS name, rp.amount
+                    FROM recipient_payments rp
+                    LEFT JOIN invoices i ON i.id = rp.invoice_id
+                    WHERE rp.recipient_name IS NOT NULL
+                      AND TRIM(rp.recipient_name) <> ''
+                      AND (rp.invoice_id IS NULL OR COALESCE(NULLIF(i.status, ''), 'approved') = 'approved')
+
+                    UNION ALL
+
+                    SELECT TRIM(COALESCE(i.recipient_name, c.name)) AS name, p.amount
+                    FROM payments p
+                    LEFT JOIN invoices i ON i.id = p.invoice_id
+                    JOIN clients c ON c.id = p.client_id
+                    WHERE p.status = 'approved'
+                ) payment_rows
+                WHERE name IS NOT NULL AND name <> ''
+                GROUP BY name
             )
             SELECT
                 inv_sum.name,
                 inv_sum.invoice_count,
                 inv_sum.total_invoiced,
                 inv_sum.employee_names,
+                inv_sum.client_id,
+                inv_sum.client_name,
                 -- المدفوع = سجلات المقبوضات فقط — الدفعة الأولية للفاتورة تُسجَّل
                 -- تلقائياً كمقبوضة عند الاعتماد، فجمعها مرتين يضخّم المدفوع
                 COALESCE(pay_sum.extra_paid, 0) AS total_paid
@@ -102,6 +117,9 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)    
             )
             result.append(d)
 
+        if user.get("role") == "recipient":
+            own_name = (user.get("recipient_name") or "").strip().lower()
+            result = [r for r in result if (r.get("name") or "").strip().lower() == own_name]
         return result
 
     except Exception as e:
@@ -112,6 +130,7 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)    
 @router.get("/payments")
 async def list_recipient_payments(user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "payments")
 
     pool = await get_pool()
 
@@ -133,6 +152,11 @@ async def list_recipient_payments(user=Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 @router.get("/{recipient_name}/statement")
 async def recipient_statement(recipient_name: str, user=Depends(get_current_user)):
+    if user.get("role") == "recipient":
+        if (user.get("recipient_name") or "").strip().lower() != recipient_name.strip().lower():
+            raise HTTPException(status_code=403, detail="لا يمكنك الوصول إلى كشف زبون آخر")
+    else:
+        require_permission(user, "recipients")
     pool = await get_pool()
     try:
         inv_rows = await pool.fetch(
@@ -207,6 +231,25 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
     recipient_name,
     )
 
+        approved_pay_rows = await pool.fetch(
+            """
+            SELECT p.id, p.amount, p.payment_date AS date, p.notes,
+                   p.client_id, p.invoice_id,
+                   CASE
+                     WHEN COALESCE(p.notes, '') ILIKE '%method:check%' THEN 'check'
+                     WHEN COALESCE(p.notes, '') ILIKE '%method:transfer%' THEN 'transfer'
+                     ELSE 'cash'
+                   END AS payment_method
+            FROM payments p
+            LEFT JOIN invoices i ON i.id = p.invoice_id
+            JOIN clients c ON c.id = p.client_id
+            WHERE p.status='approved'
+              AND LOWER(TRIM(COALESCE(i.recipient_name, c.name)))=LOWER(TRIM($1))
+            ORDER BY p.payment_date ASC, p.id ASC
+            """,
+            recipient_name,
+        )
+
 
         transactions = []
 
@@ -229,7 +272,15 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
             d["amount"] = float(d["amount"] or 0)
             transactions.append(d)
 
-        transactions.sort(key=lambda x: (x.get("date") or "", x.get("id") or 0))
+        for r in approved_pay_rows:
+            d = row_to_dict(r)
+            d["id"] = f"payment-{d['id']}"
+            d["type"] = "payment"
+            d["source"] = "approved_payment"
+            d["amount"] = float(d["amount"] or 0)
+            transactions.append(d)
+
+        transactions.sort(key=lambda x: (x.get("date") or "", str(x.get("id") or "")))
 
         balance = 0.0
         for t in transactions:
@@ -259,6 +310,7 @@ LEFT JOIN users u ON u.id = COALESCE(i.attributed_employee_id, i.created_by)
 @router.post("/payments")
 async def add_payment(data: PaymentIn, user=Depends(get_current_user)):
     require_role(user, "admin", "accountant")
+    require_permission(user, "payments")
 
     if not data.recipient_name.strip():
         raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
@@ -280,6 +332,27 @@ async def add_payment(data: PaymentIn, user=Depends(get_current_user)):
                 data.recipient_name,
             )
 
+        if data.invoice_id:
+            invoice = await pool.fetchrow(
+                """
+                SELECT i.total_amount,
+                       COALESCE((SELECT SUM(rp.amount) FROM recipient_payments rp WHERE rp.invoice_id=i.id),0)
+                       + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id=i.id AND p.status='approved'),0)
+                         AS paid_amount
+                FROM invoices i
+                WHERE i.id=$1
+                  AND ($2::int IS NULL OR i.client_id=$2)
+                  AND COALESCE(i.status, 'approved')='approved'
+                """,
+                data.invoice_id,
+                linked_client_id,
+            )
+            if not invoice:
+                raise HTTPException(status_code=400, detail="الفاتورة غير موجودة أو غير معتمدة")
+            outstanding = round(float(invoice["total_amount"] or 0) - float(invoice["paid_amount"] or 0), 3)
+            if data.amount > outstanding:
+                raise HTTPException(status_code=400, detail=f"المبلغ أكبر من باقي الفاتورة ({outstanding:.3f})")
+
         row = await pool.fetchrow(
             """
             INSERT INTO recipient_payments
@@ -298,6 +371,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         )
         return row_to_dict(row)
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -305,11 +380,81 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 @router.delete("/payments/{payment_id}")
 async def delete_payment(payment_id: int, user=Depends(get_current_user)):
     require_role(user, "admin")
+    require_permission(user, "payments")
     pool = await get_pool()
     try:
-        await pool.execute("DELETE FROM recipient_payments WHERE id=$1", payment_id)
+        deleted = await pool.fetchrow(
+            "DELETE FROM recipient_payments WHERE id=$1 RETURNING id", payment_id
+        )
+        if not deleted:
+            raise HTTPException(status_code=404, detail="المقبوضة غير موجودة")
         return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/payments/{payment_id}")
+async def update_payment(payment_id: int, data: PaymentIn, user=Depends(get_current_user)):
+    require_role(user, "admin", "accountant")
+    require_permission(user, "payments")
+
+    recipient_name = data.recipient_name.strip()
+    if not recipient_name:
+        raise HTTPException(status_code=400, detail="اسم الزبون مطلوب")
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+    if (data.payment_method or "cash") not in ("cash", "check", "transfer"):
+        raise HTTPException(status_code=400, detail="طريقة الدفع غير صحيحة")
+    try:
+        payment_date = date.fromisoformat(data.payment_date) if data.payment_date else date.today()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="تاريخ المقبوضة غير صحيح")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            if data.client_id:
+                client_exists = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM clients WHERE id=$1)", data.client_id
+                )
+                if not client_exists:
+                    raise HTTPException(status_code=400, detail="العميل غير موجود")
+            if data.invoice_id:
+                invoice = await conn.fetchrow(
+                    """
+                    SELECT i.total_amount,
+                           COALESCE((SELECT SUM(rp.amount) FROM recipient_payments rp WHERE rp.invoice_id=i.id AND rp.id<>$3),0)
+                           + COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.invoice_id=i.id AND p.status='approved'),0)
+                             AS paid_amount
+                    FROM invoices i
+                    WHERE i.id=$1
+                      AND ($2::int IS NULL OR i.client_id=$2)
+                      AND COALESCE(i.status, 'approved')='approved'
+                    """,
+                    data.invoice_id, data.client_id, payment_id,
+                )
+                if not invoice:
+                    raise HTTPException(status_code=400, detail="الفاتورة غير موجودة أو غير معتمدة")
+                outstanding = round(float(invoice["total_amount"] or 0) - float(invoice["paid_amount"] or 0), 3)
+                if data.amount > outstanding:
+                    raise HTTPException(status_code=400, detail=f"المبلغ أكبر من باقي الفاتورة ({outstanding:.3f})")
+
+            row = await conn.fetchrow(
+                """
+                UPDATE recipient_payments
+                SET recipient_name=$1, client_id=$2, invoice_id=$3, amount=$4,
+                    payment_method=$5, payment_date=$6, notes=$7
+                WHERE id=$8
+                RETURNING *
+                """,
+                recipient_name, data.client_id, data.invoice_id,
+                round(data.amount, 3), data.payment_method or "cash",
+                payment_date, data.notes, payment_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="المقبوضة غير موجودة")
+            return row_to_dict(row)
 
 
