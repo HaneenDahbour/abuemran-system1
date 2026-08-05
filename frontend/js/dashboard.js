@@ -11652,8 +11652,8 @@ async function openCategoryInvestmentsModal(categoryId) {
         <tbody>
           ${shares.length ? shares.map(s => {
     const inv = (investments.investments || []).find(i => String(i.investor_id) === String(s.investor_id));
-    const paid = parseFloat(inv?.paid_amount || 0);
-    const remaining = Math.max(0, parseFloat(s.profit_share || 0) - paid);
+    const paid = parseFloat(s.paid_share || 0);
+    const remaining = parseFloat(s.remaining != null ? s.remaining : (parseFloat(s.profit_share || 0) - paid));
     return `
               <tr>
                 <td><strong>${escHtml(s.investor_name)}</strong></td>
@@ -11663,15 +11663,12 @@ async function openCategoryInvestmentsModal(categoryId) {
                 </td>
                 <td>${fmt(s.contribution_pct)}%</td>
                 <td style="color:var(--am);font-weight:700">${fmt(s.profit_share)} د.أ</td>
-                <td>
-                  <input class="form-input" style="width:100px;border-color:var(--gr)" type="number" step="0.001" min="0"
-                    id="inv_paid_${s.investor_id}" value="${paid}">
-                </td>
-                <td style="font-weight:700;color:${remaining > 0 ? 'var(--rd)' : 'var(--gr)'}">
+                <td style="color:var(--bl)">${fmt(paid)} د.أ</td>
+                <td style="font-weight:700;color:${remaining > 0 ? 'var(--am)' : 'var(--gr)'}">
                   ${fmt(remaining)} د.أ
                 </td>
                 <td style="display:flex;gap:4px;flex-wrap:wrap;min-width:80px">
-                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}', this)" title="حفظ">💾</button>
+                  <button class="btn btn-ghost btn-sm" onclick="saveCategoryInvestment('${categoryId}', '${s.investor_id}', this)" title="حفظ رأس المال">💾</button>
                   ${inv ? `<button class="btn btn-danger btn-sm" onclick="deleteCategoryInvestmentConfirm('${categoryId}', '${inv.id}', '${s.investor_id}')" title="حذف">🗑️</button>` : ''}
                 </td>
               </tr>`;
@@ -11679,6 +11676,7 @@ async function openCategoryInvestmentsModal(categoryId) {
         </tbody>
       </table>
     </div>
+    <div style="font-size:11px;color:var(--tx3);margin-top:6px">💡 الدفعات تُسجَّل على مستوى المستثمر (من شاشة المستثمرين ← التفاصيل). "المدفوع/المتبقي" هنا موزَّع تلقائياً على هذه الفئة بنسبة حصتها من الربح.</div>
 
     <div style="margin-top:10px">
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
@@ -11692,7 +11690,7 @@ function openAddInvestmentForm(categoryId) {
   if (!target) return;
 
   target.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 130px 130px auto;gap:8px;align-items:flex-end;padding:10px;background:var(--bg2);border-radius:8px;margin-bottom:6px">
+    <div style="display:grid;grid-template-columns:1fr 160px auto;gap:8px;align-items:flex-end;padding:10px;background:var(--bg2);border-radius:8px;margin-bottom:6px">
       <div>
         <label class="form-label" style="font-size:12px">المستثمر</label>
         <select class="form-select" id="new_inv_investor" style="font-size:13px">
@@ -11702,12 +11700,8 @@ function openAddInvestmentForm(categoryId) {
         </select>
       </div>
       <div>
-        <label class="form-label" style="font-size:12px">المساهمة (د.أ)</label>
+        <label class="form-label" style="font-size:12px">المساهمة (رأس المال د.أ)</label>
         <input class="form-input" type="number" step="0.001" min="0" id="new_inv_amount" value="0" style="font-size:13px">
-      </div>
-      <div>
-        <label class="form-label" style="font-size:12px">المدفوع (د.أ)</label>
-        <input class="form-input" type="number" step="0.001" min="0" id="new_inv_paid" value="0" style="font-size:13px;border-color:var(--gr)">
       </div>
       <button class="btn btn-primary btn-sm" onclick="saveCategoryInvestment('${categoryId}', null, this)" style="align-self:flex-end">إضافة</button>
     </div>
@@ -11782,17 +11776,27 @@ async function renderInvestorsList(container) {
             <th>الهاتف</th>
             <th>رأس المال (مرة واحدة)</th>
             <th>عدد الفئات</th>
+            <th>الأرباح المستحقة</th>
+            <th>المدفوع</th>
+            <th>المتبقي</th>
             <th>ملاحظات</th>
             <th>الإجراءات</th>
           </tr>
         </thead>
         <tbody>
-          ${investors.length ? investors.map(inv => `
+          ${investors.length ? investors.map(inv => {
+    const due = parseFloat(inv.total_profit_due || 0);
+    const paid = parseFloat(inv.total_paid_out || 0);
+    const net = parseFloat(inv.net_due != null ? inv.net_due : (due - paid));
+    return `
             <tr>
               <td><strong>${escHtml(inv.name)}</strong></td>
               <td>${escHtml(inv.phone || '—')}</td>
               <td style="color:var(--gr);font-weight:700">${fmt(inv.total_invested || 0)} د.أ</td>
               <td>${inv.categories_count || 0}</td>
+              <td style="color:var(--gr);font-weight:600">${fmt(due)} د.أ</td>
+              <td style="color:var(--bl)">${fmt(paid)} د.أ</td>
+              <td style="font-weight:700;color:${net > 0 ? 'var(--am)' : 'var(--gr)'}">${fmt(net)} د.أ</td>
               <td style="font-size:12px;color:var(--tx3)">${escHtml(inv.notes || '—')}</td>
               <td>
                 <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -11801,8 +11805,8 @@ async function renderInvestorsList(container) {
                   ${isAdmin() ? `<button class="btn btn-danger btn-sm" onclick="deleteInvestorConfirm('${inv.id}')">🗑️</button>` : ''}
                 </div>
               </td>
-            </tr>
-          `).join('') : `<tr><td colspan="6" style="text-align:center;padding:30px;color:var(--tx3)">لا يوجد مستثمرون</td></tr>`}
+            </tr>`;
+  }).join('') : `<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--tx3)">لا يوجد مستثمرون</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -11865,10 +11869,9 @@ async function openInvestorModal(investorId = null) {
           <label class="form-label">إجمالي رأس المال (د.أ) *</label>
           <input class="form-input" id="wi_total_contribution" type="number" step="0.001" min="0" value="${totalContribution || 0}">
         </div>
-        <div class="form-group">
-          <label class="form-label">إجمالي المدفوع (د.أ)</label>
-          <input class="form-input" id="wi_total_paid" type="number" step="0.001" min="0" value="${totalPaid || 0}">
-        </div>
+      </div>
+      <div style="background:var(--bg2);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--tx3);margin-bottom:10px">
+        💵 الدفعات للمستثمر تُسجَّل من شاشة المستثمرين ← <strong>التفاصيل</strong> (سجل الدفعات)، وتُخصم تلقائياً من أرباحه المستحقة.
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0">
         <span class="form-label" style="margin:0">الفئات التي يشارك في أرباحها</span>
@@ -11950,9 +11953,7 @@ async function saveInvestorFull() {
   if (!name) { toast('اسم المستثمر مطلوب', 'error'); _unlockBtn(btn); return; }
 
   const amount = parseFloat(document.getElementById('wi_total_contribution')?.value || 0);
-  const paidAmount = parseFloat(document.getElementById('wi_total_paid')?.value || 0);
   if (!Number.isFinite(amount) || amount <= 0) { toast('إجمالي رأس المال يجب أن يكون أكبر من صفر', 'error'); _unlockBtn(btn); return; }
-  if (!Number.isFinite(paidAmount) || paidAmount < 0) { toast('إجمالي المدفوع غير صحيح', 'error'); _unlockBtn(btn); return; }
   const selectedCategoryIds = [...document.querySelectorAll('#inv_category_checks .inv-category-check:checked')]
     .map(el => Number(el.value));
   if (!selectedCategoryIds.length) { toast('اختر فئة واحدة على الأقل', 'error'); _unlockBtn(btn); return; }
@@ -11974,7 +11975,7 @@ async function saveInvestorFull() {
     }
     for (const categoryId of selectedCategoryIds) {
       await API.setCategoryInvestment(categoryId, {
-        investor_id: Number(finalId), amount, paid_amount: paidAmount,
+        investor_id: Number(finalId), amount,
       });
     }
     toast('تم الحفظ ✅', 'success');
@@ -12018,8 +12019,12 @@ async function openInvestorDetailsModal(investorId) {
 
   const inv = data.investor || {};
   const investments = data.investments || [];
+  const payouts = data.payouts || [];
   const totalContrib = parseFloat(data.total_invested || 0);
   const totalProfit = data.total_profit_share || 0;
+  const totalPaidOut = parseFloat(data.total_paid_out || 0);
+  const netDue = data.net_due != null ? parseFloat(data.net_due) : (totalProfit - totalPaidOut);
+  const today = new Date().toISOString().slice(0, 10);
 
   openModal(`
     <div class="modal-header">
@@ -12037,13 +12042,21 @@ async function openInvestorDetailsModal(investorId) {
         <div class="stat-value" style="color:var(--gr)">${fmt(totalProfit)} د.أ</div>
       </div>
       <div class="stat-card">
+        <div class="stat-label">المدفوع له</div>
+        <div class="stat-value" style="color:var(--bl)">${fmt(totalPaidOut)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">المتبقي</div>
+        <div class="stat-value" style="color:${netDue > 0 ? 'var(--am)' : 'var(--gr)'}">${fmt(netDue)} د.أ</div>
+      </div>
+      <div class="stat-card">
         <div class="stat-label">عدد الفئات</div>
         <div class="stat-value">${investments.length}</div>
       </div>
     </div>
 
     <div style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--tx2)">
-      💡 رأس المال ${fmt(totalContrib)} د.أ محسوب مرة واحدة، وأرباح الفئات المختارة مجمّعة أدناه. توزيع كل فئة: <strong>50% للمالك</strong> و<strong>50% للمستثمرين</strong>.
+      💡 رأس المال ${fmt(totalContrib)} د.أ محسوب مرة واحدة، وأرباح الفئات المختارة مجمّعة أدناه. توزيع كل فئة: <strong>50% للمالك</strong> و<strong>50% للمستثمرين</strong>. <strong>المتبقي = الأرباح المستحقة − المدفوع.</strong>
     </div>
 
     <div class="table-wrap">
@@ -12055,12 +12068,16 @@ async function openInvestorDetailsModal(investorId) {
             <th>نسبة المساهمة %</th>
             <th>ربح الفئة الكلي</th>
             <th>حصته من الربح</th>
+            <th>المدفوع</th>
+            <th>المتبقي</th>
           </tr>
         </thead>
         <tbody>
           ${investments.length ? investments.map(i => {
     const profit = parseFloat(i.category_total_profit || 0);
     const share = parseFloat(i.profit_share || 0);
+    const paid = parseFloat(i.paid_derived || 0);
+    const remaining = parseFloat(i.remaining != null ? i.remaining : (share - paid));
     return `
             <tr>
               <td><strong>${i.category_icon || '📦'} ${escHtml(i.category_name)}</strong></td>
@@ -12068,8 +12085,10 @@ async function openInvestorDetailsModal(investorId) {
               <td>${fmt(i.contribution_pct || 0)}%</td>
               <td style="color:${profit >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:600">${fmt(profit)} د.أ</td>
               <td style="color:var(--am);font-weight:700">${fmt(share)} د.أ</td>
+              <td style="color:var(--bl)">${fmt(paid)} د.أ</td>
+              <td style="font-weight:700;color:${remaining > 0 ? 'var(--am)' : 'var(--gr)'}">${fmt(remaining)} د.أ</td>
             </tr>`;
-  }).join('') : `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
+  }).join('') : `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
           ${investments.length ? `
           <tr style="background:var(--bg2);border-top:2px solid var(--brd)">
             <td><strong>الإجمالي</strong></td>
@@ -12077,17 +12096,76 @@ async function openInvestorDetailsModal(investorId) {
             <td>—</td>
             <td>—</td>
             <td style="font-weight:800;color:var(--gr);font-size:15px">${fmt(totalProfit)} د.أ</td>
+            <td style="font-weight:800;color:var(--bl)">${fmt(totalPaidOut)} د.أ</td>
+            <td style="font-weight:800;color:${netDue > 0 ? 'var(--am)' : 'var(--gr)'};font-size:15px">${fmt(netDue)} د.أ</td>
           </tr>` : ''}
         </tbody>
       </table>
     </div>
-    <div style="font-size:11px;color:var(--tx3);margin-top:6px">* يظهر رأس المال في كل صف لاستخدامه في نسبة ربح تلك الفئة، لكنه لا يُجمع أو يُكرر في الإجمالي.</div>
+    <div style="font-size:11px;color:var(--tx3);margin-top:6px">* يظهر رأس المال في كل صف لاستخدامه في نسبة ربح تلك الفئة، لكنه لا يُجمع أو يُكرر في الإجمالي. المدفوع/المتبقي لكل فئة موزَّع بنسبة حصتها من الربح.</div>
+
+    <div style="margin-top:16px;background:var(--bg2);border:1px solid var(--brd);border-radius:10px;padding:14px">
+      <h4 style="margin:0 0 10px">💵 تسجيل دفعة للمستثمر</h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div>
+          <label class="form-label">المبلغ (د.أ)</label>
+          <input class="form-input" id="payout_amount" type="number" step="0.001" min="0" style="width:130px" placeholder="0.000">
+        </div>
+        <div>
+          <label class="form-label">التاريخ</label>
+          <input class="form-input" id="payout_date" type="date" value="${today}" style="width:150px">
+        </div>
+        <div style="flex:1;min-width:140px">
+          <label class="form-label">ملاحظة (اختياري)</label>
+          <input class="form-input" id="payout_notes" type="text" placeholder="مثال: تحويل بنكي">
+        </div>
+        <button class="btn btn-primary" onclick="submitInvestorPayout('${investorId}')">➕ إضافة دفعة</button>
+      </div>
+
+      <div class="table-wrap" style="margin-top:12px">
+        <table>
+          <thead>
+            <tr><th>التاريخ</th><th>المبلغ</th><th>ملاحظة</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${payouts.length ? payouts.map(p => `
+              <tr>
+                <td>${(p.payout_date || '').slice(0, 10)}</td>
+                <td style="font-weight:700;color:var(--bl)">${fmt(p.amount)} د.أ</td>
+                <td style="color:var(--tx3)">${escHtml(p.notes || '—')}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="deleteInvestorPayoutConfirm('${investorId}', '${p.id}')" title="حذف">🗑️</button></td>
+              </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--tx3)">لا توجد دفعات بعد</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <div style="margin-top:10px;display:flex;gap:8px">
       <button class="btn btn-ghost btn-sm" onclick="openInvestorModal('${investorId}')">✏️ تعديل المساهمات</button>
       <button class="btn btn-ghost" onclick="closeModal()">إغلاق</button>
     </div>
-  `, '700px');
+  `, '760px');
+}
+
+async function submitInvestorPayout(investorId) {
+  const amount = parseFloat(document.getElementById('payout_amount')?.value || 0);
+  const payout_date = document.getElementById('payout_date')?.value || null;
+  const notes = document.getElementById('payout_notes')?.value || null;
+  if (!Number.isFinite(amount) || amount <= 0) { toast('المبلغ يجب أن يكون أكبر من صفر', 'error'); return; }
+  try {
+    await API.createWarehouseInvestorPayout(investorId, { amount, payout_date, notes });
+    toast('تم تسجيل الدفعة ✅', 'success');
+    await openInvestorDetailsModal(investorId);
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteInvestorPayoutConfirm(investorId, payoutId) {
+  if (!confirm('هل تريد حذف هذه الدفعة؟')) return;
+  try {
+    await API.deleteWarehouseInvestorPayout(investorId, payoutId);
+    toast('تم حذف الدفعة', 'success');
+    await openInvestorDetailsModal(investorId);
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 /* ════════════════════════════════════════════════════════════

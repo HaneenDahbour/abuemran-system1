@@ -131,6 +131,37 @@ async def link_all_investors_to_category(conn, category_id: int, created_by=None
     )
 
 
+async def compute_investor_profit_due(pool) -> dict:
+    """إجمالي الأرباح المستحقة لكل مستثمر عبر كل الفئات (نفس منطق /summary):
+    لكل فئة يُوزَّع 50% للمستثمرين بنسبة مساهمة كل مستثمر فيها."""
+    profit_due: dict = {}
+    categories = await pool.fetch("SELECT id FROM warehouse_categories")
+    for cat in categories:
+        financials = await get_category_total_profit(pool, cat["id"])
+        distributable = max(float(financials.get("total_profit") or 0), 0)
+        investors_pool = distributable * (1 - OWNER_SHARE_PCT)
+        cat_invs = await pool.fetch(
+            "SELECT investor_id, amount FROM warehouse_category_investments WHERE category_id=$1",
+            cat["id"],
+        )
+        total_in_cat = sum(float(r["amount"] or 0) for r in cat_invs)
+        if total_in_cat <= 0:
+            continue
+        for r in cat_invs:
+            share = investors_pool * (float(r["amount"] or 0) / total_in_cat)
+            profit_due[r["investor_id"]] = profit_due.get(r["investor_id"], 0.0) + share
+    return profit_due
+
+
+async def get_investor_payouts_map(pool) -> dict:
+    """مجموع الدفعات المدفوعة فعلياً لكل مستثمر."""
+    rows = await pool.fetch(
+        "SELECT investor_id, COALESCE(SUM(amount),0) AS paid "
+        "FROM warehouse_investor_payouts GROUP BY investor_id"
+    )
+    return {r["investor_id"]: float(r["paid"] or 0) for r in rows}
+
+
 # ── Pydantic models ──────────────────────────────────────────
 
 class InvestorIn(BaseModel):
@@ -148,6 +179,12 @@ class InvestmentIn(BaseModel):
 
 class DistributionIn(BaseModel):
     distribution_date: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class PayoutIn(BaseModel):
+    amount: float
+    payout_date: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -169,8 +206,19 @@ async def list_investors(user=Depends(get_current_user)):
         GROUP BY wi.id
         ORDER BY wi.name ASC
     """)
+    investors = [row_to_dict(r) for r in rows]
 
-    return [row_to_dict(r) for r in rows]
+    profit_due = await compute_investor_profit_due(pool)
+    paid_map = await get_investor_payouts_map(pool)
+
+    for inv in investors:
+        due = round(profit_due.get(inv["id"], 0.0), 3)
+        paid_out = round(paid_map.get(inv["id"], 0.0), 3)
+        inv["total_profit_due"] = due
+        inv["total_paid_out"] = paid_out
+        inv["net_due"] = round(due - paid_out, 3)
+
+    return investors
 
 
 @router.post("/investors")
@@ -308,6 +356,31 @@ async def get_investor(investor_id: int, user=Depends(get_current_user)):
         total_profit_share += profit_share
         enriched.append(inv_dict)
 
+    # سجل الدفعات المدفوعة لهذا المستثمر + إجمالي المدفوع والمتبقي
+    payout_rows = await pool.fetch(
+        """
+        SELECT id, amount, payout_date, notes, created_at
+        FROM warehouse_investor_payouts
+        WHERE investor_id = $1
+        ORDER BY payout_date DESC, id DESC
+        """,
+        investor_id,
+    )
+    payouts = [row_to_dict(p) for p in payout_rows]
+    total_paid_out = round(sum(float(p["amount"] or 0) for p in payouts), 3)
+    net_due = round(total_profit_share - total_paid_out, 3)
+
+    # توزيع المدفوع على الفئات بنسبة حصة كل فئة من الربح — حتى يتطابق
+    # "المدفوع/المتبقي" لكل حاوية مع الإجمالي على مستوى المستثمر
+    for inv in enriched:
+        share = float(inv.get("profit_share") or 0)
+        paid_derived = (
+            round(total_paid_out * (share / total_profit_share), 3)
+            if total_profit_share > 0 else 0.0
+        )
+        inv["paid_derived"] = paid_derived
+        inv["remaining"] = round(share - paid_derived, 3)
+
     return {
         "investor": row_to_dict(investor),
         "investments": enriched,
@@ -316,7 +389,73 @@ async def get_investor(investor_id: int, user=Depends(get_current_user)):
         "total_invested": round(max((float(i.get("amount") or 0) for i in enriched), default=0), 3),
         "total_paid": round(max((float(i.get("paid_amount") or 0) for i in enriched), default=0), 3),
         "total_profit_share": round(total_profit_share, 3),
+        "payouts": payouts,
+        "total_paid_out": total_paid_out,
+        "net_due": net_due,
     }
+
+
+# ── Investor payouts (الدفعات المدفوعة للمستثمر) ───────────────
+
+@router.post("/investors/{investor_id}/payouts")
+async def create_investor_payout(investor_id: int, data: PayoutIn, user=Depends(get_current_user)):
+    require_access(user)
+
+    amount = float(data.amount or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            investor = await conn.fetchrow(
+                "SELECT id, name FROM warehouse_investors WHERE id=$1", investor_id
+            )
+            if not investor:
+                raise HTTPException(status_code=404, detail="المستثمر غير موجود")
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO warehouse_investor_payouts
+                    (investor_id, amount, payout_date, notes, created_by)
+                VALUES ($1, $2, $3, $4, $5)
+                RETURNING *
+                """,
+                investor_id, amount, parse_date(data.payout_date),
+                (data.notes or "").strip() or None, user.get("id"),
+            )
+
+            await insert_audit(
+                conn, user, "تسجيل دفعة لمستثمر",
+                f"{investor['name']} — {amount:.3f} د.أ",
+            )
+
+            return row_to_dict(row)
+
+
+@router.delete("/investors/{investor_id}/payouts/{payout_id}")
+async def delete_investor_payout(investor_id: int, payout_id: int, user=Depends(get_current_user)):
+    require_access(user)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                DELETE FROM warehouse_investor_payouts
+                WHERE id=$1 AND investor_id=$2
+                RETURNING id, amount
+                """,
+                payout_id, investor_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
+
+            await insert_audit(
+                conn, user, "حذف دفعة مستثمر",
+                f"دفعة #{payout_id} — {float(row['amount']):.3f} د.أ",
+            )
+            return {"success": True}
 
 
 # ── Investments per category ──────────────────────────────────
@@ -452,17 +591,32 @@ async def get_category_profit_share(category_id: int, user=Depends(get_current_u
     owner_share = round(distributable_profit * OWNER_SHARE_PCT, 3)
     investors_pool = round(distributable_profit - owner_share, 3)
 
+    # لتوزيع "المدفوع/المتبقي" لكل مستثمر في هذه الفئة بشكل متسق مع
+    # سجل الدفعات على مستوى المستثمر: المدفوع لهذه الفئة = إجمالي دفعاته
+    # × (حصة هذه الفئة ÷ إجمالي أرباحه المستحقة عبر كل الفئات)
+    profit_due_map = await compute_investor_profit_due(pool)
+    paid_map = await get_investor_payouts_map(pool)
+
     shares = []
     for inv in investments:
         amount = float(inv["amount"] or 0)
         pct = (amount / total_invested) if total_invested > 0 else 0
         share = round(investors_pool * pct, 3)
+
+        inv_id = inv["investor_id"]
+        total_due = profit_due_map.get(inv_id, 0.0)
+        total_paid = paid_map.get(inv_id, 0.0)
+        paid_here = round(total_paid * (share / total_due), 3) if total_due > 0 else 0.0
+        remaining_here = round(share - paid_here, 3)
+
         shares.append({
-            "investor_id": inv["investor_id"],
+            "investor_id": inv_id,
             "investor_name": inv["investor_name"],
             "contribution_amount": amount,
             "contribution_pct": round(pct * 100, 3),
             "profit_share": share,
+            "paid_share": paid_here,
+            "remaining": remaining_here,
         })
 
     return {

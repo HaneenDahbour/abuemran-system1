@@ -403,6 +403,10 @@
     getCategoryProfitShare: catId =>
       apiFetch(`/warehouse-investors/categories/${requireId(catId, 'معرّف الفئة')}/profit-share`),
     getWarehouseInvestorsSummary: () => apiFetch('/warehouse-investors/summary'),
+    createWarehouseInvestorPayout: (investorId, data) =>
+      apiFetch(`/warehouse-investors/investors/${requireId(investorId, 'معرّف المستثمر')}/payouts`, { method: 'POST', body: JSON.stringify(data) }),
+    deleteWarehouseInvestorPayout: (investorId, payoutId) =>
+      apiFetch(`/warehouse-investors/investors/${requireId(investorId, 'معرّف المستثمر')}/payouts/${requireId(payoutId, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 
     // ── Personal Lending (الأمانات الشخصية) ───────────────────────
     getPersonalPeople: () => apiFetch('/personal/people'),
