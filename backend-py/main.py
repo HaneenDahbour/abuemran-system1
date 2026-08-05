@@ -84,6 +84,23 @@ async def startup():
             ON CONFLICT (category_id, investor_id) DO NOTHING
         """)
 
+        # سجل الدفعات المدفوعة للمستثمرين من أرباحهم (يُنشأ تلقائياً عند الإقلاع)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS warehouse_investor_payouts (
+                id          SERIAL        PRIMARY KEY,
+                investor_id INTEGER       NOT NULL REFERENCES warehouse_investors(id) ON DELETE CASCADE,
+                amount      NUMERIC(14,3) NOT NULL CHECK (amount > 0),
+                payout_date DATE          NOT NULL DEFAULT CURRENT_DATE,
+                notes       TEXT,
+                created_by  INTEGER       REFERENCES users(id) ON DELETE SET NULL,
+                created_at  TIMESTAMPTZ   DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_wip_investor
+            ON warehouse_investor_payouts(investor_id)
+        """)
+
 
 @app.on_event("shutdown")
 async def shutdown():
