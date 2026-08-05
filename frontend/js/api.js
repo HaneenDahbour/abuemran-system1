@@ -79,8 +79,11 @@
     return fallback;
   }
 
-  async function apiFetch(path, options = {}) {
-    const url = `${API_BASE}${normalizePath(path)}`;
+  // يمنع الإرسال المزدوج (double-click): إذا ضُغط الزر عدة مرات بسرعة، كل
+  // الطلبات المتطابقة التي ما زالت "قيد التنفيذ" تُعيد نفس الوعد → عملية واحدة.
+  const inFlight = new Map();
+
+  async function _doFetch(url, options) {
     const headers = { ...(options.headers || {}) };
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     if (!isFormData && !headers['Content-Type']) {
@@ -100,6 +103,23 @@
       }
       throw err;
     }
+  }
+
+  function apiFetch(path, options = {}) {
+    const url = `${API_BASE}${normalizePath(path)}`;
+    const method = (options.method || 'GET').toUpperCase();
+
+    // للطلبات التي تُعدّل البيانات فقط: أزل التكرار أثناء وجود طلب مطابق قيد التنفيذ
+    if (method !== 'GET') {
+      const bodyKey = typeof options.body === 'string' ? options.body : '';
+      const key = `${method} ${url} ${bodyKey}`;
+      if (inFlight.has(key)) return inFlight.get(key);
+      const p = _doFetch(url, options).finally(() => inFlight.delete(key));
+      inFlight.set(key, p);
+      return p;
+    }
+
+    return _doFetch(url, options);
   }
 
   const API = {
@@ -405,6 +425,8 @@
     getWarehouseInvestorsSummary: () => apiFetch('/warehouse-investors/summary'),
     createWarehouseInvestorPayout: (investorId, data) =>
       apiFetch(`/warehouse-investors/investors/${requireId(investorId, 'معرّف المستثمر')}/payouts`, { method: 'POST', body: JSON.stringify(data) }),
+    updateWarehouseInvestorPayout: (investorId, payoutId, data) =>
+      apiFetch(`/warehouse-investors/investors/${requireId(investorId, 'معرّف المستثمر')}/payouts/${requireId(payoutId, 'معرّف الدفعة')}`, { method: 'PUT', body: JSON.stringify(data) }),
     deleteWarehouseInvestorPayout: (investorId, payoutId) =>
       apiFetch(`/warehouse-investors/investors/${requireId(investorId, 'معرّف المستثمر')}/payouts/${requireId(payoutId, 'معرّف الدفعة')}`, { method: 'DELETE' }),
 

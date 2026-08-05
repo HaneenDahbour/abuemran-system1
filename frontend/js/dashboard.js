@@ -12008,7 +12008,10 @@ function deleteInvestorConfirm(investorId) {
   });
 }
 
-async function openInvestorDetailsModal(investorId) {
+async function openInvestorDetailsModal(investorId, keepEdit = false) {
+  // ما لم نكن ندخل وضع تعديل دفعة، ألغِ أي تعديل معلّق (فتح جديد للتفاصيل)
+  if (!keepEdit) window._editingPayoutId = null;
+
   let data;
   try {
     data = await API.getWarehouseInvestor(investorId);
@@ -12119,7 +12122,7 @@ async function openInvestorDetailsModal(investorId) {
           <label class="form-label">ملاحظة (اختياري)</label>
           <input class="form-input" id="payout_notes" type="text" placeholder="مثال: تحويل بنكي">
         </div>
-        <button class="btn btn-primary" onclick="submitInvestorPayout('${investorId}')">➕ إضافة دفعة</button>
+        <button class="btn btn-primary" onclick="submitInvestorPayout('${investorId}', this)">➕ إضافة دفعة</button>
       </div>
 
       <div class="table-wrap" style="margin-top:12px">
@@ -12128,13 +12131,31 @@ async function openInvestorDetailsModal(investorId) {
             <tr><th>التاريخ</th><th>المبلغ</th><th>ملاحظة</th><th></th></tr>
           </thead>
           <tbody>
-            ${payouts.length ? payouts.map(p => `
+            ${payouts.length ? payouts.map(p => {
+    const editing = String(window._editingPayoutId) === String(p.id);
+    if (editing) {
+      return `
+              <tr style="background:var(--bg2)">
+                <td><input class="form-input" id="edit_payout_date_${p.id}" type="date" value="${(p.payout_date || '').slice(0, 10)}" style="width:150px"></td>
+                <td><input class="form-input" id="edit_payout_amount_${p.id}" type="number" step="0.001" min="0" value="${p.amount}" style="width:120px"></td>
+                <td><input class="form-input" id="edit_payout_notes_${p.id}" type="text" value="${escHtml(p.notes || '')}" placeholder="ملاحظة"></td>
+                <td style="display:flex;gap:4px">
+                  <button class="btn btn-primary btn-sm" onclick="saveInvestorPayoutEdit('${investorId}', '${p.id}', this)" title="حفظ">💾</button>
+                  <button class="btn btn-ghost btn-sm" onclick="cancelEditPayout('${investorId}')" title="إلغاء">✖</button>
+                </td>
+              </tr>`;
+    }
+    return `
               <tr>
                 <td>${(p.payout_date || '').slice(0, 10)}</td>
                 <td style="font-weight:700;color:var(--bl)">${fmt(p.amount)} د.أ</td>
                 <td style="color:var(--tx3)">${escHtml(p.notes || '—')}</td>
-                <td><button class="btn btn-danger btn-sm" onclick="deleteInvestorPayoutConfirm('${investorId}', '${p.id}')" title="حذف">🗑️</button></td>
-              </tr>`).join('') : `<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--tx3)">لا توجد دفعات بعد</td></tr>`}
+                <td style="display:flex;gap:4px">
+                  <button class="btn btn-ghost btn-sm" onclick="startEditPayout('${investorId}', '${p.id}')" title="تعديل">✏️</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteInvestorPayoutConfirm('${investorId}', '${p.id}', this)" title="حذف">🗑️</button>
+                </td>
+              </tr>`;
+  }).join('') : `<tr><td colspan="4" style="text-align:center;padding:16px;color:var(--tx3)">لا توجد دفعات بعد</td></tr>`}
           </tbody>
         </table>
       </div>
@@ -12147,25 +12168,53 @@ async function openInvestorDetailsModal(investorId) {
   `, '760px');
 }
 
-async function submitInvestorPayout(investorId) {
+async function submitInvestorPayout(investorId, btn) {
   const amount = parseFloat(document.getElementById('payout_amount')?.value || 0);
   const payout_date = document.getElementById('payout_date')?.value || null;
   const notes = document.getElementById('payout_notes')?.value || null;
   if (!Number.isFinite(amount) || amount <= 0) { toast('المبلغ يجب أن يكون أكبر من صفر', 'error'); return; }
+  _lockBtn(btn, 'جاري...');
   try {
     await API.createWarehouseInvestorPayout(investorId, { amount, payout_date, notes });
     toast('تم تسجيل الدفعة ✅', 'success');
+    window._editingPayoutId = null;
     await openInvestorDetailsModal(investorId);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
-async function deleteInvestorPayoutConfirm(investorId, payoutId) {
+function startEditPayout(investorId, payoutId) {
+  window._editingPayoutId = payoutId;
+  openInvestorDetailsModal(investorId, true);
+}
+
+function cancelEditPayout(investorId) {
+  window._editingPayoutId = null;
+  openInvestorDetailsModal(investorId);
+}
+
+async function saveInvestorPayoutEdit(investorId, payoutId, btn) {
+  const amount = parseFloat(document.getElementById(`edit_payout_amount_${payoutId}`)?.value || 0);
+  const payout_date = document.getElementById(`edit_payout_date_${payoutId}`)?.value || null;
+  const notes = document.getElementById(`edit_payout_notes_${payoutId}`)?.value || null;
+  if (!Number.isFinite(amount) || amount <= 0) { toast('المبلغ يجب أن يكون أكبر من صفر', 'error'); return; }
+  _lockBtn(btn, 'جاري...');
+  try {
+    await API.updateWarehouseInvestorPayout(investorId, payoutId, { amount, payout_date, notes });
+    toast('تم تعديل الدفعة ✅', 'success');
+    window._editingPayoutId = null;
+    await openInvestorDetailsModal(investorId);
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
+}
+
+async function deleteInvestorPayoutConfirm(investorId, payoutId, btn) {
   if (!confirm('هل تريد حذف هذه الدفعة؟')) return;
+  _lockBtn(btn, '...');
   try {
     await API.deleteWarehouseInvestorPayout(investorId, payoutId);
     toast('تم حذف الدفعة', 'success');
+    window._editingPayoutId = null;
     await openInvestorDetailsModal(investorId);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) { toast(e.message, 'error'); _unlockBtn(btn); }
 }
 
 /* ════════════════════════════════════════════════════════════

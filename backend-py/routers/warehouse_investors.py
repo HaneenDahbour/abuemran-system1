@@ -433,6 +433,38 @@ async def create_investor_payout(investor_id: int, data: PayoutIn, user=Depends(
             return row_to_dict(row)
 
 
+@router.put("/investors/{investor_id}/payouts/{payout_id}")
+async def update_investor_payout(investor_id: int, payout_id: int, data: PayoutIn, user=Depends(get_current_user)):
+    require_access(user)
+
+    amount = float(data.amount or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="المبلغ يجب أن يكون أكبر من صفر")
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                UPDATE warehouse_investor_payouts
+                SET amount=$1, payout_date=$2, notes=$3
+                WHERE id=$4 AND investor_id=$5
+                RETURNING *
+                """,
+                amount, parse_date(data.payout_date),
+                (data.notes or "").strip() or None,
+                payout_id, investor_id,
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="الدفعة غير موجودة")
+
+            await insert_audit(
+                conn, user, "تعديل دفعة مستثمر",
+                f"دفعة #{payout_id} — {amount:.3f} د.أ",
+            )
+            return row_to_dict(row)
+
+
 @router.delete("/investors/{investor_id}/payouts/{payout_id}")
 async def delete_investor_payout(investor_id: int, payout_id: int, user=Depends(get_current_user)):
     require_access(user)
