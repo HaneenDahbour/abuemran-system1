@@ -1515,11 +1515,53 @@ async function showInvestmentDetail(id){
     </div>
     <p style="font-size:12px;color:var(--tx2);margin-bottom:12px">رأس المال: <strong>${cur(inv.capital_amount)}</strong> | الربح: <strong>${cur(inv.profit_amount)}</strong> | الحالة: ${statusBadge(inv.status)}</p>
     <button class="btn btn-success btn-sm" onclick="closeModal();showInvestorPayForm(${id})">💸 تسجيل دفعة للمستثمر</button>
+    <button class="btn btn-ghost btn-sm" onclick="printInvestmentStatement(${id})">🖨️ طباعة</button>
     <div style="font-weight:700;margin:14px 0 8px;font-size:13px">سجل المدفوعات</div>
     <div class="tw"><table>
       <thead><tr><th>التاريخ</th><th>المبلغ</th><th>الطريقة</th><th>الحالة</th></tr></thead>
       <tbody>${data.payments.length?data.payments.map(p=>`<tr><td>${fmtDate(p.payment_date)}</td><td>${cur(p.amount)}</td><td>${methodLabel(p.method)}</td><td>${statusBadge(p.status)}</td></tr>`).join(''):`<tr class="empty"><td colspan="4">لا توجد دفعات</td></tr>`}</tbody>
     </table></div>`,`600px`);
+}
+
+async function printInvestmentStatement(id){
+  let data;
+  try{ data=await api(`/aradi/investments/${id}/statement`); }catch(e){ toast(e.message,'error'); return; }
+  const inv=data.investment; const sum=data.summary; const payments=data.payments||[];
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8">
+    <title>كشف استثمار — ${esc(inv.investor_name)}</title>
+    <style>
+      body{font-family:Tahoma,Arial,sans-serif;padding:30px;direction:rtl}
+      .header{text-align:center;margin-bottom:24px;border-bottom:2px solid #000;padding-bottom:16px}
+      .stmt-box{display:flex;gap:16px;margin-bottom:16px}
+      .stmt-item{flex:1;border:1px solid #ccc;border-radius:6px;padding:10px;text-align:center}
+      .stmt-item .sl{font-size:12px;color:#666}
+      .stmt-item .sv{font-size:16px;font-weight:700;margin-top:4px}
+      table{width:100%;border-collapse:collapse;margin-top:12px}
+      th,td{border:1px solid #999;padding:8px 10px;text-align:right;font-size:13px}
+      th{background:#f0f0f0}
+      .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #999}
+      @media print{body{padding:10px}}
+    </style>
+  </head><body>
+    <div class="header">
+      <h1>مجموعة أبو عمران التجارية</h1>
+      <h2>كشف استثمار — ${esc(inv.investor_name)}</h2>
+      <p>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-JO-u-nu-latn')}</p>
+    </div>
+    <p>القطعة: <strong>${esc(inv.plot_number||'—')}</strong> | رأس المال: <strong>${cur(inv.capital_amount)}</strong> | الربح: <strong>${cur(inv.profit_amount)}</strong></p>
+    <div class="stmt-box">
+      <div class="stmt-item"><div class="sl">الإجمالي المستحق</div><div class="sv">${cur(sum.total_due)}</div></div>
+      <div class="stmt-item"><div class="sl">المدفوع</div><div class="sv">${cur(sum.total_paid_out)}</div></div>
+      <div class="stmt-item"><div class="sl">المتبقي</div><div class="sv">${cur(sum.remaining_to_pay)}</div></div>
+    </div>
+    <table>
+      <thead><tr><th>التاريخ</th><th>المبلغ</th><th>الطريقة</th><th>الحالة</th></tr></thead>
+      <tbody>${payments.length?payments.map(p=>`<tr><td>${fmtDate(p.payment_date)}</td><td>${cur(p.amount)}</td><td>${methodLabel(p.method)}</td><td>${statusBadge(p.status)}</td></tr>`).join(''):`<tr><td colspan="4">لا توجد دفعات</td></tr>`}</tbody>
+    </table>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>w.print(),300);
 }
 
 async function showInvestmentEdit(id){
@@ -1591,10 +1633,14 @@ async function loadInvestorPayments(){
   loading();
   try{
     const rows=await api('/aradi/investor-payments');
+    window._investorPaymentsCache=rows;
     setMain(`
       <div class="ph">
         <div><div class="page-title" style="font-size:20px;font-weight:800">دفعات المستثمرين</div></div>
-        <button class="btn btn-primary btn-sm" onclick="showInvestorPayFormStandalone()">+ تسجيل دفعة</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="printInvestorPayments(window._investorPaymentsCache||[])">🖨️ طباعة</button>
+          <button class="btn btn-primary btn-sm" onclick="showInvestorPayFormStandalone()">+ تسجيل دفعة</button>
+        </div>
       </div>
       <div class="tw"><table>
         <thead><tr><th>التاريخ</th><th>المستثمر</th><th>المبلغ</th><th>الطريقة</th><th>الحالة</th><th>ملاحظات</th><th>إجراءات</th></tr></thead>
@@ -1615,6 +1661,43 @@ async function loadInvestorPayments(){
         </tbody>
       </table></div>`);
   }catch(e){ errPage(e.message); }
+}
+
+function printInvestorPayments(payments){
+  const total=payments.reduce((s,p)=>s+parseFloat(p.amount||0),0);
+  const w=window.open('','_blank');
+  w.document.write(`<!DOCTYPE html><html dir="rtl" lang="ar"><head><meta charset="UTF-8">
+    <title>دفعات المستثمرين</title>
+    <style>
+      body{font-family:Tahoma,Arial,sans-serif;padding:30px;direction:rtl}
+      .header{text-align:center;margin-bottom:24px;border-bottom:2px solid #000;padding-bottom:16px}
+      table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #999;padding:8px 10px;text-align:right;font-size:13px}
+      th{background:#f0f0f0}
+      .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid #999}
+      @media print{body{padding:10px}}
+    </style>
+  </head><body>
+    <div class="header">
+      <h1>مجموعة أبو عمران التجارية</h1>
+      <h2>دفعات المستثمرين</h2>
+      <p>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-JO-u-nu-latn')}</p>
+    </div>
+    <p><strong>إجمالي الدفعات:</strong> ${cur(total)}</p>
+    <table>
+      <thead><tr><th>التاريخ</th><th>المستثمر</th><th>المبلغ</th><th>الطريقة</th><th>الحالة</th><th>ملاحظات</th></tr></thead>
+      <tbody>${payments.length?payments.map(p=>`<tr>
+        <td>${fmtDate(p.payment_date)}</td>
+        <td>${esc(p.investor_name)}</td>
+        <td>${cur(p.amount)}</td>
+        <td>${methodLabel(p.method)}</td>
+        <td>${statusBadge(p.status)}</td>
+        <td>${esc(p.notes||'')}</td>
+      </tr>`).join(''):`<tr><td colspan="6">لا توجد دفعات</td></tr>`}</tbody>
+    </table>
+  </body></html>`);
+  w.document.close();
+  setTimeout(()=>w.print(),300);
 }
 
 async function editInvPay(id){
