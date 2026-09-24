@@ -624,7 +624,7 @@ async def create_invoice(data: InvoiceRequest, user=Depends(get_current_user)):
 
     # Employees create pending invoices; admin/accountant approve immediately
     role = user.get("role", "employee")
-    invoice_status = "pending"
+    invoice_status = "pending" if role == "employee" else "approved"
 
     if role == "employee":
         attributed_employee_id = user.get("id")
