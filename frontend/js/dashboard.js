@@ -11528,12 +11528,21 @@ async function renderInvestorsOverview(container) {
   const data = await API.getWarehouseInvestorsSummary();
   const cats = data.categories || [];
   const totals = data.totals || {};
+  const netProfit = parseFloat(totals.net_profit || 0);
 
   container.innerHTML = `
     <div class="stats-grid" style="margin-bottom:16px">
       <div class="stat-card">
-        <div class="stat-label">إجمالي الأرباح (الفئات الرابحة)</div>
-        <div class="stat-value" style="color:var(--gr)">${fmt(totals.total_profit || 0)} د.أ</div>
+        <div class="stat-label">أرباح الفئات الرابحة</div>
+        <div class="stat-value" style="color:var(--gr)">${fmt(totals.gross_profit || 0)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">خسائر الفئات الخاسرة</div>
+        <div class="stat-value" style="color:var(--rd)">${fmt(totals.total_loss || 0)} د.أ</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">صافي الربح (بعد الخسائر)</div>
+        <div class="stat-value" style="color:${netProfit >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(netProfit)} د.أ</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">حصة المالك (50%)</div>
@@ -11545,12 +11554,17 @@ async function renderInvestorsOverview(container) {
       </div>
     </div>
 
+    ${(totals.total_loss || 0) > 0 ? `<div class="alert alert-warning" style="margin-bottom:12px">
+      ⚠️ تُخصم الخسائر (${fmt(totals.total_loss)} د.أ) من أرباح الفئات الرابحة بنسبة أرباحها، ثم يُوزَّع الصافي${netProfit <= 0 ? ' — الصافي صفر أو سالب فلا يوجد ربح للتوزيع' : ''}. رأس المال وأرصدة المستثمرين لا تتأثر بالخسارة.
+    </div>` : ''}
+
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th>الفئة</th>
             <th>إجمالي الربح</th>
+            <th>الربح بعد خصم الخسائر</th>
             <th>إجمالي مساهمات المستثمرين</th>
             <th>عدد المستثمرين</th>
             <th>حصة المالك (50%)</th>
@@ -11565,6 +11579,7 @@ async function renderInvestorsOverview(container) {
               <tr>
                 <td><strong>${c.icon || '📦'} ${escHtml(c.name)}</strong></td>
                 <td style="font-weight:800; color:${profit >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(profit)} د.أ</td>
+                <td style="font-weight:700">${fmt(c.distributable_profit || 0)} د.أ</td>
                 <td>${fmt(c.total_invested || 0)} د.أ</td>
                 <td>${c.investors_count || 0}</td>
                 <td style="color:var(--bl);font-weight:700">${fmt(c.owner_share || 0)} د.أ</td>
@@ -11574,7 +11589,7 @@ async function renderInvestorsOverview(container) {
                 </td>
               </tr>
             `;
-  }).join('') : `<tr><td colspan="7" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد فئات مستودع بعد</td></tr>`}
+  }).join('') : `<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--tx3)">لا توجد فئات مستودع بعد</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -11619,7 +11634,7 @@ async function openCategoryInvestmentsModal(categoryId) {
         <div class="stat-value" style="color:${profitShare.total_profit >= 0 ? 'var(--gr)' : 'var(--rd)'}">${fmt(profitShare.total_profit)} د.أ</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">حصة المالك (سيف) 50%</div>
+        <div class="stat-label">حصة المالك (سيف) 50% من ${fmt(profitShare.distributable_profit || 0)}</div>
         <div class="stat-value" style="color:var(--bl)">${fmt(profitShare.owner_share)} د.أ</div>
       </div>
       <div class="stat-card">
@@ -11628,7 +11643,8 @@ async function openCategoryInvestmentsModal(categoryId) {
       </div>
     </div>
 
-    ${profitShare.has_loss ? `<div class="alert alert-warning" style="margin-bottom:12px">⚠️ هذه الفئة في حالة خسارة — لا يوجد ربح للتوزيع</div>` : ''}
+    ${profitShare.has_loss ? `<div class="alert alert-warning" style="margin-bottom:12px">⚠️ هذه الفئة في حالة خسارة (${fmt(Math.abs(profitShare.total_profit))} د.أ) — لا توزّع شيئاً، وتُخصم خسارتها من أرباح الفئات الرابحة قبل التوزيع</div>` : ''}
+    ${(!profitShare.has_loss && (profitShare.loss_deducted || 0) > 0) ? `<div class="alert alert-warning" style="margin-bottom:12px">⚠️ خُصم ${fmt(profitShare.loss_deducted)} د.أ من ربح هذه الفئة بسبب خسائر فئات أخرى — الربح القابل للتوزيع ${fmt(profitShare.distributable_profit)} د.أ</div>` : ''}
 
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <h4 style="margin:0">مساهمات المستثمرين</h4>
@@ -12059,7 +12075,7 @@ async function openInvestorDetailsModal(investorId, keepEdit = false) {
     </div>
 
     <div style="background:var(--bg2);border:1px solid var(--brd);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:var(--tx2)">
-      💡 رأس المال ${fmt(totalContrib)} د.أ محسوب مرة واحدة، وأرباح الفئات المختارة مجمّعة أدناه. توزيع كل فئة: <strong>50% للمالك</strong> و<strong>50% للمستثمرين</strong>. <strong>المتبقي = الأرباح المستحقة − المدفوع.</strong>
+      💡 رأس المال ${fmt(totalContrib)} د.أ محسوب مرة واحدة، وأرباح الفئات المختارة مجمّعة أدناه. توزيع كل فئة: <strong>50% للمالك</strong> و<strong>50% للمستثمرين</strong> من الربح بعد خصم خسائر الفئات الخاسرة. <strong>المتبقي = الأرباح المستحقة − المدفوع.</strong>
     </div>
 
     <div class="table-wrap">
@@ -12070,6 +12086,7 @@ async function openInvestorDetailsModal(investorId, keepEdit = false) {
             <th>رأس المال المعتمد *</th>
             <th>نسبة المساهمة %</th>
             <th>ربح الفئة الكلي</th>
+            <th>الربح بعد خصم الخسائر</th>
             <th>حصته من الربح</th>
             <th>المدفوع</th>
             <th>المتبقي</th>
@@ -12087,15 +12104,17 @@ async function openInvestorDetailsModal(investorId, keepEdit = false) {
             <td style="font-weight:700">${fmt(i.amount)} د.أ</td>
               <td>${fmt(i.contribution_pct || 0)}%</td>
               <td style="color:${profit >= 0 ? 'var(--gr)' : 'var(--rd)'};font-weight:600">${fmt(profit)} د.أ</td>
+              <td style="font-weight:600">${fmt(i.category_distributable_profit || 0)} د.أ</td>
               <td style="color:var(--am);font-weight:700">${fmt(share)} د.أ</td>
               <td style="color:var(--bl)">${fmt(paid)} د.أ</td>
               <td style="font-weight:700;color:${remaining > 0 ? 'var(--am)' : 'var(--gr)'}">${fmt(remaining)} د.أ</td>
             </tr>`;
-  }).join('') : `<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
+  }).join('') : `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--tx3)">لا توجد مساهمات بعد</td></tr>`}
           ${investments.length ? `
           <tr style="background:var(--bg2);border-top:2px solid var(--brd)">
             <td><strong>الإجمالي</strong></td>
             <td style="font-weight:800;color:var(--bl)">${fmt(totalContrib)} د.أ</td>
+            <td>—</td>
             <td>—</td>
             <td>—</td>
             <td style="font-weight:800;color:var(--gr);font-size:15px">${fmt(totalProfit)} د.أ</td>
