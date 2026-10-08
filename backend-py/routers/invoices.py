@@ -247,11 +247,12 @@ async def delete_auto_payment_for_invoice(conn, invoice_id: int):
     await conn.execute(
         """
         DELETE FROM recipient_payments
-        WHERE invoice_id = $1
-           OR COALESCE(notes, '') LIKE $2
-           OR COALESCE(notes, '') LIKE $3
-           OR COALESCE(notes, '') LIKE $4
-           OR COALESCE(notes, '') = $5
+        WHERE COALESCE(notes, '') ILIKE 'دفعة تلقائية%'
+          AND (invoice_id = $1
+               OR COALESCE(notes, '') LIKE $2
+               OR COALESCE(notes, '') LIKE $3
+               OR COALESCE(notes, '') LIKE $4
+               OR COALESCE(notes, '') = $5)
         """,
         invoice_id,
         exact_marker,
