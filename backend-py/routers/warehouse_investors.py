@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional
@@ -10,6 +11,7 @@ from middleware.auth import get_current_user
 from middleware.roles import require_role
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -105,7 +107,9 @@ async def get_category_total_profit(pool, category_id: int) -> float:
         )
         return row_to_dict(row) if row else {"total_sold": 0, "total_cost": 0, "total_profit": 0}
     except Exception:
-        return {"total_sold": 0, "total_cost": 0, "total_profit": 0}
+        # لا نُرجع أصفاراً بصمت — الصفر هنا يبدو كأنه "لا ربح" بينما هو فشل في الحساب
+        logger.exception("فشل حساب ربح فئة المستودع %s", category_id)
+        raise HTTPException(status_code=500, detail="تعذّر حساب ربح الفئة — راجع سجل الخادم")
 
 
 async def link_all_investors_to_category(conn, category_id: int, created_by=None):
@@ -131,18 +135,47 @@ async def link_all_investors_to_category(conn, category_id: int, created_by=None
     )
 
 
-async def compute_investor_profit_due(pool) -> dict:
-    """إجمالي الأرباح المستحقة لكل مستثمر عبر كل الفئات (نفس منطق /summary):
-    لكل فئة يُوزَّع 50% للمستثمرين بنسبة مساهمة كل مستثمر فيها."""
-    profit_due: dict = {}
+def allocate_profit(raw_profits: dict) -> dict:
+    """يوزّع الخسائر على الأرباح: الربح الصافي = مجموع أرباح الفئات الرابحة − مجموع خسائر
+    الفئات الخاسرة. تُخصم الخسارة من الفئات الرابحة بنسبة أرباحها، فيتبقى لكل فئة رابحة
+    ربح قابل للتوزيع. إن كان الصافي صفراً أو سالباً فلا يُوزَّع شيء. لا تمسّ هذه الدالة
+    رأس المال ولا رصيد أي مستثمر."""
+    gross_profit = sum(p for p in raw_profits.values() if p > 0)
+    total_loss = -sum(p for p in raw_profits.values() if p < 0)
+    net_profit = gross_profit - total_loss
+    distributable = max(net_profit, 0.0)
+    factor = (distributable / gross_profit) if gross_profit > 0 else 0.0
+    return {
+        "raw": dict(raw_profits),
+        "effective": {cid: (p * factor if p > 0 else 0.0) for cid, p in raw_profits.items()},
+        "gross_profit": gross_profit,
+        "total_loss": total_loss,
+        "net_profit": net_profit,
+        "distributable_profit": distributable,
+        "factor": factor,
+    }
+
+
+async def compute_profit_allocation(pool) -> dict:
+    """ربح كل فئة (خام) ثم الربح القابل للتوزيع بعد خصم الخسائر (انظر allocate_profit)."""
     categories = await pool.fetch("SELECT id FROM warehouse_categories")
+    raw = {}
     for cat in categories:
         financials = await get_category_total_profit(pool, cat["id"])
-        distributable = max(float(financials.get("total_profit") or 0), 0)
+        raw[cat["id"]] = float(financials.get("total_profit") or 0)
+    return allocate_profit(raw)
+
+
+async def compute_investor_profit_due(pool, allocation: Optional[dict] = None) -> dict:
+    """إجمالي الأرباح المستحقة لكل مستثمر عبر كل الفئات (نفس منطق /summary):
+    لكل فئة يُوزَّع 50% للمستثمرين بنسبة مساهمة كل مستثمر فيها، بعد خصم الخسائر."""
+    allocation = allocation or await compute_profit_allocation(pool)
+    profit_due: dict = {}
+    for cat_id, distributable in allocation["effective"].items():
         investors_pool = distributable * (1 - OWNER_SHARE_PCT)
         cat_invs = await pool.fetch(
             "SELECT investor_id, amount FROM warehouse_category_investments WHERE category_id=$1",
-            cat["id"],
+            cat_id,
         )
         total_in_cat = sum(float(r["amount"] or 0) for r in cat_invs)
         if total_in_cat <= 0:
@@ -321,6 +354,8 @@ async def get_investor(investor_id: int, user=Depends(get_current_user)):
     )
 
     # For each investment, compute category profit and this investor's share
+    # (الربح القابل للتوزيع بعد خصم خسائر الفئات الأخرى)
+    allocation = await compute_profit_allocation(pool)
     enriched = []
     total_profit_share = 0.0
 
@@ -342,15 +377,15 @@ async def get_investor(investor_id: int, user=Depends(get_current_user)):
         contribution_pct = (this_amount / total_invested_in_cat * 100) if total_invested_in_cat > 0 else 0.0
 
         # Compute category profit
-        financials = await get_category_total_profit(pool, category_id)
-        cat_total_profit = float(financials.get("total_profit") or 0)
-        distributable = max(cat_total_profit, 0)
+        cat_total_profit = allocation["raw"].get(category_id, 0.0)
+        distributable = allocation["effective"].get(category_id, 0.0)
         investors_pool = round(distributable * (1 - OWNER_SHARE_PCT), 3)
         pct_of_investors = (this_amount / total_invested_in_cat) if total_invested_in_cat > 0 else 0.0
         profit_share = round(investors_pool * pct_of_investors, 3)
 
         inv_dict["contribution_pct"] = round(contribution_pct, 3)
         inv_dict["category_total_profit"] = round(cat_total_profit, 3)
+        inv_dict["category_distributable_profit"] = round(distributable, 3)
         inv_dict["investors_pool"] = investors_pool
         inv_dict["profit_share"] = profit_share
         total_profit_share += profit_share
@@ -602,7 +637,8 @@ async def get_category_profit_share(category_id: int, user=Depends(get_current_u
         raise HTTPException(status_code=404, detail="الفئة غير موجودة")
 
     financials = await get_category_total_profit(pool, category_id)
-    total_profit = float(financials.get("total_profit") or 0)
+    allocation = await compute_profit_allocation(pool)
+    total_profit = allocation["raw"].get(category_id, float(financials.get("total_profit") or 0))
 
     rows = await pool.fetch(
         """
@@ -617,8 +653,10 @@ async def get_category_profit_share(category_id: int, user=Depends(get_current_u
     investments = [row_to_dict(r) for r in rows]
     total_invested = sum(float(i["amount"] or 0) for i in investments)
 
-    # إذا كان الربح سالباً أو صفراً، لا يوجد توزيع
-    distributable_profit = max(total_profit, 0)
+    # الربح القابل للتوزيع = ربح الفئة بعد خصم نصيبها من خسائر الفئات الخاسرة
+    # (الفئة الخاسرة نفسها لا توزّع شيئاً، وخسارتها تُخصم من الفئات الرابحة)
+    distributable_profit = allocation["effective"].get(category_id, 0.0)
+    loss_deducted = round(max(total_profit, 0) - distributable_profit, 3)
 
     owner_share = round(distributable_profit * OWNER_SHARE_PCT, 3)
     investors_pool = round(distributable_profit - owner_share, 3)
@@ -626,7 +664,7 @@ async def get_category_profit_share(category_id: int, user=Depends(get_current_u
     # لتوزيع "المدفوع/المتبقي" لكل مستثمر في هذه الفئة بشكل متسق مع
     # سجل الدفعات على مستوى المستثمر: المدفوع لهذه الفئة = إجمالي دفعاته
     # × (حصة هذه الفئة ÷ إجمالي أرباحه المستحقة عبر كل الفئات)
-    profit_due_map = await compute_investor_profit_due(pool)
+    profit_due_map = await compute_investor_profit_due(pool, allocation)
     paid_map = await get_investor_payouts_map(pool)
 
     shares = []
@@ -656,6 +694,11 @@ async def get_category_profit_share(category_id: int, user=Depends(get_current_u
         "total_sold": financials.get("total_sold", 0),
         "total_cost": financials.get("total_cost", 0),
         "total_profit": total_profit,
+        "distributable_profit": round(distributable_profit, 3),
+        "loss_deducted": loss_deducted,
+        "overall_gross_profit": round(allocation["gross_profit"], 3),
+        "overall_total_loss": round(allocation["total_loss"], 3),
+        "overall_net_profit": round(allocation["net_profit"], 3),
         "total_invested": total_invested,
         "owner_share_pct": OWNER_SHARE_PCT * 100,
         "owner_share": owner_share,
@@ -672,16 +715,13 @@ async def get_investors_summary(user=Depends(get_current_user)):
     pool = await get_pool()
 
     categories = await pool.fetch("SELECT id, name, icon FROM warehouse_categories ORDER BY name ASC")
+    allocation = await compute_profit_allocation(pool)
 
     result = []
-    grand_total_profit = 0.0
-    grand_owner_share = 0.0
-    grand_investors_pool = 0.0
 
     for cat in categories:
         cat_dict = row_to_dict(cat)
-        financials = await get_category_total_profit(pool, cat["id"])
-        total_profit = float(financials.get("total_profit") or 0)
+        total_profit = allocation["raw"].get(cat["id"], 0.0)
 
         inv_rows = await pool.fetch(
             """
@@ -696,17 +736,14 @@ async def get_investors_summary(user=Depends(get_current_user)):
         investments = [row_to_dict(r) for r in inv_rows]
         total_invested = sum(float(i["amount"] or 0) for i in investments)
 
-        distributable_profit = max(total_profit, 0)
+        distributable_profit = allocation["effective"].get(cat["id"], 0.0)
         owner_share = round(distributable_profit * OWNER_SHARE_PCT, 3)
         investors_pool = round(distributable_profit - owner_share, 3)
 
-        if total_profit > 0:
-            grand_total_profit += total_profit
-            grand_owner_share += owner_share
-            grand_investors_pool += investors_pool
-
         cat_dict.update({
             "total_profit": total_profit,
+            "distributable_profit": round(distributable_profit, 3),
+            "loss_deducted": round(max(total_profit, 0) - distributable_profit, 3),
             "total_invested": total_invested,
             "investors_count": len(investments),
             "owner_share": owner_share,
@@ -714,11 +751,17 @@ async def get_investors_summary(user=Depends(get_current_user)):
         })
         result.append(cat_dict)
 
+    distributable = allocation["distributable_profit"]
+    owner_total = round(distributable * OWNER_SHARE_PCT, 3)
+
     return {
         "categories": result,
         "totals": {
-            "total_profit": grand_total_profit,
-            "owner_share": round(grand_owner_share, 3),
-            "investors_pool": round(grand_investors_pool, 3),
+            "gross_profit": round(allocation["gross_profit"], 3),
+            "total_loss": round(allocation["total_loss"], 3),
+            "net_profit": round(allocation["net_profit"], 3),
+            "distributable_profit": round(distributable, 3),
+            "owner_share": owner_total,
+            "investors_pool": round(distributable - owner_total, 3),
         },
     }
